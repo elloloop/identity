@@ -220,7 +220,7 @@ func (s *AdminService) PurgeExpiredPendingDeletions(ctx context.Context, cutoffM
 	}
 	purged := 0
 	for _, u := range users {
-		if err := s.purgeUser(ctx, accountDeletionSweeperActor, u); err != nil {
+		if err := s.purgeUser(ctx, accountDeletionSweeperActor, u, false); err != nil {
 			s.logger.Warn("account_deletion_purge_failed",
 				zap.String("user_id", u.ID), zap.Error(err))
 			continue
@@ -237,7 +237,11 @@ func (s *AdminService) PurgeExpiredPendingDeletions(ctx context.Context, cutoffM
 // RPC and the account-deletion sweeper rather than a second copy of it. The
 // caller owns authorization; this method performs none.
 func (s *AdminService) PurgeAccount(ctx context.Context, actorUserID string, u *User) error {
-	return s.purgeUser(ctx, actorUserID, u)
+	return s.purgeUser(ctx, actorUserID, u, false)
+}
+
+func (s *AdminService) PurgeManagedChildAccount(ctx context.Context, guardianUserID string, u *User) error {
+	return s.purgeUser(ctx, guardianUserID, u, true)
 }
 
 // purgeUser runs the hard-delete cascade for a single already-resolved user and
@@ -246,7 +250,7 @@ func (s *AdminService) PurgeAccount(ctx context.Context, actorUserID string, u *
 // the cascade. Callers own the authorization / eligibility checks before calling
 // it. Sessions and refresh tokens are revoked BEFORE the cascade so any in-flight
 // access token dies immediately.
-func (s *AdminService) purgeUser(ctx context.Context, auditActorID string, u *User) error {
+func (s *AdminService) purgeUser(ctx context.Context, auditActorID string, u *User, guardianReceipt bool) error {
 	now := nowMs()
 	if err := RevokeUserAccess(ctx, s.repo(ctx), u.ID, now); err != nil {
 		return fmt.Errorf("delete user: %w", err)
@@ -257,7 +261,13 @@ func (s *AdminService) purgeUser(ctx context.Context, auditActorID string, u *Us
 	if err := s.deleteGroupMembershipsForUser(ctx, u.ID); err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
-	if err := s.repo(ctx).DeleteUser(ctx, u.ID); err != nil {
+	var err error
+	if guardianReceipt {
+		err = s.repo(ctx).DeleteUserWithGuardianReceipt(ctx, u.ID, auditActorID, now)
+	} else {
+		err = s.repo(ctx).DeleteUser(ctx, u.ID)
+	}
+	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	s.audit.Log(ctx, audit.EventUserDeleted,

@@ -316,9 +316,23 @@ import { Code } from "astro-expressive-code/components";
       <strong>Deletion is immediate.</strong> It is the admin erasure cascade,
       not the 30-day self-service grace window. The <code>ConsentRecord</code>
       and the audit trail survive, per the retention posture consent records
-      already carry.
+      already carry. An exact project, initiating guardian and child
+      completion receipt is committed with the final erasure. The transaction
+      rechecks the live edge and participant status. Ordinary admin deletion
+      does not create this receipt.
     </li>
   </ul>
+
+  <p>
+    If an erasure acknowledgement is lost, the original guardian can retry
+    <code>DeleteManagedChildAccount</code> with a newly consumed
+    <code>guardian.delete_child</code> passkey assertion bound to the same
+    child ID. The actor must still be an active known adult. An exact receipt
+    acknowledges completed erasure after the edge is gone, without granting
+    new guardian rights. Missing receipts, wrong actor or project, replayed
+    proof and storage outages fail closed. A generic <code>NOT_FOUND</code>
+    or <code>PERMISSION_DENIED</code> is not proof of successful erasure.
+  </p>
 
   <h3>Audit trail</h3>
   <p>

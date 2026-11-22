@@ -58,6 +58,14 @@ func (StubRepository) DeleteUser(context.Context, string) error {
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) DeleteUserWithGuardianReceipt(context.Context, string, string, int64) error {
+	return ErrServiceUnavailable
+}
+
+func (StubRepository) HasGuardianDeletionReceipt(context.Context, string, string) (bool, error) {
+	return false, ErrServiceUnavailable
+}
+
 func (StubRepository) ListUsersPendingDeletionBefore(context.Context, int64, int) ([]*User, error) {
 	return nil, ErrServiceUnavailable
 }

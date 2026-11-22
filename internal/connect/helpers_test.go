@@ -113,6 +113,7 @@ type fakeRepo struct {
 	idvRecords          map[string]*service.IdentityVerificationRecord
 	parentalConsents    map[string]*service.ParentalConsentRecord
 	guardianEdges       map[string]*service.GuardianEdge
+	guardianDeletions   map[[2]string]int64
 	sessions            map[string]*service.SessionRecord
 	auditEvents         []*service.AuditEvent
 
@@ -453,88 +454,7 @@ func (r *fakeRepo) DeleteUser(_ context.Context, userID string) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	service.InvalidateAgentCreationReceipts(r.agentCreations, userID)
-	for id, t := range r.refreshTokens {
-		if t.UserID == userID {
-			delete(r.refreshTokens, id)
-		}
-	}
-	for id, s := range r.sessions {
-		if s.UserID == userID {
-			delete(r.sessions, id)
-		}
-	}
-	for id, c := range r.passkeyCreds {
-		if c.UserID == userID {
-			delete(r.passkeyCreds, id)
-		}
-	}
-	for id, c := range r.passkeyChallenges {
-		if c.UserID == userID {
-			delete(r.passkeyChallenges, id)
-		}
-	}
-	for id, s := range r.qrSessions {
-		if s.UserID == userID {
-			delete(r.qrSessions, id)
-		}
-	}
-	for id, c := range r.oauthOneTimeCodes {
-		if c.UserID == userID {
-			delete(r.oauthOneTimeCodes, id)
-		}
-	}
-	for id, c := range r.totpCreds {
-		if c.UserID == userID {
-			delete(r.totpCreds, id)
-		}
-	}
-	for id, c := range r.recoveryCodes {
-		if c.UserID == userID {
-			delete(r.recoveryCodes, id)
-		}
-	}
-	for id, c := range r.loginChallenges {
-		if c.UserID == userID {
-			delete(r.loginChallenges, id)
-		}
-	}
-	for id, inv := range r.invitations {
-		if inv.UserID == userID {
-			delete(r.invitations, id)
-		}
-	}
-	for id, t := range r.passwordResets {
-		if t.UserID == userID {
-			delete(r.passwordResets, id)
-		}
-	}
-	for id, t := range r.emailVerifications {
-		if t.UserID == userID {
-			delete(r.emailVerifications, id)
-		}
-	}
-	for id, t := range r.emailChanges {
-		if t.UserID == userID {
-			delete(r.emailChanges, id)
-		}
-	}
-	for id, oi := range r.oauthIdentities {
-		if oi.UserID == userID {
-			delete(r.oauthIdentities, id)
-		}
-	}
-	for id, rec := range r.idvRecords {
-		if rec.UserID == userID {
-			delete(r.idvRecords, id)
-		}
-	}
-	for key, e := range r.guardianEdges {
-		if e.GuardianUserID == userID || e.ChildUserID == userID {
-			delete(r.guardianEdges, key)
-		}
-	}
-	delete(r.users, userID)
+	r.deleteUserRowsLocked(userID)
 	return nil
 }
 
@@ -2606,4 +2526,117 @@ func (r *fakeRepo) ConsumeReauthenticationChallenge(_ context.Context, nodeID, u
 	}
 	delete(r.passkeyChallenges, nodeID)
 	return true, nil
+}
+
+func (r *fakeRepo) deleteUserRowsLocked(userID string) {
+	service.InvalidateAgentCreationReceipts(r.agentCreations, userID)
+	for id, t := range r.refreshTokens {
+		if t.UserID == userID {
+			delete(r.refreshTokens, id)
+		}
+	}
+	for id, s := range r.sessions {
+		if s.UserID == userID {
+			delete(r.sessions, id)
+		}
+	}
+	for id, c := range r.passkeyCreds {
+		if c.UserID == userID {
+			delete(r.passkeyCreds, id)
+		}
+	}
+	for id, c := range r.passkeyChallenges {
+		if c.UserID == userID {
+			delete(r.passkeyChallenges, id)
+		}
+	}
+	for id, s := range r.qrSessions {
+		if s.UserID == userID {
+			delete(r.qrSessions, id)
+		}
+	}
+	for id, c := range r.oauthOneTimeCodes {
+		if c.UserID == userID {
+			delete(r.oauthOneTimeCodes, id)
+		}
+	}
+	for id, c := range r.totpCreds {
+		if c.UserID == userID {
+			delete(r.totpCreds, id)
+		}
+	}
+	for id, c := range r.recoveryCodes {
+		if c.UserID == userID {
+			delete(r.recoveryCodes, id)
+		}
+	}
+	for id, c := range r.loginChallenges {
+		if c.UserID == userID {
+			delete(r.loginChallenges, id)
+		}
+	}
+	for id, inv := range r.invitations {
+		if inv.UserID == userID {
+			delete(r.invitations, id)
+		}
+	}
+	for id, t := range r.passwordResets {
+		if t.UserID == userID {
+			delete(r.passwordResets, id)
+		}
+	}
+	for id, t := range r.emailVerifications {
+		if t.UserID == userID {
+			delete(r.emailVerifications, id)
+		}
+	}
+	for id, t := range r.emailChanges {
+		if t.UserID == userID {
+			delete(r.emailChanges, id)
+		}
+	}
+	for id, oi := range r.oauthIdentities {
+		if oi.UserID == userID {
+			delete(r.oauthIdentities, id)
+		}
+	}
+	for id, rec := range r.idvRecords {
+		if rec.UserID == userID {
+			delete(r.idvRecords, id)
+		}
+	}
+	for key, e := range r.guardianEdges {
+		if e.GuardianUserID == userID || e.ChildUserID == userID {
+			delete(r.guardianEdges, key)
+		}
+	}
+	delete(r.users, userID)
+}
+
+func (r *fakeRepo) HasGuardianDeletionReceipt(_ context.Context, guardianID, childID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, found := r.guardianDeletions[[2]string{guardianID, childID}]
+	return found, nil
+}
+
+func (r *fakeRepo) DeleteUserWithGuardianReceipt(_ context.Context, userID, guardianID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	edgeFound := false
+	for _, edge := range r.guardianEdges {
+		if edge.GuardianUserID == guardianID && edge.ChildUserID == userID {
+			edgeFound = true
+			break
+		}
+	}
+	if userID == "" || guardianID == "" || userID == guardianID || atMs <= 0 || !edgeFound || !service.GuardianDeletionParticipantsAllowed(r.users[guardianID], r.users[userID]) {
+		return service.ErrPermissionDenied
+	}
+	if r.guardianDeletions == nil {
+		r.guardianDeletions = make(map[[2]string]int64)
+	}
+	r.deleteUserRowsLocked(userID)
+	r.guardianDeletions[[2]string{guardianID, userID}] = atMs
+	return nil
 }

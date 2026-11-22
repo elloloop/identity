@@ -347,6 +347,10 @@ type Repository interface {
 	// exposes no invitation create method; they are written via the graph
 	// graph.)
 	DeleteUser(ctx context.Context, userID string) error
+	// DeleteUserWithGuardianReceipt rechecks live guardian authority and commits
+	// final erasure and its actor-bound completion receipt atomically.
+	DeleteUserWithGuardianReceipt(ctx context.Context, userID, guardianID string, atMs int64) error
+	HasGuardianDeletionReceipt(ctx context.Context, guardianID, childID string) (bool, error)
 
 	// ListUsersPendingDeletionBefore returns users whose status is
 	// pending_deletion AND whose deletion_scheduled_at_ms is > 0 and <=
@@ -1669,6 +1673,7 @@ type AuthService struct {
 // with it. *AdminService implements it; the caller owns authorization.
 type AccountPurger interface {
 	PurgeAccount(ctx context.Context, actorUserID string, u *User) error
+	PurgeManagedChildAccount(ctx context.Context, guardianUserID string, u *User) error
 }
 
 // WithAccountPurger wires the account-erasure cascade (the AdminService) and

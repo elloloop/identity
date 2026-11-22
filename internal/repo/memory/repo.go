@@ -78,6 +78,7 @@ type Repo struct {
 	idvRecords                map[string]*service.IdentityVerificationRecord
 	parentalConsents          map[string]*service.ParentalConsentRecord
 	guardianEdges             map[string]*service.GuardianEdge
+	guardianDeletions         map[[2]string]int64
 	sessions                  map[string]*service.SessionRecord
 	auditEvents               map[string]*service.AuditEvent
 }
@@ -2504,4 +2505,26 @@ func (r *Repo) ConsumeReauthenticationChallenge(_ context.Context, nodeID, userI
 	}
 	delete(r.passkeyChallenges, nodeID)
 	return true, nil
+}
+
+func (r *Repo) HasGuardianDeletionReceipt(_ context.Context, guardianID, childID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, found := r.guardianDeletions[[2]string{guardianID, childID}]
+	return found, nil
+}
+
+func (r *Repo) DeleteUserWithGuardianReceipt(_ context.Context, userID, guardianID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	edgeFound := r.guardianEdges[guardianEdgeKey(guardianID, userID)] != nil
+	if userID == "" || guardianID == "" || userID == guardianID || atMs <= 0 || !edgeFound || !service.GuardianDeletionParticipantsAllowed(r.users[guardianID], r.users[userID]) {
+		return service.ErrPermissionDenied
+	}
+	if r.guardianDeletions == nil {
+		r.guardianDeletions = make(map[[2]string]int64)
+	}
+	r.deleteUserLocked(userID)
+	r.guardianDeletions[[2]string{guardianID, userID}] = atMs
+	return nil
 }

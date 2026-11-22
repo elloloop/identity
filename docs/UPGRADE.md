@@ -1,5 +1,37 @@
 # Upgrade guide
 
+## Next — durable guardian erasure acknowledgements (PostgreSQL 0064 / SQLite 0032)
+
+`DeleteManagedChildAccount` records an exact project, initiating guardian and
+child completion receipt in the same transaction that erases the user. That
+transaction locks and rechecks the guardian edge and current participant
+status, also checked before session revocation or group cleanup. Active,
+deactivated and pending-self-deletion children remain erasable. A child re-gated for withdrawn consent, an inactive guardian or a
+removed edge prevents final erasure and creates no receipt. Ordinary/admin
+`DeleteUser` never creates guardian completion receipts.
+
+If the successful response or a caller's completion update is lost, the
+original actor may retry with a newly consumed `guardian.delete_child`
+passkey proof bound to the same child ID. The actor must still be an active
+known adult. A completed receipt may acknowledge the prior erasure after its
+guardian edge is gone, but grants no new guardian authority. Missing receipts,
+wrong actors/projects, replayed assertions, contradictory account state and
+storage failures do not acknowledge completion. Do not treat a generic
+`NOT_FOUND` or `PERMISSION_DENIED` as successful erasure. Password-only
+requests retain normal live-edge authorization and do not replay receipts.
+
+The new table retains opaque actor/child identifiers and completion time,
+without a user foreign key, alongside the consent and erasure audit evidence.
+Project deletion removes it. Repository implementations gain
+`DeleteUserWithGuardianReceipt` and `HasGuardianDeletionReceipt`, and
+`AccountPurger` gains `PurgeManagedChildAccount`. The shared erasure cascade
+still handles revocation and ordinary group-membership cleanup first.
+
+Run migrations before the new server, then upgrade every replica before
+depending on replay acknowledgements. During rollback, stop retry-dependent
+flows first: the down migration drops completion receipts, so an older server
+will deny retries whose guardian edges have already been erased.
+
 ## Next — fresh passkey reauthentication (PostgreSQL 0063 / SQLite 0031, additive RPCs and fields, Go API change)
 
 An active known-adult account can authorize an individual operation with an
