@@ -1769,6 +1769,13 @@ message PasskeyCredentialInfo {
   string device_name = 2;
   google.protobuf.Timestamp created_at = 3;
   google.protobuf.Timestamp last_used_at = 4;
+  // Server-written provenance for sensitive operation assertions. False on
+  // pre-upgrade or otherwise unproven enrolments, which remain usable for
+  // ordinary sign-in. A legacy-key session, refresh or product-session
+  // exchange cannot make another key eligible. Sign in through an independent
+  // trusted method and enrol a new key. This metadata is visible only to its
+  // owner and cannot be supplied on a registration request.
+  bool reauthentication_eligible = 5;
 }
 
 // Registration requires a trusted non-recovery sign-in within five minutes
