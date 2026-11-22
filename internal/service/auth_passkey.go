@@ -21,7 +21,14 @@ import (
 // authenticated user. Returns (optionsJSON, challengeID, error). A session a
 // recovery hold binds is refused (RecoveryHoldError): a passkey it
 // registered would outlast the hold.
-func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID string, signIn SessionSignIn, deviceName string) (string, string, error) {
+func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID string, signIn SessionSignIn, deviceName string, enrolment bool) (string, string, error) {
+	if !enrolment {
+		var err error
+		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
+		if err != nil {
+			return "", "", err
+		}
+	}
 	// Refused at BEGIN, not only at completion: this call persists a
 	// challenge row, and the anonymous retention sweep does not reach the
 	// challenge tables (no FK to users), so an anonymous caller could
@@ -120,6 +127,13 @@ func (s *AuthService) VerifyPasskeyEnrolmentTicket(ctx context.Context, ticket s
 func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID string, signIn SessionSignIn, challengeID, credentialJSON, deviceName string, issueSession bool, ipAddr, userAgent string) (*PasskeyInfo, *LoginResult, error) {
 	if challengeID == "" || credentialJSON == "" {
 		return nil, nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
+	}
+	if !issueSession {
+		var err error
+		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	// A passkey is a permanent credential; an anonymous caller must go
 	// through UpgradeAnonymousAccount so the flag is cleared with it.
@@ -354,6 +368,9 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 	}
 	if challenge.ChallengeType != "authentication" {
 		return nil, fmt.Errorf("%w: challenge is not an authentication challenge", ErrInvalidArgument)
+	}
+	if challenge.Action != "" {
+		return nil, fmt.Errorf("%w: challenge is for reauthentication", ErrUnauthenticated)
 	}
 	if challenge.ExpiresAt < s.nowMs() {
 		_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)

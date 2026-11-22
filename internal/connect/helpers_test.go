@@ -2596,3 +2596,14 @@ func (*fakeRepo) UpdateOAuthClient(context.Context, string, int64, *service.OAut
 func (*fakeRepo) ListOAuthClients(context.Context, string, int) ([]*service.OAuthClient, error) {
 	return nil, service.ErrServiceUnavailable
 }
+
+func (r *fakeRepo) ConsumeReauthenticationChallenge(_ context.Context, nodeID, userID, action, resourceID string, atMs int64) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c := r.passkeyChallenges[nodeID]
+	if c == nil || userID == "" || action == "" || c.UserID != userID || c.Action != action || c.ResourceID != resourceID || c.ExpiresAt <= atMs || c.CreatedAt > atMs || c.ChallengeType != "authentication" {
+		return false, nil
+	}
+	delete(r.passkeyChallenges, nodeID)
+	return true, nil
+}

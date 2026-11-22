@@ -47,17 +47,18 @@ var ErrGuardianRightsExpired = errors.New("the managed account has reached the a
 // the audit event it emits on success AND on refusal. The refusal detail says
 // which check failed; the event type already says which operation it was.
 type guardianOperation struct {
-	event audit.EventType
+	event  audit.EventType
+	action string
 }
 
 var (
-	guardianOpViewProfile    = guardianOperation{audit.EventGuardianChildProfileViewed}
-	guardianOpSetPassword    = guardianOperation{audit.EventGuardianChildPasswordSet}
-	guardianOpSetUsername    = guardianOperation{audit.EventGuardianChildUsernameChanged}
-	guardianOpRevokeSessions = guardianOperation{audit.EventGuardianChildSessionsRevoked}
-	guardianOpDeactivate     = guardianOperation{audit.EventGuardianChildDeactivated}
-	guardianOpReactivate     = guardianOperation{audit.EventGuardianChildReactivated}
-	guardianOpDeleteChild    = guardianOperation{audit.EventGuardianChildDeleted}
+	guardianOpViewProfile    = guardianOperation{audit.EventGuardianChildProfileViewed, "guardian.view_child"}
+	guardianOpSetPassword    = guardianOperation{audit.EventGuardianChildPasswordSet, "guardian.set_child_password"}
+	guardianOpSetUsername    = guardianOperation{audit.EventGuardianChildUsernameChanged, "guardian.set_child_username"}
+	guardianOpRevokeSessions = guardianOperation{audit.EventGuardianChildSessionsRevoked, "guardian.revoke_child_sessions"}
+	guardianOpDeactivate     = guardianOperation{audit.EventGuardianChildDeactivated, "guardian.deactivate_child"}
+	guardianOpReactivate     = guardianOperation{audit.EventGuardianChildReactivated, "guardian.reactivate_child"}
+	guardianOpDeleteChild    = guardianOperation{audit.EventGuardianChildDeleted, "guardian.delete_child"}
 
 	// guardianRefusalNotAllowed is the ONE message every non-guardian refusal
 	// carries, whether the child exists or not.
@@ -81,13 +82,19 @@ func (s *AuthService) auditGuardianAction(
 }
 
 // stepUp is the one guardian step-up rule. admitted is whether the caller may
-// proceed; reauthenticated is whether they actually proved a password, which
+// proceed; reauthenticated is whether they proved a password or bound passkey, which
 // the consent record persists as evidence and so must never be inferred from
 // admitted alone. The two differ when GuardianStepUpAllowNoPassword is enabled
 // and the project does not require step-up; then a passwordless account may
-// proceed without proof. An
-// account that does hold a hash must still present the matching password.
-func (s *AuthService) stepUp(ctx context.Context, user *User, stepUpPassword string) (admitted, reauthenticated bool) {
+// proceed without proof. Password proof still requires the matching stored hash.
+func (s *AuthService) stepUp(ctx context.Context, user *User, stepUpPassword string, proof *PasskeyReauthentication, action, resourceID string) (admitted, reauthenticated bool) {
+	if proof != nil {
+		if stepUpPassword != "" {
+			return false, false
+		}
+		ok := s.verifyPasskeyReauthentication(ctx, user, proof, action, resourceID) == nil
+		return ok, ok
+	}
 	if user.PasswordHash == "" {
 		scope := ProjectScopeFromContext(ctx)
 		strict := scope != nil && scope.Guardian.RequireStepUp
@@ -127,7 +134,7 @@ var errGuardianAdultProfileRequired = fmt.Errorf("%w: a known adult profile is r
 // already holds the edge reaches the adult-profile and step-up checks, and only an admitted
 // guardian reaches the band check.
 func (s *AuthService) authorizeGuardianAction(
-	ctx context.Context, op guardianOperation, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
+	ctx context.Context, op guardianOperation, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) (context.Context, *User, error) {
 	if guardianUserID == "" {
 		return nil, nil, ErrUnauthenticated
@@ -180,7 +187,7 @@ func (s *AuthService) authorizeGuardianAction(
 	}
 
 	// (2) Step-up re-authentication, verified before any state change.
-	if admitted, _ := s.stepUp(ctx, guardian, stepUpPassword); !admitted {
+	if admitted, _ := s.stepUp(ctx, guardian, stepUpPassword, stepUpPasskey, op.action, childUserID); !admitted {
 		s.auditGuardianAction(ctx, op, guardianUserID, childUserID, false, ip, userAgent,
 			map[string]any{"step": "step_up"})
 		return nil, nil, ErrParentalConsentStepUpFailed
@@ -217,9 +224,9 @@ func (s *AuthService) authorizeGuardianAction(
 // deliberately holds very little (minor data-minimization suppresses the
 // optional PII at every write path), and the guardian sees exactly that.
 func (s *AuthService) GetManagedChildProfile(
-	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
+	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) (*User, error) {
-	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpViewProfile, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpViewProfile, guardianUserID, signIn, childUserID, stepUpPassword, stepUpPasskey, ip, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -234,9 +241,9 @@ func (s *AuthService) GetManagedChildProfile(
 // paths enforce, and the child's sessions are cut so a device the guardian
 // is locking out cannot keep using an old token.
 func (s *AuthService) SetManagedChildPassword(
-	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, newPassword, stepUpPassword, ip, userAgent string,
+	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, newPassword, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) error {
-	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpSetPassword, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpSetPassword, guardianUserID, signIn, childUserID, stepUpPassword, stepUpPasskey, ip, userAgent)
 	if err != nil {
 		return err
 	}
@@ -279,9 +286,9 @@ func (s *AuthService) SetManagedChildPassword(
 // one implementation. A duplicate is ErrAlreadyExists whether the
 // pre-check or the storage unique index catches it.
 func (s *AuthService) SetManagedChildUsername(
-	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, username, stepUpPassword, ip, userAgent string,
+	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, username, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) (*User, error) {
-	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpSetUsername, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpSetUsername, guardianUserID, signIn, childUserID, stepUpPassword, stepUpPasskey, ip, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -335,9 +342,9 @@ func (s *AuthService) SetManagedChildUsername(
 // the child immediately — the lost-tablet case. A revoked session cannot
 // refresh: the refresh tokens are deleted, not merely expired.
 func (s *AuthService) RevokeManagedChildSessions(
-	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
+	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) error {
-	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpRevokeSessions, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpRevokeSessions, guardianUserID, signIn, childUserID, stepUpPassword, stepUpPasskey, ip, userAgent)
 	if err != nil {
 		return err
 	}
@@ -355,9 +362,9 @@ func (s *AuthService) RevokeManagedChildSessions(
 // consent, pending deletion) is refused rather than having its state machine
 // overwritten.
 func (s *AuthService) DeactivateManagedChildAccount(
-	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, reason, stepUpPassword, ip, userAgent string,
+	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, reason, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) error {
-	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpDeactivate, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpDeactivate, guardianUserID, signIn, childUserID, stepUpPassword, stepUpPasskey, ip, userAgent)
 	if err != nil {
 		return err
 	}
@@ -405,9 +412,9 @@ func (s *AuthService) DeactivateManagedChildAccount(
 // GrantParentalConsent, so reactivation can never bypass the consent gate
 // (the same rule the admin reactivation path enforces).
 func (s *AuthService) ReactivateManagedChildAccount(
-	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
+	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) error {
-	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpReactivate, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpReactivate, guardianUserID, signIn, childUserID, stepUpPassword, stepUpPasskey, ip, userAgent)
 	if err != nil {
 		return err
 	}
@@ -449,9 +456,9 @@ func (s *AuthService) ReactivateManagedChildAccount(
 // consent record and the audit trail survive by design — they are the
 // evidence that the consent, and this erasure, happened.
 func (s *AuthService) DeleteManagedChildAccount(
-	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword, ip, userAgent string,
+	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) error {
-	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpDeleteChild, guardianUserID, signIn, childUserID, stepUpPassword, ip, userAgent)
+	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpDeleteChild, guardianUserID, signIn, childUserID, stepUpPassword, stepUpPasskey, ip, userAgent)
 	if err != nil {
 		return err
 	}

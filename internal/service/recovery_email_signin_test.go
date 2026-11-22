@@ -188,7 +188,7 @@ func (f *recoveryEmailFixture) heldGrants(userID string, session SessionSignIn) 
 			return err
 		},
 		"GrantParentalConsent": func() error {
-			_, err := f.svc.GrantParentalConsent(f.ctx, userID, session, "child-1", "v1", "Str0ng!Pass1", "", "")
+			_, err := f.svc.GrantParentalConsent(f.ctx, userID, session, "child-1", "v1", "Str0ng!Pass1", nil, "", "")
 			return err
 		},
 		"CreateManagedChildAccount": func() error {
@@ -196,27 +196,27 @@ func (f *recoveryEmailFixture) heldGrants(userID string, session SessionSignIn) 
 			return err
 		},
 		"GetManagedChildProfile": func() error {
-			_, err := f.svc.GetManagedChildProfile(f.ctx, userID, session, "child-1", "Str0ng!Pass1", "", "")
+			_, err := f.svc.GetManagedChildProfile(f.ctx, userID, session, "child-1", "Str0ng!Pass1", nil, "", "")
 			return err
 		},
 		"SetManagedChildPassword": func() error {
-			return f.svc.SetManagedChildPassword(f.ctx, userID, session, "child-1", "N3w!Str0ngPass", "Str0ng!Pass1", "", "")
+			return f.svc.SetManagedChildPassword(f.ctx, userID, session, "child-1", "N3w!Str0ngPass", "Str0ng!Pass1", nil, "", "")
 		},
 		"SetManagedChildUsername": func() error {
-			_, err := f.svc.SetManagedChildUsername(f.ctx, userID, session, "child-1", "kid", "Str0ng!Pass1", "", "")
+			_, err := f.svc.SetManagedChildUsername(f.ctx, userID, session, "child-1", "kid", "Str0ng!Pass1", nil, "", "")
 			return err
 		},
 		"RevokeManagedChildSessions": func() error {
-			return f.svc.RevokeManagedChildSessions(f.ctx, userID, session, "child-1", "Str0ng!Pass1", "", "")
+			return f.svc.RevokeManagedChildSessions(f.ctx, userID, session, "child-1", "Str0ng!Pass1", nil, "", "")
 		},
 		"DeactivateManagedChildAccount": func() error {
-			return f.svc.DeactivateManagedChildAccount(f.ctx, userID, session, "child-1", "", "Str0ng!Pass1", "", "")
+			return f.svc.DeactivateManagedChildAccount(f.ctx, userID, session, "child-1", "", "Str0ng!Pass1", nil, "", "")
 		},
 		"ReactivateManagedChildAccount": func() error {
-			return f.svc.ReactivateManagedChildAccount(f.ctx, userID, session, "child-1", "Str0ng!Pass1", "", "")
+			return f.svc.ReactivateManagedChildAccount(f.ctx, userID, session, "child-1", "Str0ng!Pass1", nil, "", "")
 		},
 		"DeleteManagedChildAccount": func() error {
-			return f.svc.DeleteManagedChildAccount(f.ctx, userID, session, "child-1", "Str0ng!Pass1", "", "")
+			return f.svc.DeleteManagedChildAccount(f.ctx, userID, session, "child-1", "Str0ng!Pass1", nil, "", "")
 		},
 		"TransferAgent": func() error {
 			_, err := f.svc.TransferAgent(f.ctx, userID, session, "agent-1", "someone-else", "", "")
@@ -290,7 +290,7 @@ func (f *recoveryEmailFixture) heldSecurityChanges(userID string, session Sessio
 			return err
 		},
 		"BeginPasskeyRegistration": func() error {
-			_, _, err := f.svc.BeginPasskeyRegistration(f.ctx, userID, session, "Key")
+			_, _, err := f.svc.BeginPasskeyRegistration(f.ctx, userID, session, "Key", false)
 			return err
 		},
 		"CompletePasskeyRegistration": func() error {

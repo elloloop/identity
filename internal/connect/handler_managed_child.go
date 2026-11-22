@@ -49,6 +49,7 @@ func (h *IdentityHandler) CreateManagedChildAccount(
 			PasskeyEnrolment: req.Msg.GetPasskeyEnrolment(),
 			PolicyVersion:    req.Msg.GetPolicyVersion(),
 			StepUpPassword:   req.Msg.GetStepUpPassword(),
+			StepUpPasskey:    passkeyReauthentication(req.Msg.GetStepUpPasskey()),
 		},
 		clientIP(req.Header()),
 		clientUserAgent(req.Header()),

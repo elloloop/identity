@@ -197,6 +197,8 @@ const (
 	IdentityService_GetManagedChildAuthorization_FullMethodName      = "/identity.v1.IdentityService/GetManagedChildAuthorization"
 	IdentityService_LookupUsers_FullMethodName                       = "/identity.v1.IdentityService/LookupUsers"
 	IdentityService_MatchTenantMemberPhones_FullMethodName           = "/identity.v1.IdentityService/MatchTenantMemberPhones"
+	IdentityService_BeginReauthentication_FullMethodName             = "/identity.v1.IdentityService/BeginReauthentication"
+	IdentityService_VerifyReauthentication_FullMethodName            = "/identity.v1.IdentityService/VerifyReauthentication"
 	IdentityService_GetProjectEmailDelivery_FullMethodName           = "/identity.v1.IdentityService/GetProjectEmailDelivery"
 )
 
@@ -921,6 +923,12 @@ type IdentityServiceClient interface {
 	// as directory_phone_match with the tenant and the number of hashes asked
 	// for and matched, never the hashes.
 	MatchTenantMemberPhones(ctx context.Context, in *MatchTenantMemberPhonesRequest, opts ...grpc.CallOption) (*MatchTenantMemberPhonesResponse, error)
+	// BeginReauthentication requires an active known adult with enrolled passkeys.
+	// The challenge requests user verification and expires after at most two minutes.
+	BeginReauthentication(ctx context.Context, in *BeginReauthenticationRequest, opts ...grpc.CallOption) (*BeginReauthenticationResponse, error)
+	// VerifyReauthentication checks and consumes the exact action/resource-bound
+	// assertion for the authenticated adult. It issues no token or session.
+	VerifyReauthentication(ctx context.Context, in *VerifyReauthenticationRequest, opts ...grpc.CallOption) (*VerifyReauthenticationResponse, error)
 	// GetProjectEmailDelivery exposes only the resolved project's email policy.
 	// Resolve the project exactly as for authentication and recovery calls.
 	// This request requires no user session or email address.
@@ -2715,6 +2723,26 @@ func (c *identityServiceClient) MatchTenantMemberPhones(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *identityServiceClient) BeginReauthentication(ctx context.Context, in *BeginReauthenticationRequest, opts ...grpc.CallOption) (*BeginReauthenticationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BeginReauthenticationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_BeginReauthentication_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) VerifyReauthentication(ctx context.Context, in *VerifyReauthenticationRequest, opts ...grpc.CallOption) (*VerifyReauthenticationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyReauthenticationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_VerifyReauthentication_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) GetProjectEmailDelivery(ctx context.Context, in *GetProjectEmailDeliveryRequest, opts ...grpc.CallOption) (*GetProjectEmailDeliveryResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetProjectEmailDeliveryResponse)
@@ -3446,6 +3474,12 @@ type IdentityServiceServer interface {
 	// as directory_phone_match with the tenant and the number of hashes asked
 	// for and matched, never the hashes.
 	MatchTenantMemberPhones(context.Context, *MatchTenantMemberPhonesRequest) (*MatchTenantMemberPhonesResponse, error)
+	// BeginReauthentication requires an active known adult with enrolled passkeys.
+	// The challenge requests user verification and expires after at most two minutes.
+	BeginReauthentication(context.Context, *BeginReauthenticationRequest) (*BeginReauthenticationResponse, error)
+	// VerifyReauthentication checks and consumes the exact action/resource-bound
+	// assertion for the authenticated adult. It issues no token or session.
+	VerifyReauthentication(context.Context, *VerifyReauthenticationRequest) (*VerifyReauthenticationResponse, error)
 	// GetProjectEmailDelivery exposes only the resolved project's email policy.
 	// Resolve the project exactly as for authentication and recovery calls.
 	// This request requires no user session or email address.
@@ -3993,6 +4027,12 @@ func (UnimplementedIdentityServiceServer) LookupUsers(context.Context, *LookupUs
 }
 func (UnimplementedIdentityServiceServer) MatchTenantMemberPhones(context.Context, *MatchTenantMemberPhonesRequest) (*MatchTenantMemberPhonesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MatchTenantMemberPhones not implemented")
+}
+func (UnimplementedIdentityServiceServer) BeginReauthentication(context.Context, *BeginReauthenticationRequest) (*BeginReauthenticationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BeginReauthentication not implemented")
+}
+func (UnimplementedIdentityServiceServer) VerifyReauthentication(context.Context, *VerifyReauthenticationRequest) (*VerifyReauthenticationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyReauthentication not implemented")
 }
 func (UnimplementedIdentityServiceServer) GetProjectEmailDelivery(context.Context, *GetProjectEmailDeliveryRequest) (*GetProjectEmailDeliveryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetProjectEmailDelivery not implemented")
@@ -7222,6 +7262,42 @@ func _IdentityService_MatchTenantMemberPhones_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_BeginReauthentication_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BeginReauthenticationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).BeginReauthentication(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_BeginReauthentication_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).BeginReauthentication(ctx, req.(*BeginReauthenticationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_VerifyReauthentication_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyReauthenticationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).VerifyReauthentication(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_VerifyReauthentication_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).VerifyReauthentication(ctx, req.(*VerifyReauthenticationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_GetProjectEmailDelivery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetProjectEmailDeliveryRequest)
 	if err := dec(in); err != nil {
@@ -7958,6 +8034,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MatchTenantMemberPhones",
 			Handler:    _IdentityService_MatchTenantMemberPhones_Handler,
+		},
+		{
+			MethodName: "BeginReauthentication",
+			Handler:    _IdentityService_BeginReauthentication_Handler,
+		},
+		{
+			MethodName: "VerifyReauthentication",
+			Handler:    _IdentityService_VerifyReauthentication_Handler,
 		},
 		{
 			MethodName: "GetProjectEmailDelivery",

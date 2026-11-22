@@ -298,7 +298,7 @@ func TestBeginPasskeyRegistration_UserNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "no-such-user", SessionSignIn{}, "Key")
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "no-such-user", SessionSignIn{}, "Key", false)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -317,7 +317,7 @@ func TestBeginPasskeyRegistration_WithExistingCreds(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, SessionSignIn{}, "Key")
+	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, SessionSignIn{}, "Key", false)
 	require.NoError(t, err)
 	assert.NotEmpty(t, optionsJSON)
 	assert.NotEmpty(t, challengeID)

@@ -224,7 +224,7 @@ func TestBeginPasskeyRegistration_GetUserErrors(t *testing.T) {
 	r.failGetUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "u", SessionSignIn{}, "Key")
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "u", SessionSignIn{}, "Key", false)
 	require.Error(t, err)
 }
 
@@ -235,7 +235,7 @@ func TestBeginPasskeyRegistration_ListErrors(t *testing.T) {
 	r.failListPasskeyCredentials = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{}, "Key")
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{}, "Key", false)
 	require.Error(t, err)
 }
 
@@ -246,7 +246,7 @@ func TestBeginPasskeyRegistration_CreateChallengeErrors(t *testing.T) {
 	r.failCreatePasskeyChallenge = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{}, "Key")
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{}, "Key", false)
 	require.Error(t, err)
 }
 

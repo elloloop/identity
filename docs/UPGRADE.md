@@ -1,5 +1,59 @@
 # Upgrade guide
 
+## Next — fresh passkey reauthentication (PostgreSQL 0063 / SQLite 0031, additive RPCs and fields, Go API change)
+
+An active known-adult account can authorize an individual operation with an
+enrolled passkey even when it has no Identity password. `BeginReauthentication`
+binds a challenge to the caller, project, action and resource. The browser runs
+the returned WebAuthn options, which require user verification. The challenge
+expires after two minutes. `VerifyReauthentication` checks the assertion and
+atomically consumes that exact binding. It returns the authenticated user ID
+and creates no session or bearer credential. Callers must check authorization
+for their own resource before applying a change.
+
+Guardian requests accept `step_up_passkey` as an alternative to password
+re-entry. Use the fixed actions below when beginning the challenge. Each action
+uses the child ID as its resource, except creation, whose resource is empty.
+
+| RPC | Action |
+| --- | --- |
+| CreateManagedChildAccount | `guardian.create_child` |
+| GrantParentalConsent | `guardian.grant_consent` |
+| GetManagedChildProfile | `guardian.view_child` |
+| SetManagedChildPassword | `guardian.set_child_password` |
+| SetManagedChildUsername | `guardian.set_child_username` |
+| RevokeManagedChildSessions | `guardian.revoke_child_sessions` |
+| DeactivateManagedChildAccount | `guardian.deactivate_child` |
+| ReactivateManagedChildAccount | `guardian.reactivate_child` |
+| DeleteManagedChildAccount | `guardian.delete_child` |
+
+Each assertion is consumed once, so collecting a profile and deleting an
+account require distinct challenges. Password and passkey proof are mutually
+exclusive. Consent still requires a known adult and a strong verified factor,
+and persists the policy version the caller explicitly accepted. OAuth sign-in
+alone does not satisfy these checks. Existing password flows retain their
+behavior. The Go service guardian methods take an additional optional passkey
+proof argument, and Repository implementations must implement atomic
+`ConsumeReauthenticationChallenge`.
+
+For projects with `guardian.require_step_up: true`, normal passkey registration
+now requires a trusted sign-in from the last five minutes at both Begin and
+Complete. Missing or stale `auth_time`, recovery-email sign-in and unvouched
+native-gRPC claims fail with `reauthentication_required`. Refresh retains the
+original sign-in time and cannot renew this window. Ask the user to sign in
+again before enrolling the first passkey. A verified managed-child enrolment
+ticket continues to authorize its separate bootstrap flow. Go callers pass the
+new registration `enrolment` flag only after validating that ticket.
+
+Migrations add constant-default action/resource columns to the existing
+challenge table. PostgreSQL takes a table lock with a ten-second acquisition
+timeout. Run migrations before the new image, then wait for every replica
+before enabling clients that use the new proof fields. Older replicas ignore
+them. For rollback, disable those client flows and wait two minutes for their
+challenges to expire. The down migration deletes bound challenges before
+dropping their binding columns. Ordinary login and registration challenges
+are retained.
+
 ## Next — project outbound email policy (additive config and RPC)
 
 After upgrading every replica, set `config_json.email_delivery.disabled: true`

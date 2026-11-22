@@ -1293,6 +1293,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.BeginPasskeySignupResponse'
+  /identity.v1.IdentityService/BeginReauthentication:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: BeginReauthentication
+      description: |-
+        BeginReauthentication requires an active known adult with enrolled passkeys.
+         The challenge requests user verification and expires after at most two minutes.
+      operationId: identity.v1.IdentityService.BeginReauthentication
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.BeginReauthenticationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.BeginReauthenticationResponse'
   /identity.v1.IdentityService/BeginTotpSetup:
     post:
       tags:
@@ -6799,6 +6837,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.VerifyProjectAuthDomainResponse'
+  /identity.v1.IdentityService/VerifyReauthentication:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: VerifyReauthentication
+      description: |-
+        VerifyReauthentication checks and consumes the exact action/resource-bound
+         assertion for the authenticated adult. It issues no token or session.
+      operationId: identity.v1.IdentityService.VerifyReauthentication
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.VerifyReauthenticationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.VerifyReauthenticationResponse'
   /identity.v1.IdentityService/VerifyRecoveryEmail:
     post:
       tags:
@@ -8204,6 +8280,28 @@ components:
           title: challenge_id
       title: BeginPasskeySignupResponse
       additionalProperties: false
+    identity.v1.BeginReauthenticationRequest:
+      type: object
+      properties:
+        action:
+          type: string
+          title: action
+        resourceId:
+          type: string
+          title: resource_id
+      title: BeginReauthenticationRequest
+      additionalProperties: false
+    identity.v1.BeginReauthenticationResponse:
+      type: object
+      properties:
+        optionsJson:
+          type: string
+          title: options_json
+        challengeId:
+          type: string
+          title: challenge_id
+      title: BeginReauthenticationResponse
+      additionalProperties: false
     identity.v1.BeginTotpSetupRequest:
       type: object
       title: BeginTotpSetupRequest
@@ -8507,7 +8605,7 @@ components:
           title: stepped_up
           description: |-
             stepped_up records whether the consenting adult re-authenticated with a
-             password at the moment of consent. False only when the deployment enabled
+             password or user-verified passkey at the moment of consent. False only when the deployment enabled
              GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD and the adult's account holds no
              password. Recorded explicitly so the artifact is self-describing.
         consentIp:
@@ -8884,6 +8982,10 @@ components:
             Presence-aware UTC epoch milliseconds. Absent means unknown; zero and
              negative timestamps are valid dates. On requests, a nonzero legacy
              date_of_birth_ms must agree when both fields are supplied.
+        stepUpPasskey:
+          title: step_up_passkey
+          description: Alternative to step_up_password. The action and resource are fixed by this RPC.
+          $ref: '#/components/schemas/identity.v1.PasskeyReauthentication'
       title: CreateManagedChildAccountRequest
       additionalProperties: false
     identity.v1.CreateManagedChildAccountResponse:
@@ -9087,6 +9189,10 @@ components:
         stepUpPassword:
           type: string
           title: step_up_password
+        stepUpPasskey:
+          title: step_up_passkey
+          description: Alternative to step_up_password. The action and resource are fixed by this RPC.
+          $ref: '#/components/schemas/identity.v1.PasskeyReauthentication'
       title: DeactivateManagedChildAccountRequest
       additionalProperties: false
     identity.v1.DeactivateManagedChildAccountResponse:
@@ -9215,6 +9321,10 @@ components:
         stepUpPassword:
           type: string
           title: step_up_password
+        stepUpPasskey:
+          title: step_up_passkey
+          description: Alternative to step_up_password. The action and resource are fixed by this RPC.
+          $ref: '#/components/schemas/identity.v1.PasskeyReauthentication'
       title: DeleteManagedChildAccountRequest
       additionalProperties: false
     identity.v1.DeleteManagedChildAccountResponse:
@@ -9697,6 +9807,10 @@ components:
           description: |-
             step_up_password re-authenticates the CALLING GUARDIAN (verified against
              the guardian's stored password hash). Required on every call.
+        stepUpPasskey:
+          title: step_up_passkey
+          description: Alternative to step_up_password. The action and resource are fixed by this RPC.
+          $ref: '#/components/schemas/identity.v1.PasskeyReauthentication'
       title: GetManagedChildProfileRequest
       additionalProperties: false
     identity.v1.GetManagedChildProfileResponse:
@@ -9825,10 +9939,13 @@ components:
           description: |-
             step_up_password re-authenticates the consenting adult at the moment of
              consent. The adult's identity is taken from the authenticated session,
-             never from this request; requiring the password here proves the live
+             never from this request. Requiring credential proof here proves the live
              actor is the account owner, not merely the holder of a valid session
-             token (closing the "spoofable consent" risk). The account must have a
-             password set.
+             token. Use step_up_passkey instead for a registered passkey, without a password.
+        stepUpPasskey:
+          title: step_up_passkey
+          description: Alternative to step_up_password. The action and resource are fixed by this RPC.
+          $ref: '#/components/schemas/identity.v1.PasskeyReauthentication'
       title: GrantParentalConsentRequest
       additionalProperties: false
     identity.v1.GrantParentalConsentResponse:
@@ -11308,6 +11425,20 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: PasskeyCredentialInfo
       additionalProperties: false
+    identity.v1.PasskeyReauthentication:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        credentialJson:
+          type: string
+          title: credential_json
+      title: PasskeyReauthentication
+      additionalProperties: false
+      description: |-
+        A fresh assertion from the calling account's enrolled passkey. A challenge
+         is bound to one project, account, action and resource and can be used once.
     identity.v1.PasswordChangeRequiredDetails:
       type: object
       properties:
@@ -11802,6 +11933,10 @@ components:
         stepUpPassword:
           type: string
           title: step_up_password
+        stepUpPasskey:
+          title: step_up_passkey
+          description: Alternative to step_up_password. The action and resource are fixed by this RPC.
+          $ref: '#/components/schemas/identity.v1.PasskeyReauthentication'
       title: ReactivateManagedChildAccountRequest
       additionalProperties: false
     identity.v1.ReactivateManagedChildAccountResponse:
@@ -12560,6 +12695,10 @@ components:
         stepUpPassword:
           type: string
           title: step_up_password
+        stepUpPasskey:
+          title: step_up_passkey
+          description: Alternative to step_up_password. The action and resource are fixed by this RPC.
+          $ref: '#/components/schemas/identity.v1.PasskeyReauthentication'
       title: RevokeManagedChildSessionsRequest
       additionalProperties: false
     identity.v1.RevokeManagedChildSessionsResponse:
@@ -12783,6 +12922,10 @@ components:
         stepUpPassword:
           type: string
           title: step_up_password
+        stepUpPasskey:
+          title: step_up_passkey
+          description: Alternative to step_up_password. The action and resource are fixed by this RPC.
+          $ref: '#/components/schemas/identity.v1.PasskeyReauthentication'
       title: SetManagedChildPasswordRequest
       additionalProperties: false
     identity.v1.SetManagedChildPasswordResponse:
@@ -12811,6 +12954,10 @@ components:
         stepUpPassword:
           type: string
           title: step_up_password
+        stepUpPasskey:
+          title: step_up_passkey
+          description: Alternative to step_up_password. The action and resource are fixed by this RPC.
+          $ref: '#/components/schemas/identity.v1.PasskeyReauthentication'
       title: SetManagedChildUsernameRequest
       additionalProperties: false
     identity.v1.SetManagedChildUsernameResponse:
@@ -13947,6 +14094,31 @@ components:
           title: domain
           $ref: '#/components/schemas/identity.v1.ProjectAuthDomain'
       title: VerifyProjectAuthDomainResponse
+      additionalProperties: false
+    identity.v1.VerifyReauthenticationRequest:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          title: challenge_id
+        credentialJson:
+          type: string
+          title: credential_json
+        action:
+          type: string
+          title: action
+        resourceId:
+          type: string
+          title: resource_id
+      title: VerifyReauthenticationRequest
+      additionalProperties: false
+    identity.v1.VerifyReauthenticationResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          title: user_id
+      title: VerifyReauthenticationResponse
       additionalProperties: false
     identity.v1.VerifyRecoveryEmailRequest:
       type: object

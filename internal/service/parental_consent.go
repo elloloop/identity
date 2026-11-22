@@ -29,11 +29,11 @@ import (
 //     (verified phone, a registered passkey, or an approved identity
 //     verification), AND
 //  2. a STEP-UP RE-AUTHENTICATION at the moment of consent (the adult
-//     re-enters their password).
+//     re-enters their password or proves a bound, user-verified passkey).
 //
 // A modified client cannot bypass either: the consenting adult's identity is
 // taken from the verified session (never a request field), the step-up
-// password is checked against the stored hash, and the factor check reads
+// proof is checked against the stored credential, and the factor check reads
 // server-side account state.
 
 // ParentalConsentFactor is a strong, server-verified factor present on the
@@ -74,7 +74,7 @@ type ParentalConsentRecord struct {
 	// Factors is the canonical, comma-separated, sorted list of the
 	// ParentalConsentFactor values present at the moment of consent (>= 1).
 	Factors string
-	// SteppedUp records whether the adult re-authenticated with a password at
+	// SteppedUp records whether the adult re-authenticated with a password or passkey at
 	// the moment of consent. False only when GuardianStepUpAllowNoPassword
 	// admitted an account holding no password.
 	SteppedUp        bool
@@ -97,8 +97,7 @@ type ParentalConsentRecord struct {
 var (
 	// ErrParentalConsentStepUpFailed is returned when the step-up
 	// re-authentication at the moment of consent fails — a missing or wrong
-	// step-up password, or a consenting account with no password set (so no
-	// step-up is possible). Mapped to CodeUnauthenticated.
+	// password or passkey proof. Mapped to CodeUnauthenticated.
 	ErrParentalConsentStepUpFailed = errors.New("parental consent step-up re-authentication failed")
 	// ErrParentalConsentFactorMissing is returned when the consenting adult
 	// holds no strong verified factor (verified phone / passkey / approved
@@ -168,12 +167,12 @@ func (s *AuthService) strongVerifiedFactors(ctx context.Context, adult *User) ([
 // token says about it: a session a recovery hold binds, or whose recovery
 // email is gone, is refused (refuseHeldSession). childUserID is the child the
 // consent is for. policyVersion identifies the notice the adult was shown.
-// stepUpPassword re-authenticates the adult. ip/userAgent are recorded for the
+// The password or bound passkey re-authenticates the adult. ip/userAgent are recorded for the
 // audit trail.
 //
 // BOTH checks are mandatory and enforced here, server-side:
-//   - step-up re-auth: stepUpPassword must verify against the adult's stored
-//     password hash;
+//   - step-up re-auth: the password or passkey must verify against the adult's
+//     stored credential;
 //   - strong verified factor: the adult must hold >= 1 of verified phone /
 //     passkey / approved identity verification.
 //
@@ -181,7 +180,7 @@ func (s *AuthService) strongVerifiedFactors(ctx context.Context, adult *User) ([
 // is visible) and returns without mutating any account.
 func (s *AuthService) GrantParentalConsent(
 	ctx context.Context,
-	consentingUserID string, signIn SessionSignIn, childUserID, policyVersion, stepUpPassword, ip, userAgent string,
+	consentingUserID string, signIn SessionSignIn, childUserID, policyVersion, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) (*ParentalConsentRecord, error) {
 	if consentingUserID == "" {
 		return nil, ErrUnauthenticated
@@ -229,7 +228,7 @@ func (s *AuthService) GrantParentalConsent(
 	// Check (b): STEP-UP RE-AUTH. Verified before any state changes so a
 	// caller holding only a session token (a hijacked session, a shared
 	// device) cannot consent.
-	admitted, reauthenticated := s.stepUp(ctx, adult, stepUpPassword)
+	admitted, reauthenticated := s.stepUp(ctx, adult, stepUpPassword, stepUpPasskey, "guardian.grant_consent", childUserID)
 	if !admitted {
 		s.auditConsentFailure(ctx, consentingUserID, childUserID, "step_up", ip, userAgent)
 		return nil, ErrParentalConsentStepUpFailed

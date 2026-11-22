@@ -432,7 +432,7 @@ func TestAccountAddress_FollowsAManagedChildRename(t *testing.T) {
 	ensureAccountAddress(ctx, f.repo, zap.NewNop(), f.child)
 	require.Equal(t, "kid.one@accounts.example.test", f.child.AccountAddress)
 
-	child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "kid.two", strongPW, "", "")
+	child, err := f.svc.SetManagedChildUsername(ctx, f.guardian.ID, SessionSignIn{}, f.child.ID, "kid.two", strongPW, nil, "", "")
 	require.NoError(t, err)
 	require.Equal(t, "kid.two@accounts.example.test", child.AccountAddress)
 	stored, err := f.repo.GetUser(ctx, f.child.ID)

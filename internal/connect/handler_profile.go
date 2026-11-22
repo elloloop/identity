@@ -209,7 +209,7 @@ func (h *IdentityHandler) BeginPasskeyRegistration(
 	}
 
 	optionsJSON, challengeID, err := h.auth.BeginPasskeyRegistration(
-		ctx, userID, authenticatedSignIn(req.Header()), req.Msg.DeviceName,
+		ctx, userID, authenticatedSignIn(req.Header()), req.Msg.DeviceName, req.Msg.GetEnrolmentToken() != "",
 	)
 	if err != nil {
 		return nil, toConnectError(err)

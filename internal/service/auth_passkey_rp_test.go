@@ -257,10 +257,10 @@ func TestPasskeyRegistration_UnlistedHost_Refused(t *testing.T) {
 	listed := WithRequestHost(context.Background(), "auth.example.org")
 	unlisted := WithRequestHost(context.Background(), "auth.other.example")
 
-	_, _, err := svc.BeginPasskeyRegistration(unlisted, userID, SessionSignIn{}, "Second")
+	_, _, err := svc.BeginPasskeyRegistration(unlisted, userID, SessionSignIn{}, "Second", false)
 	require.ErrorIs(t, err, ErrPasskeysUnavailable)
 
-	_, challengeID, err := svc.BeginPasskeyRegistration(listed, userID, SessionSignIn{}, "Second")
+	_, challengeID, err := svc.BeginPasskeyRegistration(listed, userID, SessionSignIn{}, "Second", false)
 	require.NoError(t, err)
 	_, _, err = svc.CompletePasskeyRegistration(unlisted, userID, SessionSignIn{}, challengeID, pkRegCredentialJSON(t), "Second", false, "1.2.3.4", "ua")
 	require.ErrorIs(t, err, ErrPasskeysUnavailable)

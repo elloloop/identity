@@ -613,3 +613,7 @@ func (StubRepository) UpdateOAuthClient(context.Context, string, int64, *OAuthCl
 func (StubRepository) ListOAuthClients(context.Context, string, int) ([]*OAuthClient, error) {
 	return nil, ErrServiceUnavailable
 }
+
+func (StubRepository) ConsumeReauthenticationChallenge(context.Context, string, string, string, string, int64) (bool, error) {
+	return false, ErrServiceUnavailable
+}
