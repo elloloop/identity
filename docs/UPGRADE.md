@@ -39,8 +39,11 @@ cannot enroll a trusted replacement, link an independent provider or move
 credentials through self-service account merging to launder its authority.
 Merging retains its configured fresh-sign-in window and also requires
 trusted enrollment provenance. Password changes still require the existing
-password.
-A proven eligible-key login may authorize enrollment, but its source key is
+password. Completing an administrator-issued temporary-password sign-in
+counts as independent primary proof: the administrator is already authorized
+to issue that account's password, and the original sign-in time is retained.
+An eligible-key login with verified UV may authorize enrollment; a
+presence-only assertion still signs in but grants no enrollment trust. The source key is
 rechecked: removing that key removes this authority without revoking ordinary
 sign-in. Refresh and tenant selection preserve provenance and original
 `auth_time`. DOB completion preserves the interrupted sign-in. QR approval
@@ -48,13 +51,17 @@ and polling carry no enrollment trust and no fresh authentication time.
 
 The signed `amr` claim uses public markers `credential_enrollment` and, for
 an eligible-key source, `credential_enrollment_passkey:<credential_id>`.
-They are metadata, never bearer credentials. Hosts must forward the verified
-claim unchanged and never derive it from key counts, request fields or a
+The latter exposes a public credential identifier to that account's token
+consumer; it is metadata, never a bearer credential. Hosts must forward the
+verified claim unchanged and never derive it from key counts, request fields or a
 client's metadata. Native-gRPC hosts must vouch for verified AMR with
 `GRPCTrustAMR`; unvouched claims fail closed. App/product-session exchanges
 must preserve token provenance rather than minting a new trusted sign-in.
 
 Go token-issuance methods now take explicit enrollment provenance, and
+`WebAuthnService.CompleteAuthenticationWithUserVerification` exposes the
+verified UV flag alongside the counter. The existing public counter-only
+method keeps its signature for versioned Go consumers.
 Repository gains `MarkPasskeyReauthenticationEligible` for an exact verified
 credential version. Refresh
 records gain `CredentialEnrollmentEligible` and

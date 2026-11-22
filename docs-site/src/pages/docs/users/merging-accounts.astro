@@ -74,8 +74,10 @@ import DocsLayout from "../../../layouts/DocsLayout.astro";
       The session must come from a <strong>recent sign-in</strong>: within
       <code>GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS</code> (default 300,
       at most 3600)
-      of the call, by any method the account has, its second factor
-      included. A refresh keeps the sign-in's time rather than restarting the
+      of the call, with trusted credential-enrollment provenance from its
+      primary sign-in or a user-verified eligible key. A legacy-key session
+      cannot move another account's credentials onto the survivor. Removing
+      the source eligible key removes this authority too. A refresh keeps the sign-in's time rather than restarting the
       clock, so a token refreshed from a recent sign-in passes and one refreshed
       from an older sign-in does not. A session opened by a QR handoff, an
       anonymous sign-in or a password just added to an anonymous account has

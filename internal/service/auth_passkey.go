@@ -398,7 +398,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, errors.New("credential sign_count overflows WebAuthn counter")
 	}
 
-	newSignCount, err := relyingParty.CompleteAuthentication(
+	newSignCount, userVerified, err := relyingParty.CompleteAuthenticationWithUserVerification(
 		credentialJSON,
 		challenge.Challenge,
 		cred.PublicKey,
@@ -461,7 +461,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, err
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent, credentialEnrollment{Trusted: cred.ReauthenticationEligible, PasskeyID: cred.CredentialID})
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent, credentialEnrollment{Trusted: cred.ReauthenticationEligible && userVerified, PasskeyID: cred.CredentialID})
 	if err != nil {
 		return nil, err
 	}

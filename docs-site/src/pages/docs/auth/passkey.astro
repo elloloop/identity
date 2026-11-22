@@ -249,9 +249,12 @@ const complete = await fetch("/identity.v1.IdentityService/CompletePasskeyLogin"
     Recover by signing in freshly through an independent trusted method and
     enrolling a new key or explicitly verifying an existing one. A legacy-key session, token refresh, recovery session
     or QR handoff cannot manufacture trusted enrollment. An eligible-key
-    sign-in can enroll another key while its source credential remains on
+    sign-in with verified UV can enroll another key while its source credential remains on
     file and the five-minute sign-in window is fresh. Eligibility is written
-    only by the server. Never infer it from client-supplied values.
+    only by the server. Never infer it from client-supplied values. A
+    presence-only key assertion still signs in but grants no enrollment trust.
+    Completing an administrator-issued temporary-password sign-in counts as
+    primary proof under the administrator's existing credential authority.
   </p>
   <p>
     To keep a legacy key on the same device, call

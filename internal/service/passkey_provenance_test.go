@@ -171,3 +171,20 @@ func TestMergeCannotAttachCredentialsAfterEligibleSourceRemoval(t *testing.T) {
 	require.Empty(t, f.user.PasswordHash)
 	require.Empty(t, other.MergedIntoUserID)
 }
+
+func TestEligiblePasskeyPresenceOnlyLoginCannotEnrollCredentials(t *testing.T) {
+	f := newReauthenticationFixture(t)
+	f.user.EmailVerified = true
+	ctx := context.Background()
+	_, id, err := f.service.BeginPasskeyLogin(ctx, f.user.Email)
+	require.NoError(t, err)
+	challenge, err := f.repo.GetPasskeyChallenge(ctx, id)
+	require.NoError(t, err)
+	login, err := f.service.CompletePasskeyLogin(ctx, id, f.assertion(t, challenge.Challenge, false), "", "")
+	require.NoError(t, err, "ordinary presence-only sign-in remains available")
+	require.NotEmpty(t, login.AccessToken)
+	signIn := provenanceSignIn(t, f.service, login.AccessToken)
+	require.False(t, signIn.credentialEnrollment().Trusted)
+	_, _, err = f.service.BeginPasskeyRegistration(ctx, f.user.ID, signIn, "new key", false)
+	require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
+}

@@ -119,7 +119,6 @@ const (
 const (
 	pkfCredentialID = "1"
 	pkfUserID       = "2"
-	pkfDeviceName   = "5"
 )
 
 // ── UserInvitation field IDs (type_id 27) ──────────────────────────

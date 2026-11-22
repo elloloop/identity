@@ -156,3 +156,18 @@ func TestPasskeyEligibilityStorageFailureCannotPromoteOrReplay(t *testing.T) {
 	_, err = f.service.CompletePasskeyEligibilityVerification(context.Background(), f.user.ID, signIn, f.credentialID, proof)
 	require.ErrorIs(t, err, ErrParentalConsentStepUpFailed)
 }
+
+func TestPasskeyDerivedSessionCannotVerifyCredentialEligibility(t *testing.T) {
+	f := newReauthenticationFixture(t)
+	primary := SessionSignIn{AuthTimeSec: f.service.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}
+	proof := eligibilityProof(t, f, primary, true)
+	login := f.passkeyLogin(t, true)
+	signIn := provenanceSignIn(t, f.service, login.AccessToken)
+	require.True(t, signIn.credentialEnrollment().Trusted)
+	require.NotEmpty(t, signIn.credentialEnrollment().PasskeyID)
+	ctx := context.Background()
+	_, _, err := f.service.BeginPasskeyEligibilityVerification(ctx, f.user.ID, signIn, f.credentialID)
+	require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
+	_, err = f.service.CompletePasskeyEligibilityVerification(ctx, f.user.ID, signIn, f.credentialID, proof)
+	require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
+}

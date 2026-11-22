@@ -249,6 +249,8 @@ func (f *fakeDB) addRefreshToken(id, userID string, expiresAt int64) {
 	}
 }
 
+const pkfDeviceName = "5"
+
 func (f *fakeDB) addPasskey(id, userID, credentialID, deviceName string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
