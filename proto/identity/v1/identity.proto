@@ -1773,9 +1773,35 @@ message PasskeyCredentialInfo {
   // pre-upgrade or otherwise unproven enrolments, which remain usable for
   // ordinary sign-in. A legacy-key session, refresh or product-session
   // exchange cannot make another key eligible. Sign in through an independent
-  // trusted method and enrol a new key. This metadata is visible only to its
+  // trusted method and enrol or explicitly reverify a key. This metadata is visible only to its
   // owner and cannot be supplied on a registration request.
   bool reauthentication_eligible = 5;
+}
+
+// An explicit migration ceremony for an existing owned passkey. Both steps
+// require independently trusted authentication within five minutes. Legacy
+// passkey, recovery, QR and unmarked sessions cannot authorize it. No request
+// can assert eligibility. Cancelling leaves the credential unchanged.
+message BeginPasskeyEligibilityVerificationRequest {
+  string credential_id = 1;
+}
+
+message BeginPasskeyEligibilityVerificationResponse {
+  string options_json = 1;
+  string challenge_id = 2;
+}
+
+message CompletePasskeyEligibilityVerificationRequest {
+  string credential_id = 1;
+  string challenge_id = 2;
+  string credential_json = 3;
+}
+
+message CompletePasskeyEligibilityVerificationResponse {
+  // Owner-visible metadata after the server verifies and atomically consumes
+  // a user-verified assertion for this exact account, project and credential.
+  // The credential remains the same ordinary sign-in key.
+  PasskeyCredentialInfo credential = 1;
 }
 
 // Registration requires a trusted non-recovery sign-in within five minutes
@@ -4439,6 +4465,8 @@ service IdentityService {
   // VerifyReauthentication checks and consumes the exact action/resource-bound
   // assertion for the authenticated adult. It issues no token or session.
   rpc VerifyReauthentication(VerifyReauthenticationRequest) returns (VerifyReauthenticationResponse);
+  rpc BeginPasskeyEligibilityVerification(BeginPasskeyEligibilityVerificationRequest) returns (BeginPasskeyEligibilityVerificationResponse);
+  rpc CompletePasskeyEligibilityVerification(CompletePasskeyEligibilityVerificationRequest) returns (CompletePasskeyEligibilityVerificationResponse);
 
   // GetProjectEmailDelivery exposes only the resolved project's email policy.
   // Resolve the project exactly as for authentication and recovery calls.
