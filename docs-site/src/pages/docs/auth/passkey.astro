@@ -74,11 +74,13 @@ import { Code } from "astro-expressive-code/components";
     password). The flow is two RPCs.
   </p>
   <p>
-    Projects with <code>guardian.require_step_up: true</code> require a trusted
-    sign-in from the last five minutes at both registration steps. Missing or
-    stale <code>auth_time</code>, recovery-email sessions and unvouched native
+    Every project requires a trusted sign-in from the last five minutes at
+    both registration steps. Missing or
+    stale <code>auth_time</code> and unvouched native
     gRPC claims fail with <code>reauthentication_required</code>. Sign in again
-    before enrolling a passkey. Refreshing tokens preserves the original
+    before enrolling a passkey. Recovery-email sessions are also refused,
+    retaining their recovery-session or hold refusal where applicable.
+    Refreshing tokens preserves the original
     sign-in time. The managed-child enrolment ticket remains a separate flow.
   </p>
 

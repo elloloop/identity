@@ -141,26 +141,38 @@ func TestReauthenticationRejectsLoginChallengeAndDoesNotCreateSessions(t *testin
 	require.LessOrEqual(t, record.ExpiresAt-record.CreatedAt, (2 * time.Minute).Milliseconds())
 }
 
-func TestStrictProjectPasskeyRegistrationRequiresFreshTrustedSignIn(t *testing.T) {
-	f := newReauthenticationFixture(t)
-	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: f.service.cfg.DefaultProjectID})
-	f.service.WithActiveProjects(&fakeActiveProjects{active: map[string]*AdminProject{
-		f.service.cfg.DefaultProjectID: {ID: f.service.cfg.DefaultProjectID, Guardian: ProjectGuardianConfig{RequireStepUp: true}},
-	}})
-	for _, signIn := range []SessionSignIn{
-		{},
-		{AuthTimeSec: f.service.nowMs()/1000 - 301},
-		{AuthTimeSec: f.service.nowMs() / 1000, AMR: []string{AMRRecoveryEmail}},
-		{AuthTimeSec: f.service.nowMs() / 1000, AMR: []string{AMRUnvouched}},
-	} {
-		_, _, err := f.service.BeginPasskeyRegistration(ctx, f.user.ID, signIn, "device", false)
-		require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
-		_, _, err = f.service.CompletePasskeyRegistration(ctx, f.user.ID, signIn, "unused", "{}", "device", false, "", "")
-		require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
+func TestPasskeyRegistrationRequiresFreshTrustedSignIn(t *testing.T) {
+	for _, policy := range []struct {
+		name   string
+		strict bool
+	}{{"default", false}, {"strict", true}} {
+		t.Run(policy.name, func(t *testing.T) {
+			f := newReauthenticationFixture(t)
+			f.user.PasswordHash = hashPW(t, strongPW)
+			f.service.WithActiveProjects(&fakeActiveProjects{active: map[string]*AdminProject{
+				f.service.cfg.DefaultProjectID: {ID: f.service.cfg.DefaultProjectID, Guardian: ProjectGuardianConfig{RequireStepUp: policy.strict}},
+			}})
+			ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: f.service.cfg.DefaultProjectID})
+			for _, signIn := range []SessionSignIn{
+				{},
+				{AuthTimeSec: f.service.nowMs()/1000 - 301},
+				{AuthTimeSec: f.service.nowMs() / 1000, AMR: []string{AMRRecoveryEmail}},
+				{AuthTimeSec: f.service.nowMs() / 1000, AMR: []string{AMRUnvouched}},
+			} {
+				want := ErrRecoveryReauthenticationRequired
+				if signIn.openedByRecoveryEmail() {
+					want = ErrRecoverySession
+				}
+				_, _, err := f.service.BeginPasskeyRegistration(ctx, f.user.ID, signIn, "device", false)
+				require.ErrorIs(t, err, want)
+				_, _, err = f.service.CompletePasskeyRegistration(ctx, f.user.ID, signIn, "unused", "{}", "device", false, "", "")
+				require.ErrorIs(t, err, want)
+			}
+			require.Empty(t, f.repo.passkeyChallenges)
+			_, _, err := f.service.BeginPasskeyRegistration(ctx, f.user.ID, SessionSignIn{AuthTimeSec: f.service.nowMs() / 1000}, "device", false)
+			require.NoError(t, err)
+		})
 	}
-	require.Empty(t, f.repo.passkeyChallenges)
-	_, _, err := f.service.BeginPasskeyRegistration(ctx, f.user.ID, SessionSignIn{AuthTimeSec: f.service.nowMs() / 1000}, "device", false)
-	require.NoError(t, err)
 }
 
 func TestStrictProjectRefreshDoesNotRenewEnrollmentFreshness(t *testing.T) {

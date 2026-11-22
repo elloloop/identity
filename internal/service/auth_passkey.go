@@ -22,13 +22,6 @@ import (
 // recovery hold binds is refused (RecoveryHoldError): a passkey it
 // registered would outlast the hold.
 func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID string, signIn SessionSignIn, deviceName string, enrolment bool) (string, string, error) {
-	if !enrolment {
-		var err error
-		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
-		if err != nil {
-			return "", "", err
-		}
-	}
 	// Refused at BEGIN, not only at completion: this call persists a
 	// challenge row, and the anonymous retention sweep does not reach the
 	// challenge tables (no FK to users), so an anonymous caller could
@@ -38,6 +31,13 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID strin
 	}
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return "", "", err
+	}
+	if !enrolment {
+		var err error
+		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
+		if err != nil {
+			return "", "", err
+		}
 	}
 	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
@@ -128,13 +128,6 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID st
 	if challengeID == "" || credentialJSON == "" {
 		return nil, nil, fmt.Errorf("%w: challenge_id and credential_json are required", ErrInvalidArgument)
 	}
-	if !issueSession {
-		var err error
-		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
 	// A passkey is a permanent credential; an anonymous caller must go
 	// through UpgradeAnonymousAccount so the flag is cleared with it.
 	if err := s.refuseCredentialAttach(ctx, userID); err != nil {
@@ -142,6 +135,13 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID st
 	}
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return nil, nil, err
+	}
+	if !issueSession {
+		var err error
+		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// On the managed-child enrolment path the ticket stood in for a session,

@@ -36,14 +36,18 @@ behavior. The Go service guardian methods take an additional optional passkey
 proof argument, and Repository implementations must implement atomic
 `ConsumeReauthenticationChallenge`.
 
-For projects with `guardian.require_step_up: true`, normal passkey registration
-now requires a trusted sign-in from the last five minutes at both Begin and
-Complete. Missing or stale `auth_time`, recovery-email sign-in and unvouched
-native-gRPC claims fail with `reauthentication_required`. Refresh retains the
+Normal passkey registration in every project now requires a trusted sign-in
+from the last five minutes at both Begin and
+Complete. Missing or stale `auth_time` and unvouched native-gRPC claims fail
+with `reauthentication_required`. Recovery-email sessions are also refused,
+retaining their existing recovery-session or hold refusal when applicable. Refresh retains the
 original sign-in time and cannot renew this window. Ask the user to sign in
 again before enrolling the first passkey. A verified managed-child enrolment
 ticket continues to authorize its separate bootstrap flow. Go callers pass the
-new registration `enrolment` flag only after validating that ticket.
+new registration `enrolment` flag only after validating that ticket. A recent
+OAuth, email-code or other trusted non-recovery sign-in can enroll a passkey,
+including on an account that also holds a password. Its user-verified proof
+then satisfies passkey step-up without re-entering that password.
 
 Migrations add constant-default action/resource columns to the existing
 challenge table. PostgreSQL takes a table lock with a ten-second acquisition

@@ -1771,8 +1771,9 @@ message PasskeyCredentialInfo {
   google.protobuf.Timestamp last_used_at = 4;
 }
 
-// Registration (requires an authenticated session, OR a passkey-enrolment
-// ticket minted by CreateManagedChildAccount for a passwordless child account)
+// Registration requires a trusted non-recovery sign-in within five minutes
+// at both steps, OR a verified passkey-enrolment ticket minted by
+// CreateManagedChildAccount for a passwordless child account.
 message BeginPasskeyRegistrationRequest {
   string device_name = 1;
   // enrolment_token redeems a managed-child passkey-enrolment ticket (JWT

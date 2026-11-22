@@ -10507,8 +10507,9 @@ func (x *PasskeyCredentialInfo) GetLastUsedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-// Registration (requires an authenticated session, OR a passkey-enrolment
-// ticket minted by CreateManagedChildAccount for a passwordless child account)
+// Registration requires a trusted non-recovery sign-in within five minutes
+// at both steps, OR a verified passkey-enrolment ticket minted by
+// CreateManagedChildAccount for a passwordless child account.
 type BeginPasskeyRegistrationRequest struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	DeviceName string                 `protobuf:"bytes,1,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`

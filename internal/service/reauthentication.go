@@ -22,10 +22,8 @@ func (s *AuthService) passkeyRegistrationContext(ctx context.Context, signIn Ses
 	if err != nil {
 		return nil, err
 	}
-	if scope := ProjectScopeFromContext(ctx); scope != nil && scope.Guardian.RequireStepUp {
-		if signIn.mayBeRecoverySession() || !s.signedInWithin(signIn.AuthTimeSec, passkeyRegistrationAuthMaxAge) {
-			return nil, ErrRecoveryReauthenticationRequired
-		}
+	if signIn.mayBeRecoverySession() || !s.signedInWithin(signIn.AuthTimeSec, passkeyRegistrationAuthMaxAge) {
+		return nil, ErrRecoveryReauthenticationRequired
 	}
 	return ctx, nil
 }

@@ -298,7 +298,7 @@ func TestBeginPasskeyRegistration_UserNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "no-such-user", SessionSignIn{}, "Key", false)
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "no-such-user", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "Key", false)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -317,7 +317,7 @@ func TestBeginPasskeyRegistration_WithExistingCreds(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, SessionSignIn{}, "Key", false)
+	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "Key", false)
 	require.NoError(t, err)
 	assert.NotEmpty(t, optionsJSON)
 	assert.NotEmpty(t, challengeID)
@@ -329,7 +329,7 @@ func TestCompletePasskeyRegistration_MissingArgs(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, "", "", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "", "", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -338,7 +338,7 @@ func TestCompletePasskeyRegistration_ChallengeNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, "no-such-challenge", "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "no-such-challenge", "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }
@@ -358,7 +358,7 @@ func TestCompletePasskeyRegistration_WrongChallengeType(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, id, "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }
@@ -378,7 +378,7 @@ func TestCompletePasskeyRegistration_WrongUser(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-2", SessionSignIn{}, id, "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-2", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrPermissionDenied))
 }
@@ -398,7 +398,7 @@ func TestCompletePasskeyRegistration_ExpiredChallenge(t *testing.T) {
 	}
 	repo.mu.Unlock()
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, id, "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, id, "{}", "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTokenExpired))
 }
@@ -419,7 +419,7 @@ func TestCompletePasskeyRegistration_VerifyFails(t *testing.T) {
 	repo.mu.Unlock()
 
 	// Bogus credential JSON — verification will fail.
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{}, id, `{"id":"x"}`, "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "user-1", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, id, `{"id":"x"}`, "Device", false, "", "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrInvalidArgument))
 }

@@ -1240,7 +1240,7 @@ func TestAgentCredentialAttach_Refused(t *testing.T) {
 	ctx := context.Background()
 	agent := seedAgent(f.repo, f.owner.ID)
 
-	_, _, err := f.svc.BeginPasskeyRegistration(ctx, agent.ID, SessionSignIn{}, "Key", false)
+	_, _, err := f.svc.BeginPasskeyRegistration(ctx, agent.ID, SessionSignIn{AuthTimeSec: f.svc.nowMs() / 1000}, "Key", false)
 	require.ErrorIs(t, err, ErrAgentCredential, "passkey")
 	_, err = f.svc.LinkIdentity(ctx, agent.ID, SessionSignIn{}, "code", "google", "https://app/cb", "", "", "")
 	require.ErrorIs(t, err, ErrAgentCredential, "provider identity")
