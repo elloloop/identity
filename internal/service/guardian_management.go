@@ -43,9 +43,14 @@ import (
 // account is their own. Mapped to CodeFailedPrecondition.
 var ErrGuardianRightsExpired = errors.New("the managed account has reached the adult age band; guardian management rights no longer apply")
 
-// guardianOperation is one guardian-authorized management operation, named by
-// the audit event it emits on success AND on refusal. The refusal detail says
-// which check failed; the event type already says which operation it was.
+// GuardianDeletionParticipantsAllowed is the repository's final erasure gate.
+// Re-gating a child on consent withdrawal must defeat a concurrent deletion.
+func GuardianDeletionParticipantsAllowed(guardian, child *User) bool {
+	return isActivePerson(guardian) && isPermanentPerson(child) &&
+		(isActiveStatus(child.Status) || strings.ToLower(child.Status) == StatusDeactivated)
+}
+
+// guardianOperation pairs each operation with its audit event and proof binding.
 type guardianOperation struct {
 	event  audit.EventType
 	action string
@@ -458,6 +463,43 @@ func (s *AuthService) ReactivateManagedChildAccount(
 func (s *AuthService) DeleteManagedChildAccount(
 	ctx context.Context, guardianUserID string, signIn SessionSignIn, childUserID, stepUpPassword string, stepUpPasskey *PasskeyReauthentication, ip, userAgent string,
 ) error {
+	if guardianUserID == "" {
+		return ErrUnauthenticated
+	}
+	childUserID = strings.TrimSpace(childUserID)
+	if childUserID == "" {
+		return fmt.Errorf("%w: child_user_id is required", ErrInvalidArgument)
+	}
+	if err := s.refuseHeldSession(ctx, guardianUserID, signIn); err != nil {
+		return err
+	}
+	var err error
+	ctx, err = s.activeProjectPolicyContext(ctx)
+	if err != nil {
+		return err
+	}
+	completed, err := s.repo(ctx).HasGuardianDeletionReceipt(ctx, guardianUserID, childUserID)
+	if err != nil {
+		return fmt.Errorf("check managed child erasure: %w", err)
+	}
+	if completed {
+		remaining, err := s.repo(ctx).GetUser(ctx, childUserID)
+		if err != nil {
+			return fmt.Errorf("check completed erasure: %w", err)
+		}
+		if remaining != nil {
+			return fmt.Errorf("%w: completed erasure does not match current account state", ErrServiceUnavailable)
+		}
+		if stepUpPassword != "" {
+			return ErrParentalConsentStepUpFailed
+		}
+		if err := s.VerifyReauthentication(ctx, guardianUserID, signIn, stepUpPasskey, guardianOpDeleteChild.action, childUserID); err != nil {
+			return err
+		}
+		s.auditGuardianAction(ctx, guardianOpDeleteChild, guardianUserID, childUserID, true, ip, userAgent,
+			map[string]any{"completion_replayed": true})
+		return nil
+	}
 	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpDeleteChild, guardianUserID, signIn, childUserID, stepUpPassword, stepUpPasskey, ip, userAgent)
 	if err != nil {
 		return err
@@ -465,7 +507,7 @@ func (s *AuthService) DeleteManagedChildAccount(
 	if s.purger == nil {
 		return fmt.Errorf("%w: account erasure is not wired on this deployment", ErrServiceUnavailable)
 	}
-	if err := s.purger.PurgeAccount(ctx, guardianUserID, child); err != nil {
+	if err := s.purger.PurgeManagedChildAccount(ctx, guardianUserID, child); err != nil {
 		return fmt.Errorf("delete managed child account: %w", err)
 	}
 	s.auditGuardianAction(ctx, guardianOpDeleteChild, guardianUserID, child.ID, true, ip, userAgent, nil)

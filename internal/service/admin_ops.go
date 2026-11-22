@@ -155,7 +155,7 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 	if u == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
-	return s.purgeUser(ctx, actorID, u)
+	return s.purgeUser(ctx, actorID, u, false)
 }
 
 // deleteGroupMembershipsForUser removes every MEMBER_OF edge from the

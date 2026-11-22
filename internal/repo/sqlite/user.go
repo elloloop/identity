@@ -577,6 +577,26 @@ func (r *sqliteRepository) SetDateOfBirthOnce(
 }
 
 func (r *sqliteRepository) DeleteUser(ctx context.Context, userID string) error {
+	return r.deleteUser(ctx, userID, "", 0)
+}
+
+func (r *sqliteRepository) DeleteUserWithGuardianReceipt(ctx context.Context, userID, guardianID string, atMs int64) error {
+	if userID == "" || guardianID == "" || userID == guardianID || atMs <= 0 {
+		return service.ErrPermissionDenied
+	}
+	return r.deleteUser(ctx, userID, guardianID, atMs)
+}
+
+func (r *sqliteRepository) HasGuardianDeletionReceipt(ctx context.Context, guardianID, childID string) (bool, error) {
+	var found bool
+	err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM guardian_deletion_receipts WHERE project_id=$1 AND guardian_user_id=$2 AND child_user_id=$3)`, r.projectID, guardianID, childID).Scan(&found)
+	if err != nil {
+		return false, wrapErr("HasGuardianDeletionReceipt", err)
+	}
+	return found, nil
+}
+
+func (r *sqliteRepository) deleteUser(ctx context.Context, userID, guardianID string, atMs int64) error {
 	if userID == "" {
 		return nil
 	}
@@ -585,6 +605,27 @@ func (r *sqliteRepository) DeleteUser(ctx context.Context, userID string) error 
 		return wrapErr("DeleteUser", err)
 	}
 	defer func() { _ = t.Rollback(ctx) }()
+
+	if guardianID != "" {
+		var id string
+		err := t.QueryRow(ctx, `SELECT child.id FROM users child
+ JOIN users guardian ON guardian.project_id=child.project_id AND guardian.id=$3
+ JOIN guardian_edges edge ON edge.project_id=child.project_id AND edge.child_user_id=child.id AND edge.guardian_user_id=guardian.id
+ WHERE child.project_id=$1 AND child.id=$2
+ AND lower(guardian.status) IN ('','active') AND lower(child.status) IN ('','active','deactivated')
+ AND NOT guardian.is_anonymous AND guardian.kind<>'agent' AND guardian.merged_into_user_id=''
+ AND NOT child.is_anonymous AND child.kind<>'agent' AND child.merged_into_user_id='' `, r.projectID, userID, guardianID).Scan(&id)
+		if noRows(err) {
+			return service.ErrPermissionDenied
+		}
+		if err != nil {
+			return wrapErr("DeleteUser(guardian authority)", err)
+		}
+		_, err = t.Exec(ctx, `INSERT INTO guardian_deletion_receipts(project_id,guardian_user_id,child_user_id,completed_at_ms) VALUES ($1,$2,$3,$4)`, r.projectID, guardianID, userID, atMs)
+		if err != nil {
+			return wrapErr("DeleteUser(guardian receipt)", err)
+		}
+	}
 
 	for _, tbl := range userDeleteNonFKTables {
 		if _, err := t.Exec(ctx,

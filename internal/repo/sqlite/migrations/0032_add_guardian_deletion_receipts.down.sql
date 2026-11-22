@@ -1,0 +1,1 @@
+DROP TABLE guardian_deletion_receipts;

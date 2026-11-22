@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
@@ -27,9 +28,10 @@ type guardianFixture struct {
 // test can assert the guardian delete path DELEGATES rather than
 // reimplementing it.
 type fakePurger struct {
-	calls []string // "actor->target" per call
-	err   error
-	repo  *fakeRepo
+	calls              []string // "actor->target" per call
+	err                error
+	repo               *fakeRepo
+	beforeManagedPurge func()
 }
 
 func (p *fakePurger) PurgeAccount(ctx context.Context, actorUserID string, u *User) error {
@@ -38,6 +40,17 @@ func (p *fakePurger) PurgeAccount(ctx context.Context, actorUserID string, u *Us
 		return p.err
 	}
 	return p.repo.DeleteUser(ctx, u.ID)
+}
+
+func (p *fakePurger) PurgeManagedChildAccount(ctx context.Context, actorUserID string, u *User) error {
+	p.calls = append(p.calls, actorUserID+"->"+u.ID)
+	if p.err != nil {
+		return p.err
+	}
+	if p.beforeManagedPurge != nil {
+		p.beforeManagedPurge()
+	}
+	return p.repo.DeleteUserWithGuardianReceipt(ctx, u.ID, actorUserID, time.Now().UnixMilli())
 }
 
 func newGuardianFixture(ctx context.Context, t *testing.T) *guardianFixture {

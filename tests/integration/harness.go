@@ -765,6 +765,7 @@ type MemRepo struct {
 	idvRecords         map[string]*service.IdentityVerificationRecord
 	parentalConsents   map[string]*service.ParentalConsentRecord
 	guardianEdges      map[string]*service.GuardianEdge
+	guardianDeletions  map[[2]string]int64
 	sessions           map[string]*service.SessionRecord
 	auditEvents        []*service.AuditEvent
 }
@@ -3216,4 +3217,32 @@ func (r *MemRepo) ListOAuthClients(_ context.Context, afterID string, limit int)
 		clients = append(clients, r.oauthClients[id].Clone())
 	}
 	return clients, nil
+}
+
+func (r *MemRepo) HasGuardianDeletionReceipt(_ context.Context, guardianID, childID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, found := r.guardianDeletions[[2]string{guardianID, childID}]
+	return found, nil
+}
+
+func (r *MemRepo) DeleteUserWithGuardianReceipt(_ context.Context, userID, guardianID string, atMs int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	edgeFound := false
+	for _, edge := range r.guardianEdges {
+		if edge.GuardianUserID == guardianID && edge.ChildUserID == userID {
+			edgeFound = true
+			break
+		}
+	}
+	if userID == "" || guardianID == "" || userID == guardianID || atMs <= 0 || !edgeFound || !service.GuardianDeletionParticipantsAllowed(r.users[guardianID], r.users[userID]) {
+		return service.ErrPermissionDenied
+	}
+	if r.guardianDeletions == nil {
+		r.guardianDeletions = make(map[[2]string]int64)
+	}
+	r.deleteUserRowsLocked(userID)
+	r.guardianDeletions[[2]string{guardianID, userID}] = atMs
+	return nil
 }

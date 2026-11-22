@@ -2878,6 +2878,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runAuditRetentionConformance(t, driver)
 	runAssuranceConformance(t, driver)
 	runReauthenticationConformance(t, driver)
+	runGuardianDeletionConformance(t, driver)
 	runAnonymousConformance(t, driver)
 	runParentalConsentConformance(t, driver)
 	runGuardianEdgeConformance(t, driver)
