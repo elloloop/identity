@@ -25,7 +25,7 @@ func TestRefusedRefreshAudit_OncePerAccountPerWindow(t *testing.T) {
 	for _, addr := range []string{"replayer@example.com", "bystander@example.com"} {
 		user := seedUser(repo, addr, "", StatusActive)
 		user.EmailVerified = true
-		_, refresh, err := svc.issueTokens(ctx, user, "", "")
+		_, refresh, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 		require.NoError(t, err)
 		require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": false, "email_verified_at": int64(0)}))
 		refreshes = append(refreshes, refresh)
@@ -86,7 +86,7 @@ func TestRefusedRefreshAudit_LockoutPacedOnRefreshOnly(t *testing.T) {
 	now := time.Now()
 	svc.nowFunc = func() time.Time { return now }
 	user := seedUser(repo, "locked-replayer@example.com", "", StatusActive)
-	_, refresh, err := svc.issueTokens(ctx, user, "", "")
+	_, refresh, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"locked_until": now.Add(time.Hour).UnixMilli()}))

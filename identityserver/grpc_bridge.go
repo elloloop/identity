@@ -97,8 +97,8 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 		operatorLimits[procedure] = limit
 	}
 	emailPolicyLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceGetProjectEmailDeliveryProcedure)
-	reauthenticationLimits := make(map[string]middleware.PathLimit, 2)
-	for _, procedure := range []string{identityv1connect.IdentityServiceBeginReauthenticationProcedure, identityv1connect.IdentityServiceVerifyReauthenticationProcedure} {
+	reauthenticationLimits := make(map[string]middleware.PathLimit, 4)
+	for _, procedure := range []string{identityv1connect.IdentityServiceBeginReauthenticationProcedure, identityv1connect.IdentityServiceVerifyReauthenticationProcedure, identityv1connect.IdentityServiceBeginPasskeyEligibilityVerificationProcedure, identityv1connect.IdentityServiceCompletePasskeyEligibilityVerificationProcedure} {
 		if limit, ok := middleware.MatchPathLimit(built.RateLimits, procedure); ok {
 			reauthenticationLimits[procedure] = limit
 		}
@@ -1163,4 +1163,20 @@ func (b *grpcBridge) managedChildProjectContext(ctx context.Context) (context.Co
 		return nil, status.Error(codes.Unauthenticated, "invalid project key")
 	}
 	return service.WithProjectScope(ctx, middleware.ScopeFromResolved(project)), nil
+}
+
+func (b *grpcBridge) BeginPasskeyEligibilityVerification(ctx context.Context, in *identitypb.BeginPasskeyEligibilityVerificationRequest) (*identitypb.BeginPasskeyEligibilityVerificationResponse, error) {
+	ctx, err := b.reauthenticationContext(ctx, identityv1connect.IdentityServiceBeginPasskeyEligibilityVerificationProcedure)
+	if err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.BeginPasskeyEligibilityVerification)
+}
+
+func (b *grpcBridge) CompletePasskeyEligibilityVerification(ctx context.Context, in *identitypb.CompletePasskeyEligibilityVerificationRequest) (*identitypb.CompletePasskeyEligibilityVerificationResponse, error) {
+	ctx, err := b.reauthenticationContext(ctx, identityv1connect.IdentityServiceCompletePasskeyEligibilityVerificationProcedure)
+	if err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.CompletePasskeyEligibilityVerification)
 }

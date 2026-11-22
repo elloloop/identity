@@ -130,6 +130,10 @@ func (StubRepository) UpdatePasskeyCredential(context.Context, string, map[strin
 	return ErrServiceUnavailable
 }
 
+func (StubRepository) MarkPasskeyReauthenticationEligible(context.Context, *PasskeyCredRecord) (bool, error) {
+	return false, ErrServiceUnavailable
+}
+
 func (StubRepository) DeletePasskeyCredentialsForUser(context.Context, string) error {
 	return ErrServiceUnavailable
 }

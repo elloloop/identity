@@ -288,17 +288,18 @@ func (s *AuthService) CompletePasskeySignup(
 	}
 
 	if _, err := s.repo(ctx).CreatePasskeyCredential(ctx, &PasskeyCredRecord{
-		CredentialID:   result.CredentialID,
-		UserID:         userID,
-		PublicKey:      result.PublicKey,
-		SignCount:      int64(result.SignCount),
-		DeviceName:     deviceName,
-		AAGUID:         result.AAGUID,
-		Transports:     result.Transports,
-		BackupEligible: result.BackupEligible,
-		BackupState:    result.BackupState,
-		CreatedAt:      now,
-		LastUsedAt:     now,
+		CredentialID:             result.CredentialID,
+		UserID:                   userID,
+		PublicKey:                result.PublicKey,
+		ReauthenticationEligible: true,
+		SignCount:                int64(result.SignCount),
+		DeviceName:               deviceName,
+		AAGUID:                   result.AAGUID,
+		Transports:               result.Transports,
+		BackupEligible:           result.BackupEligible,
+		BackupState:              result.BackupState,
+		CreatedAt:                now,
+		LastUsedAt:               now,
 	}); err != nil {
 		return nil, fmt.Errorf("storing credential: %w", err)
 	}
@@ -335,7 +336,7 @@ func (s *AuthService) CompletePasskeySignup(
 	// this flow has no such state.) A non-inbox-controller can never reach this
 	// point — an invalid OTP fails above with a generic error — so issuing a
 	// session reveals nothing to an attacker who lacks the emailed code.
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent, credentialEnrollment{Trusted: true})
 	if err != nil {
 		return nil, err
 	}

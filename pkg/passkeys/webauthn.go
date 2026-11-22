@@ -304,29 +304,37 @@ func (s *WebAuthnService) CompleteAuthentication(
 	backupEligible bool,
 	backupState bool,
 ) (newSignCount uint32, err error) {
+	counter, _, err := s.completeAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64, storedSignCount, storedCredentialID, userID, backupEligible, backupState, false)
+	return counter, err
+}
+
+// CompleteAuthenticationWithUserVerification also returns the verified UV
+// flag, so callers distinguish ordinary sign-in from credential enrollment.
+func (s *WebAuthnService) CompleteAuthenticationWithUserVerification(credentialJSON, expectedChallenge, storedPublicKeyB64 string, storedSignCount uint32, storedCredentialID, userID string, backupEligible, backupState bool) (uint32, bool, error) {
 	return s.completeAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64, storedSignCount, storedCredentialID, userID, backupEligible, backupState, false)
 }
 
 func (s *WebAuthnService) CompleteUserVerifiedAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64 string, storedSignCount uint32, storedCredentialID, userID string, backupEligible, backupState bool) (uint32, error) {
-	return s.completeAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64, storedSignCount, storedCredentialID, userID, backupEligible, backupState, true)
+	counter, _, err := s.completeAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64, storedSignCount, storedCredentialID, userID, backupEligible, backupState, true)
+	return counter, err
 }
 
-func (s *WebAuthnService) completeAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64 string, storedSignCount uint32, storedCredentialID, userID string, backupEligible, backupState, requireVerification bool) (uint32, error) {
+func (s *WebAuthnService) completeAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64 string, storedSignCount uint32, storedCredentialID, userID string, backupEligible, backupState, requireVerification bool) (uint32, bool, error) {
 	credIDBytes, decErr := b64urlDecode(storedCredentialID)
 	if decErr != nil {
-		return 0, fmt.Errorf("passkeys: decoding stored credential ID: %w", decErr)
+		return 0, false, fmt.Errorf("passkeys: decoding stored credential ID: %w", decErr)
 	}
 
 	pubKeyBytes, decErr := base64.StdEncoding.DecodeString(storedPublicKeyB64)
 	if decErr != nil {
-		return 0, fmt.Errorf("passkeys: decoding stored public key: %w", decErr)
+		return 0, false, fmt.Errorf("passkeys: decoding stored public key: %w", decErr)
 	}
 
 	parsedResponse, parseErr := protocol.ParseCredentialRequestResponseBody(
 		strings.NewReader(credentialJSON),
 	)
 	if parseErr != nil {
-		return 0, fmt.Errorf("passkeys: parsing credential request response: %w", parseErr)
+		return 0, false, fmt.Errorf("passkeys: parsing credential request response: %w", parseErr)
 	}
 
 	// Build a user with the stored credential so the library can verify. The ID
@@ -366,13 +374,13 @@ func (s *WebAuthnService) completeAuthentication(credentialJSON, expectedChallen
 
 	credential, loginErr := s.wa.ValidateLogin(user, session, parsedResponse)
 	if loginErr != nil {
-		return 0, fmt.Errorf("passkeys: verifying authentication: %w", loginErr)
+		return 0, false, fmt.Errorf("passkeys: verifying authentication: %w", loginErr)
 	}
 	if credential.Authenticator.CloneWarning {
-		return 0, errors.New("passkeys: authenticator counter regression detected")
+		return 0, false, errors.New("passkeys: authenticator counter regression detected")
 	}
 
-	return credential.Authenticator.SignCount, nil
+	return credential.Authenticator.SignCount, credential.Flags.UserVerified, nil
 }
 
 // ExtractCredentialID extracts the credential ID from a raw credential JSON

@@ -428,7 +428,7 @@ func TestProfileRevokeAllSessions_ExecuteFails(t *testing.T) {
 	require.Equal(t, 0, count)
 }
 
-func TestProfileListPasskeys_QueryFails(t *testing.T) {
+func TestProfileListPasskeys_RequiresRepository(t *testing.T) {
 	db := newErrorDB()
 	db.failQueryNodes = true
 	svc := newProfileWithDB(db)

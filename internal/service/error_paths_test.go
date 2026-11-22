@@ -224,7 +224,7 @@ func TestBeginPasskeyRegistration_GetUserErrors(t *testing.T) {
 	r.failGetUser = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "u", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "Key", false)
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), "u", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, "Key", false)
 	require.Error(t, err)
 }
 
@@ -235,7 +235,7 @@ func TestBeginPasskeyRegistration_ListErrors(t *testing.T) {
 	r.failListPasskeyCredentials = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "Key", false)
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, "Key", false)
 	require.Error(t, err)
 }
 
@@ -246,7 +246,7 @@ func TestBeginPasskeyRegistration_CreateChallengeErrors(t *testing.T) {
 	r.failCreatePasskeyChallenge = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "Key", false)
+	_, _, err := svc.BeginPasskeyRegistration(context.Background(), user.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, "Key", false)
 	require.Error(t, err)
 }
 
@@ -255,7 +255,7 @@ func TestCompletePasskeyRegistration_ChallengeRepoErrors(t *testing.T) {
 	r.failGetPasskeyChallenge = true
 	svc := newTestAuthServiceErr(t, r)
 
-	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "u", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "challenge", "{}", "Device", false, "", "")
+	_, _, err := svc.CompletePasskeyRegistration(context.Background(), "u", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, "challenge", "{}", "Device", false, "", "")
 	require.Error(t, err)
 }
 

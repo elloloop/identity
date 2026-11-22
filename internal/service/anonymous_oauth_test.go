@@ -158,17 +158,17 @@ func TestAnonymousAccount_CannotAttachCredentialsOutsideUpgrade(t *testing.T) {
 	}{
 		{"LinkIdentity", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
 			_, err := svc.LinkIdentity(ctx, id,
-				SessionSignIn{},
+				SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}},
 				fakeOAuthCode(testOAuthEmail, "Fed", "", testOAuthProvider),
 				testOAuthProvider, testOAuthRedirect, "", "", "")
 			return err
 		}},
 		{"BeginPasskeyRegistration", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
-			_, _, err := svc.BeginPasskeyRegistration(ctx, id, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "device", false)
+			_, _, err := svc.BeginPasskeyRegistration(ctx, id, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, "device", false)
 			return err
 		}},
 		{"CompletePasskeyRegistration", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
-			_, _, err := svc.CompletePasskeyRegistration(ctx, id, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "challenge", `{"id":"x"}`, "device", false, "", "")
+			_, _, err := svc.CompletePasskeyRegistration(ctx, id, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, "challenge", `{"id":"x"}`, "device", false, "", "")
 			return err
 		}},
 		{"RequestPhoneVerification", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {

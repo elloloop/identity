@@ -189,17 +189,32 @@ func TestProfileService_RevokeAllSessions_WrongPassword(t *testing.T) {
 }
 
 func TestProfileService_ListMyPasskeys_HappyPath(t *testing.T) {
-	db := newFakeDB()
-	db.addPasskey("pk-1", "user-1", "cred-abc", "YubiKey 5")
-	db.addPasskey("pk-2", "user-1", "cred-xyz", "iPhone 15")
-	svc := newTestProfileService(db)
-
+	repo := newFakeRepo()
+	for _, credential := range []*PasskeyCredRecord{
+		{UserID: "user-1", CredentialID: "cred-abc", DeviceName: "YubiKey 5", ReauthenticationEligible: true},
+		{UserID: "user-1", CredentialID: "cred-xyz", DeviceName: "iPhone 15"},
+		{UserID: "other", CredentialID: "unrelated"},
+	} {
+		if _, err := repo.CreatePasskeyCredential(context.Background(), credential); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := newTestProfileServiceWithRepo(repo, newFakeDB())
 	passkeys, err := svc.ListMyPasskeys(context.Background(), "user-1")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
 	if len(passkeys) != 2 {
-		t.Errorf("expected 2 passkeys, got %d", len(passkeys))
+		t.Fatalf("count=%d, want 2", len(passkeys))
+	}
+	eligible := 0
+	for _, key := range passkeys {
+		if key.ReauthenticationEligible {
+			eligible++
+		}
+	}
+	if eligible != 1 {
+		t.Fatalf("eligible=%d, want 1", eligible)
 	}
 }
 

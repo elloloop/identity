@@ -12,14 +12,14 @@ import (
 const refreshTokenColumns = `
 	id, token_hash, user_id, device_info, device_name,
 	ip_address, user_agent,
-	expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms, sid, auth_time_ms, recovery_email_id`
+	expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms, sid, auth_time_ms, recovery_email_id, credential_enrollment_eligible, credential_enrollment_passkey_id`
 
 func scanRefreshToken(s scanner) (*service.RefreshTokenRecord, error) {
 	var t service.RefreshTokenRecord
 	if err := s.Scan(
 		&t.NodeID, &t.TokenHash, &t.UserID, &t.DeviceInfo, &t.DeviceName,
 		&t.IPAddress, &t.UserAgent,
-		&t.ExpiresAt, &t.CreatedAt, &t.LastUsedAt, &t.SessionStartedAt, &t.ConsumedAtMs, &t.SID, &t.AuthTimeMs, &t.RecoveryEmailID,
+		&t.ExpiresAt, &t.CreatedAt, &t.LastUsedAt, &t.SessionStartedAt, &t.ConsumedAtMs, &t.SID, &t.AuthTimeMs, &t.RecoveryEmailID, &t.CredentialEnrollmentEligible, &t.CredentialEnrollmentPasskeyID,
 	); err != nil {
 		return nil, err
 	}
@@ -75,14 +75,14 @@ func (r *sqliteRepository) CreateRefreshToken(ctx context.Context, t *service.Re
 			id, project_id, token_hash, user_id,
 			device_info, device_name, ip_address, user_agent,
 			expires_at_ms, created_at_ms, last_used_at_ms, session_started_at_ms, consumed_at_ms, sid,
-			auth_time_ms, recovery_email_id
+			auth_time_ms, recovery_email_id, credential_enrollment_eligible, credential_enrollment_passkey_id
 		)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16`
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18`
 	args := []any{
 		id, r.projectID, t.TokenHash, t.UserID,
 		t.DeviceInfo, t.DeviceName, t.IPAddress, t.UserAgent,
 		t.ExpiresAt, t.CreatedAt, t.LastUsedAt, t.SessionStartedAt, t.ConsumedAtMs, t.SID,
-		t.AuthTimeMs, t.RecoveryEmailID,
+		t.AuthTimeMs, t.RecoveryEmailID, t.CredentialEnrollmentEligible, t.CredentialEnrollmentPasskeyID,
 	}
 	if t.RecoveryEmailID != "" {
 		// A recovery session's token is stored only while its account holds

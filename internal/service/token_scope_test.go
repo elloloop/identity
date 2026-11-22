@@ -34,7 +34,7 @@ func TestIssueTokens_ProjectAudienceAndIssuer(t *testing.T) {
 			svc.cfg.JWTIssuer = "https://auth.example.org"
 			user := seedUser(repo, "alice@acme.com", "", "active")
 
-			access, _, err := svc.issueTokens(withProject("proj-a"), user, "", "")
+			access, _, err := svc.issueTokens(withProject("proj-a"), user, "", "", credentialEnrollment{Trusted: true})
 			require.NoError(t, err)
 			claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 			require.NoError(t, err)
@@ -52,7 +52,7 @@ func TestIssueTokens_ProjectAudienceRefusedByAnotherProject(t *testing.T) {
 	svc.cfg.JWTProjectAudience = true
 	user := seedUser(repo, "alice@acme.com", "", "active")
 
-	access, _, err := svc.issueTokens(withProject("proj-a"), user, "", "")
+	access, _, err := svc.issueTokens(withProject("proj-a"), user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 	_, err = jwt.VerifyAccessToken(access, svc.signer, "", "proj-b", true)
 	require.Error(t, err)

@@ -349,7 +349,7 @@ func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, u
 		s.revokeUserSessionsIfModeSession(ctx, userID, "anonymous_upgrade_pending_verification")
 		return &LoginResult{User: u}, nil
 	}
-	access, refresh, err := s.issueSignInTokens(ctx, u, ipAddr, userAgent, s.nowMs(), authTimeMs, "")
+	access, refresh, err := s.issueSignInTokens(ctx, u, ipAddr, userAgent, s.nowMs(), authTimeMs, "", credentialEnrollment{Trusted: authTimeMs > 0})
 	if err != nil {
 		return nil, err
 	}

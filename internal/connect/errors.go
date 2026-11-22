@@ -26,7 +26,7 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrAgentOAuthRevision), errors.Is(err, service.ErrOAuthClientRevision):
 		return connect.NewError(connect.CodeAborted, err)
 
-	case errors.Is(err, service.ErrAgentOAuthReauthenticationRequired):
+	case errors.Is(err, service.ErrAgentOAuthReauthenticationRequired), errors.Is(err, service.ErrReauthenticationKeyEnrollmentRequired):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 	case errors.Is(err, service.ErrAgentOAuthGrant):
 		return connect.NewError(connect.CodePermissionDenied, err)

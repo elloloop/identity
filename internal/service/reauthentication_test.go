@@ -36,7 +36,7 @@ func newReauthenticationFixture(t *testing.T) reauthenticationFixture {
 	public, err := cbor.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: key.X.FillBytes(make([]byte, 32)), -3: key.Y.FillBytes(make([]byte, 32))})
 	require.NoError(t, err)
 	credentialID := base64.RawURLEncoding.EncodeToString([]byte("fixture-credential"))
-	_, err = repo.CreatePasskeyCredential(context.Background(), &PasskeyCredRecord{UserID: user.ID, CredentialID: credentialID, PublicKey: base64.StdEncoding.EncodeToString(public)})
+	_, err = repo.CreatePasskeyCredential(context.Background(), &PasskeyCredRecord{UserID: user.ID, CredentialID: credentialID, PublicKey: base64.StdEncoding.EncodeToString(public), ReauthenticationEligible: true})
 	require.NoError(t, err)
 	return reauthenticationFixture{service: svc, repo: repo, user: user, key: key, credentialID: credentialID}
 }
@@ -48,7 +48,12 @@ func (f reauthenticationFixture) proof(t *testing.T, action, resource string, ve
 	require.Contains(t, options, `"userVerification":"required"`)
 	record, err := f.repo.GetPasskeyChallenge(context.Background(), id)
 	require.NoError(t, err)
-	client, err := json.Marshal(map[string]any{"type": "webauthn.get", "challenge": record.Challenge, "origin": f.service.cfg.PasskeyOrigin})
+	return &PasskeyReauthentication{ChallengeID: id, CredentialJSON: f.assertion(t, record.Challenge, verified)}
+}
+
+func (f reauthenticationFixture) assertion(t *testing.T, challenge string, verified bool) string {
+	t.Helper()
+	client, err := json.Marshal(map[string]any{"type": "webauthn.get", "challenge": challenge, "origin": f.service.cfg.PasskeyOrigin})
 	require.NoError(t, err)
 	rpHash := sha256.Sum256([]byte(f.service.cfg.PasskeyRPID))
 	flags := byte(0x01)
@@ -65,7 +70,7 @@ func (f reauthenticationFixture) proof(t *testing.T, action, resource string, ve
 		"authenticatorData": b64(authData), "clientDataJSON": b64(client), "signature": b64(signature), "userHandle": b64([]byte(f.user.ID)),
 	}})
 	require.NoError(t, err)
-	return &PasskeyReauthentication{ChallengeID: id, CredentialJSON: string(assertion)}
+	return string(assertion)
 }
 
 func TestReauthenticationRequiresExactBindingAndVerification(t *testing.T) {
@@ -169,7 +174,7 @@ func TestPasskeyRegistrationRequiresFreshTrustedSignIn(t *testing.T) {
 				require.ErrorIs(t, err, want)
 			}
 			require.Empty(t, f.repo.passkeyChallenges)
-			_, _, err := f.service.BeginPasskeyRegistration(ctx, f.user.ID, SessionSignIn{AuthTimeSec: f.service.nowMs() / 1000}, "device", false)
+			_, _, err := f.service.BeginPasskeyRegistration(ctx, f.user.ID, SessionSignIn{AuthTimeSec: f.service.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, "device", false)
 			require.NoError(t, err)
 		})
 	}
@@ -190,7 +195,7 @@ func TestStrictProjectRefreshDoesNotRenewEnrollmentFreshness(t *testing.T) {
 	f.service.WithActiveProjects(&fakeActiveProjects{active: map[string]*AdminProject{
 		f.service.cfg.DefaultProjectID: {ID: f.service.cfg.DefaultProjectID, Guardian: ProjectGuardianConfig{RequireStepUp: true}},
 	}})
-	_, _, err = f.service.BeginPasskeyRegistration(context.Background(), f.user.ID, SessionSignIn{AuthTimeSec: stamp}, "device", false)
+	_, _, err = f.service.BeginPasskeyRegistration(context.Background(), f.user.ID, SessionSignIn{AuthTimeSec: stamp, AMR: []string{AMRCredentialEnrollment}}, "device", false)
 	require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
 }
 

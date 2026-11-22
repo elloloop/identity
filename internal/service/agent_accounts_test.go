@@ -850,7 +850,7 @@ func TestDeleteAgent_DelegatesToThePurger(t *testing.T) {
 // chokepoint, the way the delegation flow will: no sign-in.
 func issueAgentTokens(t *testing.T, f *agentFixture, agent *User) (string, string) {
 	t.Helper()
-	access, refresh, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0, 0, "", "")
+	access, refresh, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0, 0, "", "", credentialEnrollment{})
 	require.NoError(t, err)
 	return access, refresh
 }
@@ -918,7 +918,7 @@ func TestAgentStanding_FollowsTheOwner(t *testing.T) {
 
 			stored, _ := f.repo.GetUser(context.Background(), agent.ID)
 			if stored != nil {
-				_, _, err = f.svc.issueTokensWithSessionStart(context.Background(), stored, "", "", sessionGateRefresh, 0, 0, 0, "", "")
+				_, _, err = f.svc.issueTokensWithSessionStart(context.Background(), stored, "", "", sessionGateRefresh, 0, 0, 0, "", "", credentialEnrollment{})
 				require.ErrorIs(t, err, ErrAccountNotActive)
 			}
 		})
@@ -931,7 +931,7 @@ func TestAgentStanding_RestoredWithTheOwner(t *testing.T) {
 	f := newAgentFixture(t)
 	agent := seedAgent(f.repo, f.owner.ID)
 	f.setStatus(f.owner.ID, StatusDeactivated)
-	_, _, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0, 0, "", "")
+	_, _, err := f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0, 0, "", "", credentialEnrollment{})
 	require.ErrorIs(t, err, ErrAccountNotActive)
 
 	f.setStatus(f.owner.ID, StatusActive)
@@ -976,7 +976,7 @@ func TestAgentAdmission_FollowsTheOwner(t *testing.T) {
 				return
 			}
 			require.ErrorIs(t, err, ErrAccessNotAllowed)
-			_, _, err = f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0, 0, "", "")
+			_, _, err = f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0, 0, "", "", credentialEnrollment{})
 			require.ErrorIs(t, err, ErrAccessNotAllowed, "the token chokepoint refuses too")
 		})
 	}
@@ -1066,7 +1066,7 @@ func requireAgentSignInRefusal(t *testing.T, repo *fakeRepo, err error, agentID 
 func TestAgentSignIn_Chokepoint(t *testing.T) {
 	f := newAgentFixture(t)
 	agent := seedAgent(f.repo, f.owner.ID)
-	_, _, err := f.svc.issueTokens(context.Background(), agent, "203.0.113.9", "ua")
+	_, _, err := f.svc.issueTokens(context.Background(), agent, "203.0.113.9", "ua", credentialEnrollment{Trusted: true})
 	requireAgentSignInRefusal(t, f.repo, err, agent.ID)
 	assert.Equal(t, 1, f.writer.countByEventTypeActorTarget(string(audit.EventAgentSignInRefused), agent.ID, agent.ID))
 }
@@ -1240,9 +1240,9 @@ func TestAgentCredentialAttach_Refused(t *testing.T) {
 	ctx := context.Background()
 	agent := seedAgent(f.repo, f.owner.ID)
 
-	_, _, err := f.svc.BeginPasskeyRegistration(ctx, agent.ID, SessionSignIn{AuthTimeSec: f.svc.nowMs() / 1000}, "Key", false)
+	_, _, err := f.svc.BeginPasskeyRegistration(ctx, agent.ID, SessionSignIn{AuthTimeSec: f.svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, "Key", false)
 	require.ErrorIs(t, err, ErrAgentCredential, "passkey")
-	_, err = f.svc.LinkIdentity(ctx, agent.ID, SessionSignIn{}, "code", "google", "https://app/cb", "", "", "")
+	_, err = f.svc.LinkIdentity(ctx, agent.ID, SessionSignIn{AuthTimeSec: f.svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, "code", "google", "https://app/cb", "", "", "")
 	require.ErrorIs(t, err, ErrAgentCredential, "provider identity")
 	require.ErrorIs(t, f.svc.RequestPhoneVerification(ctx, agent.ID, SessionSignIn{}, "+15555550100"), ErrAgentCredential, "phone")
 	_, err = f.svc.VerifyPhoneCode(ctx, agent.ID, SessionSignIn{}, "+15555550100", "123456")

@@ -1,6 +1,46 @@
 package service
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
+
+const AMRCredentialEnrollment = "credential_enrollment" // #nosec G101 -- public authentication-method marker, not a credential.
+
+const enrollmentPasskeyPrefix = "credential_enrollment_passkey:" // #nosec G101 -- public provenance marker, not a key.
+
+type credentialEnrollment struct {
+	Trusted   bool
+	PasskeyID string
+}
+
+func (p credentialEnrollment) amr() []string {
+	if !p.Trusted {
+		return nil
+	}
+	out := []string{AMRCredentialEnrollment}
+	if p.PasskeyID != "" {
+		out = append(out, enrollmentPasskeyPrefix+p.PasskeyID)
+	}
+	return out
+}
+
+func (s SessionSignIn) credentialEnrollment() credentialEnrollment {
+	if s.mayBeRecoverySession() || !slices.Contains(s.AMR, AMRCredentialEnrollment) {
+		return credentialEnrollment{}
+	}
+	p := credentialEnrollment{Trusted: true}
+	for _, method := range s.AMR {
+		if strings.HasPrefix(method, enrollmentPasskeyPrefix) {
+			id := strings.TrimPrefix(method, enrollmentPasskeyPrefix)
+			if id == "" || p.PasskeyID != "" {
+				return credentialEnrollment{}
+			}
+			p.PasskeyID = id
+		}
+	}
+	return p
+}
 
 // AMRRecoveryEmail is the amr value (RFC 8176 lets a server define its own)
 // of a session a recovery email opened. Its access tokens carry it in the

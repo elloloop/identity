@@ -47,6 +47,7 @@ func TestMergeAccounts_Handler_RequiresARecentSignIn(t *testing.T) {
 		})), survivorID)
 		if authTime != 0 {
 			req.Header().Set(middleware.AuthenticatedAuthTimeHeader, strconv.FormatInt(authTime, 10))
+			req.Header().Set(middleware.AuthenticatedAMRHeader, service.AMRCredentialEnrollment)
 		}
 		_, err := h.client.MergeAccounts(ctx, req)
 		return err

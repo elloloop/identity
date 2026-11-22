@@ -237,10 +237,11 @@ type UserListFilter struct {
 
 // PasskeyInfo holds display-safe passkey credential metadata.
 type PasskeyInfo struct {
-	CredentialID string
-	DeviceName   string
-	CreatedAt    time.Time
-	LastUsedAt   time.Time
+	CredentialID             string
+	DeviceName               string
+	CreatedAt                time.Time
+	LastUsedAt               time.Time
+	ReauthenticationEligible bool
 }
 
 // LoginResult is returned by password/OAuth login when successful.
@@ -441,6 +442,9 @@ type Repository interface {
 	GetPasskeyCredentialByCredID(ctx context.Context, credentialID string) (*PasskeyCredRecord, error)
 	CreatePasskeyCredential(ctx context.Context, r *PasskeyCredRecord) (string, error)
 	UpdatePasskeyCredential(ctx context.Context, nodeID string, fields map[string]any) error
+	// MarkPasskeyReauthenticationEligible promotes only the exact credential
+	// version the server just verified. A deleted/replaced key cannot win.
+	MarkPasskeyReauthenticationEligible(ctx context.Context, verified *PasskeyCredRecord) (bool, error)
 	// DeletePasskeyCredentialsForUser removes every passkey credential
 	// owned by userID, synchronously, on every driver. It backs the
 	// anti-pre-hijacking clearing in markEmailVerifiedViaExternalProof: a
@@ -1001,19 +1005,22 @@ type RefreshTokenRecord struct {
 	// Every rotation copies it unchanged, and while it is set the session's
 	// access tokens carry the amr claim AMRRecoveryEmail and the id itself.
 	// Removing the address ends the session (Repository.RemoveRecoveryEmail).
-	RecoveryEmailID string
+	RecoveryEmailID               string
+	CredentialEnrollmentEligible  bool
+	CredentialEnrollmentPasskeyID string
 }
 
 // PasskeyCredRecord represents a stored passkey credential.
 type PasskeyCredRecord struct {
-	NodeID       string
-	CredentialID string
-	UserID       string
-	PublicKey    string
-	SignCount    int64
-	DeviceName   string
-	AAGUID       string
-	Transports   string
+	NodeID                   string
+	CredentialID             string
+	UserID                   string
+	PublicKey                string
+	ReauthenticationEligible bool
+	SignCount                int64
+	DeviceName               string
+	AAGUID                   string
+	Transports               string
 	// BackupEligible / BackupState are the WebAuthn backup flags captured at
 	// registration. They must be persisted and replayed at login: go-webauthn
 	// rejects an assertion whose backup flags are inconsistent with the stored
@@ -2151,9 +2158,9 @@ func generateChallengeID() string {
 // This is the initial-login entry point: it anchors the new session's
 // absolute lifetime at now. The refresh path calls issueTokensWithSessionStart
 // directly so the anchor propagates unchanged across rotations.
-func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string) (string, string, error) {
+func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userAgent string, provenance credentialEnrollment) (string, string, error) {
 	now := s.nowMs()
-	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, "")
+	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, "", provenance)
 }
 
 // issueSignInTokens issues the tokens of an interactive sign-in into an
@@ -2167,7 +2174,7 @@ func (s *AuthService) issueTokens(ctx context.Context, user *User, ipAddr, userA
 // session is issued: a sign-in refused on the way is not a login.
 // recoveryEmailID is the RecoveryEmail.ID of the recovery email the sign-in
 // was made with, empty for most.
-func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64, recoveryEmailID string) (string, string, error) {
+func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr, userAgent string, sessionStartedAtMs, authTimeMs int64, recoveryEmailID string, provenance credentialEnrollment) (string, string, error) {
 	// An agent account has no sign-in method. Refused here, before anything
 	// is written, so no credential a corrupt row might hold opens one.
 	if err := s.refuseAgentSignIn(ctx, user, ipAddr, userAgent); err != nil {
@@ -2180,7 +2187,7 @@ func (s *AuthService) issueSignInTokens(ctx context.Context, user *User, ipAddr,
 		return "", "", err
 	}
 	s.cancelPendingDeletionOnLogin(ctx, user)
-	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, authTimeMs, recoveryEmailID, "")
+	accessToken, refreshToken, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateSignIn, sessionStartedAtMs, authTimeMs, authTimeMs, recoveryEmailID, "", provenance)
 	if err != nil {
 		return "", "", err
 	}
@@ -2298,7 +2305,7 @@ func (s *AuthService) enforceVerifiedEmail(ctx context.Context, user *User, ipAd
 // tenantID becomes the access token's tenant claim. It is a tenant the caller
 // has already checked the user may act in; empty keeps the deployment's
 // default tenant.
-func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, recoveryEmailID, tenantID string) (string, string, error) {
+func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *User, ipAddr, userAgent string, gate sessionGate, sessionStartedAtMs, signInAtMs, claimAuthTimeMs int64, recoveryEmailID, tenantID string, provenance credentialEnrollment) (string, string, error) {
 	var err error
 	ctx, err = s.activeProjectPolicyContext(ctx)
 	if err != nil {
@@ -2338,11 +2345,18 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		return "", "", err
 	}
 
+	if recoveryEmailID != "" || claimAuthTimeMs <= 0 {
+		provenance = credentialEnrollment{}
+	}
+	provenance, err = s.checkedCredentialEnrollment(ctx, user.ID, provenance)
+	if err != nil {
+		return "", "", err
+	}
 	// The required-DOB completion gate, checked before any session state is
 	// written. Like the product gate it lives here, at the chokepoint, so
 	// every session-issuing path — initial login, refresh, and any path
 	// added later — is covered by construction.
-	if err := s.enforceDOBRequired(ctx, user, claimAuthTimeMs, recoveryEmailID, ipAddr, userAgent, gate); err != nil {
+	if err := s.enforceDOBRequired(ctx, user, claimAuthTimeMs, recoveryEmailID, ipAddr, userAgent, gate, provenance); err != nil {
 		return "", "", err
 	}
 
@@ -2358,7 +2372,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	ensureAccountAddress(ctx, s.repo(ctx), s.logger, user)
 
 	claims := s.accessTokenClaims(ctx, user, claimAuthTimeMs)
-	claims.AMR = recoverySessionAMR(recoveryEmailID)
+	claims.AMR = append(recoverySessionAMR(recoveryEmailID), provenance.amr()...)
 	claims.RecoveryEmailID = recoveryEmailID
 	if tenantID != "" {
 		claims.Tenant = tenantID
@@ -2386,19 +2400,21 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	devName := friendlyDeviceName(userAgent)
 
 	_, err = s.repo(ctx).CreateRefreshToken(ctx, &RefreshTokenRecord{
-		TokenHash:        refreshHash,
-		UserID:           user.ID,
-		DeviceInfo:       devName,
-		DeviceName:       devName,
-		IPAddress:        ipAddr,
-		UserAgent:        truncate(userAgent, 512),
-		ExpiresAt:        now + int64(s.cfg.RefreshExpirySeconds)*1000,
-		CreatedAt:        now,
-		LastUsedAt:       now,
-		SessionStartedAt: sessionStart,
-		SID:              sid,
-		AuthTimeMs:       claimAuthTimeMs,
-		RecoveryEmailID:  recoveryEmailID,
+		TokenHash:                     refreshHash,
+		UserID:                        user.ID,
+		DeviceInfo:                    devName,
+		DeviceName:                    devName,
+		IPAddress:                     ipAddr,
+		UserAgent:                     truncate(userAgent, 512),
+		ExpiresAt:                     now + int64(s.cfg.RefreshExpirySeconds)*1000,
+		CreatedAt:                     now,
+		LastUsedAt:                    now,
+		SessionStartedAt:              sessionStart,
+		SID:                           sid,
+		AuthTimeMs:                    claimAuthTimeMs,
+		RecoveryEmailID:               recoveryEmailID,
+		CredentialEnrollmentEligible:  provenance.Trusted,
+		CredentialEnrollmentPasskeyID: provenance.PasskeyID,
 	})
 	if recoveryEmailID != "" && errors.Is(err, ErrNotFound) {
 		s.revokeSessionIfModeSession(ctx, sid, user.ID, "recovery_email_removed")
@@ -2801,7 +2817,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// issueTokensWithSessionStart (so nothing is bypassed); this early pass
 	// exists only so the refusal is non-destructive and the client can
 	// complete the step and rotate normally.
-	if err := s.enforceDOBRequired(ctx, timeoutUser, record.AuthTimeMs, record.RecoveryEmailID, ipAddr, userAgent, sessionGateRefresh); err != nil {
+	if err := s.enforceDOBRequired(ctx, timeoutUser, record.AuthTimeMs, record.RecoveryEmailID, ipAddr, userAgent, sessionGateRefresh, credentialEnrollment{Trusted: record.CredentialEnrollmentEligible, PasskeyID: record.CredentialEnrollmentPasskeyID}); err != nil {
 		return nil, "", "", err
 	}
 
@@ -2924,7 +2940,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// issueTokensWithSessionStart. The sign-in's auth_time is carried over
 	// unchanged too, and so is the recovery email that opened it; the gates
 	// get 0 because a rotation is not a sign-in.
-	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, record.RecoveryEmailID, tenantID)
+	accessToken, newRefresh, err := s.issueTokensWithSessionStart(ctx, user, ipAddr, userAgent, sessionGateRefresh, record.SessionStartedAt, 0, record.AuthTimeMs, record.RecoveryEmailID, tenantID, credentialEnrollment{Trusted: record.CredentialEnrollmentEligible, PasskeyID: record.CredentialEnrollmentPasskeyID})
 	if err != nil {
 		return nil, "", "", err
 	}

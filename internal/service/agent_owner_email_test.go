@@ -18,7 +18,7 @@ func TestAgentStanding_InheritsOwnerEmailVerification(t *testing.T) {
 	agent := seedAgent(f.repo, f.owner.ID)
 	ctx := context.Background()
 
-	access, refresh, err := f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0, 0, "", "")
+	access, refresh, err := f.svc.issueTokensWithSessionStart(ctx, agent, "", "", sessionGateRefresh, 0, 0, 0, "", "", credentialEnrollment{})
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Empty(t, access)
 	assert.Empty(t, refresh)
@@ -57,7 +57,7 @@ func TestAgentSignIn_PrecedesEmailVerification(t *testing.T) {
 	agent := seedUser(f.repo, "unproven-agent@example.com", "", StatusActive)
 	forceAgent(f.repo, agent, f.owner.ID)
 
-	_, _, err := f.svc.issueTokens(context.Background(), agent, "", "")
+	_, _, err := f.svc.issueTokens(context.Background(), agent, "", "", credentialEnrollment{Trusted: true})
 	requireAgentSignInRefusal(t, f.repo, err, agent.ID)
 	assert.Zero(t, f.writer.countByEventType("login_failure"))
 }

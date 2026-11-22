@@ -46,6 +46,11 @@ func (s *AuthService) LinkIdentity(
 	if err := s.refuseCredentialAttach(ctx, userID); err != nil {
 		return nil, err
 	}
+	var enrollmentErr error
+	ctx, enrollmentErr = s.credentialEnrollmentContext(ctx, userID, signIn)
+	if enrollmentErr != nil {
+		return nil, enrollmentErr
+	}
 	// Read before the insert: see withdrawLinkIfAddressProven.
 	holder, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {

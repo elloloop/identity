@@ -333,6 +333,8 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	limits := []middleware.PathLimit{
 		{PathPrefix: "/identity.v1.IdentityService/BeginReauthentication", Tag: "guardian", Limiter: guardianLimiter},
 		{PathPrefix: "/identity.v1.IdentityService/VerifyReauthentication", Tag: "guardian", Limiter: guardianLimiter},
+		{PathPrefix: "/identity.v1.IdentityService/BeginPasskeyEligibilityVerification", Tag: "guardian", Limiter: guardianLimiter},
+		{PathPrefix: "/identity.v1.IdentityService/CompletePasskeyEligibilityVerification", Tag: "guardian", Limiter: guardianLimiter},
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
 			Limiter: signupLimiter,

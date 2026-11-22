@@ -104,6 +104,9 @@ func newRecoveryEmailHarness(t *testing.T, policy service.ProjectRecoveryEmailsC
 // signedIn marks a request as coming from userID's session, signed in now.
 func signedIn[T any](r *connect.Request[T], userID string) *connect.Request[T] {
 	r.Header().Set(middleware.AuthenticatedAuthTimeHeader, strconv.FormatInt(time.Now().Unix(), 10))
+	if r.Header().Get(middleware.AuthenticatedAMRHeader) == "" {
+		r.Header().Set(middleware.AuthenticatedAMRHeader, service.AMRCredentialEnrollment)
+	}
 	return authedReq(r, userID)
 }
 

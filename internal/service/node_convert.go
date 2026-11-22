@@ -87,17 +87,11 @@ func sessionFromNode(n *graph.Node) *Session {
 	}
 }
 
-func passkeyInfoFromNode(n *graph.Node) *PasskeyInfo {
-	if n == nil {
+func passkeyInfoFromCredential(credential *PasskeyCredRecord) *PasskeyInfo {
+	if credential == nil {
 		return nil
 	}
-	p := n.Payload
-	return &PasskeyInfo{
-		CredentialID: pstr(p, pkfCredentialID),
-		DeviceName:   pstr(p, pkfDeviceName),
-		CreatedAt:    time.UnixMilli(pi64(p, pkfCreatedAt)),
-		LastUsedAt:   time.UnixMilli(pi64(p, pkfLastUsedAt)),
-	}
+	return &PasskeyInfo{CredentialID: credential.CredentialID, DeviceName: credential.DeviceName, CreatedAt: time.UnixMilli(credential.CreatedAt), LastUsedAt: time.UnixMilli(credential.LastUsedAt), ReauthenticationEligible: credential.ReauthenticationEligible}
 }
 
 // ── Payload helpers ────────────────────────────────────────────────

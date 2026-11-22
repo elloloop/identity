@@ -300,15 +300,14 @@ func (s *ProfileService) ListMyPasskeys(ctx context.Context, userID string) ([]*
 		return nil, errors.New("user_id is required")
 	}
 
-	nodes, err := s.db(ctx).QueryNodes(ctx, s.projectID(ctx), actorStr(userID), typePasskeyCredCred,
-		map[string]any{pkfUserID: userID})
+	credentials, err := s.repo(ctx).ListPasskeyCredentials(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list passkeys: %w", err)
 	}
 
-	passkeys := make([]*PasskeyInfo, 0, len(nodes))
-	for _, n := range nodes {
-		passkeys = append(passkeys, passkeyInfoFromNode(n))
+	passkeys := make([]*PasskeyInfo, 0, len(credentials))
+	for _, credential := range credentials {
+		passkeys = append(passkeys, passkeyInfoFromCredential(credential))
 	}
 	return passkeys, nil
 }

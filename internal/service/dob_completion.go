@@ -64,7 +64,7 @@ func (e *DOBRequiredError) Unwrap() error { return ErrDOBRequired }
 // (empty for none); the ticket carries both, so completing the step continues
 // that session rather than counting as a new sign-in. The refusal is audited
 // with reason dob_required and gate, the step that refused.
-func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTimeMs int64, recoveryEmailID, ipAddr, userAgent string, gate sessionGate) error {
+func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTimeMs int64, recoveryEmailID, ipAddr, userAgent string, gate sessionGate, provenance credentialEnrollment) error {
 	if err := s.requireAgeGateForDOB(ctx); err != nil {
 		return err
 	}
@@ -77,7 +77,7 @@ func (s *AuthService) enforceDOBRequired(ctx context.Context, user *User, authTi
 	if user.DateOfBirthMs != nil {
 		return validateCompletionDOB(user.DateOfBirthMs, s.nowFunc())
 	}
-	ticket, err := s.mintDOBCompletionTicket(ctx, user, authTimeMs, recoveryEmailID)
+	ticket, err := s.mintDOBCompletionTicket(ctx, user, authTimeMs, recoveryEmailID, provenance)
 	if err != nil {
 		return err
 	}
@@ -130,9 +130,9 @@ func (s *AuthService) verifyPurposeTicket(ctx context.Context, ticket, purpose s
 // (auth_time, absent for none, and the id of the recovery email that made
 // it, absent for a sign-in made another way) for SubmitDateOfBirth to
 // continue.
-func (s *AuthService) mintDOBCompletionTicket(ctx context.Context, user *User, authTimeMs int64, recoveryEmailID string) (string, error) {
+func (s *AuthService) mintDOBCompletionTicket(ctx context.Context, user *User, authTimeMs int64, recoveryEmailID string, provenance credentialEnrollment) (string, error) {
 	return s.signPurposeTicket(ctx, jwt.Claims{
-		Sub: user.ID, Purpose: tokenPurposeDOBCompletion, AuthTime: authTimeMs / 1000, RecoveryEmailID: recoveryEmailID,
+		Sub: user.ID, Purpose: tokenPurposeDOBCompletion, AuthTime: authTimeMs / 1000, RecoveryEmailID: recoveryEmailID, AMR: provenance.amr(),
 	}, dobCompletionTicketTTL)
 }
 
@@ -251,7 +251,7 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 	// through the sign-in path and audits a login_success below, so a rewrite
 	// here is a sign-in's.
 	anchor := claims.AuthTime * 1000
-	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, anchor, anchor, claims.RecoveryEmailID)
+	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, anchor, anchor, claims.RecoveryEmailID, (SessionSignIn{AMR: claims.AMR}).credentialEnrollment())
 	if err != nil {
 		return nil, err
 	}

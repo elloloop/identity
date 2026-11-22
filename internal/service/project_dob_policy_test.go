@@ -34,7 +34,7 @@ func TestProjectDOBPolicy_DefaultExplicitAndIsolation(t *testing.T) {
 				svc.ageGate = agegate.NewNoop()
 			}
 			user := seedUser(repo, "policy@example.com", hashPW(t, strongPW), "active")
-			access, refresh, err := svc.issueTokens(ctx, user, "", "")
+			access, refresh, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 			switch mode {
 			case "ordinary":
 				require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestProjectDOBPolicy_ImplausibleStoredDateCannotAdmitAdult(t *testing.T) {
 	for _, dob := range []int64{ageGateNow.AddDate(-200, 0, 0).UnixMilli(), ageGateNow.AddDate(1, 0, 0).UnixMilli()} {
 		user := &User{ID: "invalid-age", Status: StatusActive, Kind: UserKindPerson, DateOfBirthMs: new(dob)}
 		require.False(t, svc.isKnownAdultPerson(context.Background(), user))
-		access, refresh, err := svc.issueTokens(context.Background(), user, "", "")
+		access, refresh, err := svc.issueTokens(context.Background(), user, "", "", credentialEnrollment{Trusted: true})
 		require.ErrorIs(t, err, ErrInvalidArgument)
 		require.Empty(t, access)
 		require.Empty(t, refresh)

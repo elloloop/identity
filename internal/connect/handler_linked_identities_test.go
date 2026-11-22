@@ -36,7 +36,7 @@ func TestLinkedIdentityHandlers_LinkListUnlink(t *testing.T) {
 	// the last credential and unlink is allowed).
 	u := h.repo.seedUser(&service.User{Email: "cap@e.com", Status: "active", Role: "member", PasswordHash: "hash"})
 
-	linkResp, err := h.client.LinkIdentity(ctx, authedReq(connect.NewRequest(&identitypb.LinkIdentityRequest{
+	linkResp, err := h.client.LinkIdentity(ctx, signedIn(connect.NewRequest(&identitypb.LinkIdentityRequest{
 		Provider: "google", Code: "auth-code", RedirectUri: "https://app/cb",
 	}), u.ID))
 	if err != nil {
@@ -55,7 +55,7 @@ func TestLinkedIdentityHandlers_LinkListUnlink(t *testing.T) {
 	}
 
 	// Re-linking the same provider identity is rejected.
-	if _, err := h.client.LinkIdentity(ctx, authedReq(connect.NewRequest(&identitypb.LinkIdentityRequest{
+	if _, err := h.client.LinkIdentity(ctx, signedIn(connect.NewRequest(&identitypb.LinkIdentityRequest{
 		Provider: "google", Code: "auth-code", RedirectUri: "https://app/cb",
 	}), u.ID)); connectCodeOf(err) != connect.CodeAlreadyExists {
 		t.Fatalf("re-link = %v, want AlreadyExists", connectCodeOf(err))
@@ -86,7 +86,7 @@ func TestLinkedIdentityHandlers_UnlinkLastCredentialBlocked(t *testing.T) {
 	// FailedPrecondition (would remove the last sign-in credential).
 	u := h.repo.seedUser(&service.User{Email: "nopw@e.com", Status: "active", Role: "member"})
 
-	if _, err := h.client.LinkIdentity(ctx, authedReq(connect.NewRequest(&identitypb.LinkIdentityRequest{
+	if _, err := h.client.LinkIdentity(ctx, signedIn(connect.NewRequest(&identitypb.LinkIdentityRequest{
 		Provider: "google", Code: "auth-code", RedirectUri: "https://app/cb",
 	}), u.ID)); err != nil {
 		t.Fatalf("LinkIdentity: %v", err)

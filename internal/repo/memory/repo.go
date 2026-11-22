@@ -2528,3 +2528,17 @@ func (r *Repo) DeleteUserWithGuardianReceipt(_ context.Context, userID, guardian
 	r.guardianDeletions[[2]string{guardianID, userID}] = atMs
 	return nil
 }
+
+func (r *Repo) MarkPasskeyReauthenticationEligible(_ context.Context, verified *service.PasskeyCredRecord) (bool, error) {
+	if verified == nil {
+		return false, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current := r.passkeyCreds[verified.NodeID]
+	if current == nil || verified.NodeID == "" || verified.UserID == "" || verified.PublicKey == "" || current.UserID != verified.UserID || current.CredentialID != verified.CredentialID || current.PublicKey != verified.PublicKey {
+		return false, nil
+	}
+	current.ReauthenticationEligible = true
+	return true, nil
+}

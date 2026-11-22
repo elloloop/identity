@@ -286,7 +286,7 @@ func (s *AuthService) PasswordSignup(ctx context.Context, email, password, name,
 		return &LoginResult{User: user}, nil
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, "", "")
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	if err != nil {
 		return nil, err
 	}
@@ -440,7 +440,9 @@ func (s *AuthService) duplicateSignupDecoyResult(ctx context.Context, user *User
 	user.AccountAddress = predictedAccountAddress(ctx, user)
 	// The same claim set a real sign-up's token carries, or the decoy's
 	// shape would give the duplicate away.
-	accessToken, err := s.signer.SignAccessToken(ctx, s.accessTokenClaims(ctx, user, s.nowMs()), s.cfg.JWTExpiry())
+	claims := s.accessTokenClaims(ctx, user, s.nowMs())
+	claims.AMR = (credentialEnrollment{Trusted: true}).amr()
+	accessToken, err := s.signer.SignAccessToken(ctx, claims, s.cfg.JWTExpiry())
 	if err != nil {
 		return nil, fmt.Errorf("creating duplicate-signup decoy token: %w", err)
 	}
@@ -491,7 +493,7 @@ func (s *AuthService) PasswordLogin(ctx context.Context, email, password, ipAddr
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, "", ipAddr, userAgent)
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent, credentialEnrollment{Trusted: true})
 	if err != nil {
 		return nil, err
 	}
@@ -908,7 +910,7 @@ func (s *AuthService) OAuthLogin(
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, "", params.IPAddr, params.UserAgent)
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, params.IPAddr, params.UserAgent, credentialEnrollment{Trusted: true})
 	if err != nil {
 		// Hosted OAuth carries only the authenticated subject to its opaque code.
 		// No session is issued until the required profile step completes.
@@ -1785,7 +1787,7 @@ func (s *AuthService) AcceptInvitation(ctx context.Context, invitationToken, pas
 		return &LoginResult{User: user}, nil
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent, credentialEnrollment{Trusted: true})
 	if err != nil {
 		return nil, err
 	}

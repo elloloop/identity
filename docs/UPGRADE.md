@@ -1,5 +1,78 @@
 # Upgrade guide
 
+## Next — passkey provenance for sensitive reauthentication (PostgreSQL 0065 / SQLite 0033)
+
+Passkeys and sessions now carry server-written enrollment provenance.
+Existing keys and refresh records migrate with eligibility false, preserving
+ordinary sign-in while refusing their use as sensitive step-up credentials.
+Creation time alone never establishes eligibility. Owner-only
+`PasskeyCredentialInfo.reauthentication_eligible` (tag 5) exposes the decision
+through registration metadata, `ListPasskeys` and the owner's data export.
+Only literal true is affirmative. No request accepts an eligibility flag.
+
+`BeginReauthentication` offers only eligible keys. When none exists it returns
+`FAILED_PRECONDITION` with stable token
+`reauthentication_key_enrollment_required`. Offer an independent fresh
+OAuth/password or other trusted primary sign-in, then enroll a new passkey or
+explicitly verify an existing one. Fresh normal registration and verified
+passkey-first signup create eligible keys. Managed-child ticket bootstrap
+keys remain ordinary sign-in credentials until independently verified or a
+trusted enrollment adds an eligible key. All normal registration and
+provider-link attachment require trusted provenance and the existing
+five-minute sign-in window.
+
+For same-device migration, `BeginPasskeyEligibilityVerification` takes the
+owned `credential_id` and returns UV-required assertion options plus a
+two-minute challenge. `CompletePasskeyEligibilityVerification` takes that
+credential ID, challenge ID and assertion JSON. Both steps require a fresh
+independent primary sign-in, never a passkey-derived session. The challenge
+binds project, caller, purpose and target, and is atomically consumed once.
+Only the exact still-present credential version is then marked eligible.
+Begin/cancellation changes no key metadata. No key is deleted or replaced.
+Failures do not promote the key, and a consumed proof cannot be replayed.
+The response carries owner metadata and the audit event is
+`passkey_eligibility_verified`. This purpose cannot be minted by generic
+`BeginReauthentication`.
+
+A legacy-key session, recovery session, old unmarked session or QR handoff
+cannot enroll a trusted replacement, link an independent provider or move
+credentials through self-service account merging to launder its authority.
+Merging retains its configured fresh-sign-in window and also requires
+trusted enrollment provenance. Password changes still require the existing
+password. Completing an administrator-issued temporary-password sign-in
+counts as independent primary proof: the administrator is already authorized
+to issue that account's password, and the original sign-in time is retained.
+An eligible-key login with verified UV may authorize enrollment; a
+presence-only assertion still signs in but grants no enrollment trust. The source key is
+rechecked: removing that key removes this authority without revoking ordinary
+sign-in. Refresh and tenant selection preserve provenance and original
+`auth_time`. DOB completion preserves the interrupted sign-in. QR approval
+and polling carry no enrollment trust and no fresh authentication time.
+
+The signed `amr` claim uses public markers `credential_enrollment` and, for
+an eligible-key source, `credential_enrollment_passkey:<credential_id>`.
+The latter exposes a public credential identifier to that account's token
+consumer; it is metadata, never a bearer credential. Hosts must forward the
+verified claim unchanged and never derive it from key counts, request fields or a
+client's metadata. Native-gRPC hosts must vouch for verified AMR with
+`GRPCTrustAMR`; unvouched claims fail closed. App/product-session exchanges
+must preserve token provenance rather than minting a new trusted sign-in.
+
+Go token-issuance methods now take explicit enrollment provenance, and
+`WebAuthnService.CompleteAuthenticationWithUserVerification` exposes the
+verified UV flag alongside the counter. The existing public counter-only
+method keeps its signature for versioned Go consumers.
+Repository gains `MarkPasskeyReauthenticationEligible` for an exact verified
+credential version. Refresh
+records gain `CredentialEnrollmentEligible` and
+`CredentialEnrollmentPasskeyID`; credentials gain `ReauthenticationEligible`.
+Profile passkey metadata reads the typed repository, including on embedded
+drivers, so embedders must supply that repository. Migrate first, upgrade all
+replicas, and only then enable sensitive client flows. Older replicas ignore
+the new metadata and lose trust on rotation, which fails closed. Stop these
+flows before rollback. Down migrations remove provenance while retaining
+keys and refresh rows, so re-upgrading defaults them to untrusted again.
+
 ## Next — durable guardian erasure acknowledgements (PostgreSQL 0064 / SQLite 0032)
 
 `DeleteManagedChildAccount` records an exact project, initiating guardian and
