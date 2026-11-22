@@ -1267,6 +1267,8 @@ message GrantParentalConsentRequest {
   // token (closing the "spoofable consent" risk). The account must have a
   // password set.
   string step_up_password = 3;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 4;
 }
 
 message GrantParentalConsentResponse {
@@ -1557,6 +1559,8 @@ message CreateManagedChildAccountRequest {
   // negative timestamps are valid dates. On requests, a nonzero legacy
   // date_of_birth_ms must agree when both fields are supplied.
   optional int64 date_of_birth_unix_ms = 10;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 11;
 }
 
 message CreateManagedChildAccountResponse {
@@ -1609,6 +1613,8 @@ message GetManagedChildProfileRequest {
   // step_up_password re-authenticates the CALLING GUARDIAN (verified against
   // the guardian's stored password hash). Required on every call.
   string step_up_password = 2;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 3;
 }
 
 message GetManagedChildProfileResponse {
@@ -1624,6 +1630,8 @@ message SetManagedChildPasswordRequest {
   // self-service paths enforce for the resolved project.
   string new_password = 2;
   string step_up_password = 3;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 4;
 }
 
 // Setting the password revokes the child's sessions and refresh tokens, so a
@@ -1640,6 +1648,8 @@ message SetManagedChildUsernameRequest {
   // the project is ALREADY_EXISTS.
   string username = 2;
   string step_up_password = 3;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 4;
 }
 
 message SetManagedChildUsernameResponse {
@@ -1650,6 +1660,8 @@ message SetManagedChildUsernameResponse {
 message RevokeManagedChildSessionsRequest {
   string child_user_id = 1;
   string step_up_password = 2;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 3;
 }
 
 // Every session and refresh token of the child is invalidated
@@ -1661,6 +1673,8 @@ message DeactivateManagedChildAccountRequest {
   // reason is optional free text retained on the audit event.
   string reason = 2;
   string step_up_password = 3;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 4;
 }
 
 // Deactivation is reversible by the same guardian via
@@ -1670,6 +1684,8 @@ message DeactivateManagedChildAccountResponse {}
 message ReactivateManagedChildAccountRequest {
   string child_user_id = 1;
   string step_up_password = 2;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 3;
 }
 
 // Reactivation moves a deactivated child account back to
@@ -1681,6 +1697,8 @@ message ReactivateManagedChildAccountResponse {}
 message DeleteManagedChildAccountRequest {
   string child_user_id = 1;
   string step_up_password = 2;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 3;
 }
 
 // Deletion runs the same hard-delete erasure cascade as the admin DeleteUser
@@ -3618,6 +3636,34 @@ message GetProjectEmailDeliveryResponse {
   bool disabled = 1;
 }
 
+// A fresh assertion from the calling account's enrolled passkey. A challenge
+// is bound to one project, account, action and resource and can be used once.
+message PasskeyReauthentication {
+  string challenge_id = 1;
+  string credential_json = 2;
+}
+
+message BeginReauthenticationRequest {
+  string action = 1;
+  string resource_id = 2;
+}
+
+message BeginReauthenticationResponse {
+  string options_json = 1;
+  string challenge_id = 2;
+}
+
+message VerifyReauthenticationRequest {
+  string challenge_id = 1;
+  string credential_json = 2;
+  string action = 3;
+  string resource_id = 4;
+}
+
+message VerifyReauthenticationResponse {
+  string user_id = 1;
+}
+
 service IdentityService {
   rpc CreateAgentMachineChallenge(CreateAgentMachineChallengeRequest) returns (CreateAgentMachineChallengeResponse);
   rpc RegisterAgentMachineAgentKey(RegisterAgentMachineAgentKeyRequest) returns (RegisterAgentMachineAgentKeyResponse);
@@ -4379,6 +4425,13 @@ service IdentityService {
   // as directory_phone_match with the tenant and the number of hashes asked
   // for and matched, never the hashes.
   rpc MatchTenantMemberPhones(MatchTenantMemberPhonesRequest) returns (MatchTenantMemberPhonesResponse);
+
+  // BeginReauthentication requires an active known adult with enrolled passkeys.
+  // The challenge requests user verification and expires after at most two minutes.
+  rpc BeginReauthentication(BeginReauthenticationRequest) returns (BeginReauthenticationResponse);
+  // VerifyReauthentication checks and consumes the exact action/resource-bound
+  // assertion for the authenticated adult. It issues no token or session.
+  rpc VerifyReauthentication(VerifyReauthenticationRequest) returns (VerifyReauthenticationResponse);
 
   // GetProjectEmailDelivery exposes only the resolved project's email policy.
   // Resolve the project exactly as for authentication and recovery calls.
