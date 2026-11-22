@@ -220,6 +220,20 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, sign
 	if err := s.refuseHeldSession(ctx, survivorID, signIn); err != nil {
 		return nil, err
 	}
+	var err error
+	ctx, err = s.activeProjectPolicyContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// A merge can attach the other account's password and providers. Its
+	// credential must not turn an untrusted survivor session into a trusted one.
+	provenance, err := s.checkedCredentialEnrollment(ctx, survivorID, signIn.credentialEnrollment())
+	if err != nil {
+		return nil, err
+	}
+	if !provenance.Trusted {
+		return nil, ErrRecoveryReauthenticationRequired
+	}
 	repo := s.repo(ctx)
 	survivor, err := repo.GetUser(ctx, survivorID)
 	if err != nil {

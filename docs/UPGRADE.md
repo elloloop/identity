@@ -16,9 +16,10 @@ Only literal true is affirmative. No request accepts an eligibility flag.
 OAuth/password or other trusted primary sign-in, then enroll a new passkey or
 explicitly verify an existing one. Fresh normal registration and verified
 passkey-first signup create eligible keys. Managed-child ticket bootstrap
-keys remain ordinary sign-in credentials until a trusted enrollment replaces
-them. All normal registration and provider-link attachment require trusted
-provenance and the existing five-minute sign-in window.
+keys remain ordinary sign-in credentials until independently verified or a
+trusted enrollment adds an eligible key. All normal registration and
+provider-link attachment require trusted provenance and the existing
+five-minute sign-in window.
 
 For same-device migration, `BeginPasskeyEligibilityVerification` takes the
 owned `credential_id` and returns UV-required assertion options plus a
@@ -34,8 +35,11 @@ The response carries owner metadata and the audit event is
 `BeginReauthentication`.
 
 A legacy-key session, recovery session, old unmarked session or QR handoff
-cannot enroll a trusted replacement or link an independent provider to
-launder its authority. Password changes still require the existing password.
+cannot enroll a trusted replacement, link an independent provider or move
+credentials through self-service account merging to launder its authority.
+Merging retains its configured fresh-sign-in window and also requires
+trusted enrollment provenance. Password changes still require the existing
+password.
 A proven eligible-key login may authorize enrollment, but its source key is
 rechecked: removing that key removes this authority without revoking ordinary
 sign-in. Refresh and tenant selection preserve provenance and original

@@ -370,7 +370,9 @@ func TestAcceptInvitation_RefusesAMergedAccount(t *testing.T) {
 }
 
 // freshAuth is a session signed in just now.
-func freshAuth(svc *AuthService) SessionSignIn { return SessionSignIn{AuthTimeSec: svc.nowMs() / 1000} }
+func freshAuth(svc *AuthService) SessionSignIn {
+	return SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}
+}
 
 // The account that is kept must have signed in recently: a session alone —
 // stolen, or simply long-lived — cannot pull another account onto it.
@@ -395,7 +397,7 @@ func TestMergeAccounts_RequiresARecentSignIn(t *testing.T) {
 	still, _ := repo.GetUser(ctx, native.ID)
 	require.Zero(t, still.FailedLoginCount)
 
-	_, err = svc.MergeAccounts(ctx, survivor.ID, SessionSignIn{AuthTimeSec: now - maxAge + 5}, "bob", accessTestPassword, "203.0.113.10", "agent", false)
+	_, err = svc.MergeAccounts(ctx, survivor.ID, SessionSignIn{AuthTimeSec: now - maxAge + 5, AMR: []string{AMRCredentialEnrollment}}, "bob", accessTestPassword, "203.0.113.10", "agent", false)
 	require.NoError(t, err, "a sign-in within the window is enough")
 }
 
@@ -435,7 +437,7 @@ func TestTokens_AuthTimeIsTheSignIn(t *testing.T) {
 
 	// An hour-old sign-in is outside the merge's recent-sign-in window however
 	// fresh the token that carries it.
-	_, err = svc.MergeAccounts(ctx, user.ID, SessionSignIn{AuthTimeSec: claims.AuthTime}, "other@example.com", strongPW, "203.0.113.10", "agent", false)
+	_, err = svc.MergeAccounts(ctx, user.ID, SessionSignIn{AuthTimeSec: claims.AuthTime, AMR: claims.AMR}, "other@example.com", strongPW, "203.0.113.10", "agent", false)
 	require.ErrorIs(t, err, ErrReauthenticationRequired)
 }
 
@@ -458,7 +460,7 @@ func TestMergeAccounts_AcceptsATokenRefreshedFromARecentSignIn(t *testing.T) {
 	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 	require.NoError(t, err)
 
-	_, err = svc.MergeAccounts(ctx, user.ID, SessionSignIn{AuthTimeSec: claims.AuthTime}, "other@example.com", strongPW, "203.0.113.10", "agent", false)
+	_, err = svc.MergeAccounts(ctx, user.ID, SessionSignIn{AuthTimeSec: claims.AuthTime, AMR: claims.AMR}, "other@example.com", strongPW, "203.0.113.10", "agent", false)
 	require.NoError(t, err, "the sign-in behind the refreshed token is recent")
 }
 

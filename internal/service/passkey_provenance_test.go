@@ -31,9 +31,12 @@ func (f reauthenticationFixture) passkeyLogin(t *testing.T, eligible bool) *Logi
 	return login
 }
 
-func TestLegacyPasskeyLoginAndRefreshCannotEnrollOrLink(t *testing.T) {
+func TestLegacyPasskeyLoginAndRefreshCannotAttachCredentials(t *testing.T) {
 	f := newReauthenticationFixture(t)
 	login := f.passkeyLogin(t, false)
+	f.service.cfg.AccountMergeEnabled = true
+	other := seedUser(f.repo, "merge-source@example.test", hashPW(t, strongPW), StatusActive)
+	other.EmailVerified = true
 	require.NotEmpty(t, login.AccessToken, "ordinary legacy-key sign-in remains available")
 	ctx := context.Background()
 	for range 2 {
@@ -43,6 +46,11 @@ func TestLegacyPasskeyLoginAndRefreshCannotEnrollOrLink(t *testing.T) {
 		require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
 		_, err = f.service.LinkIdentity(ctx, f.user.ID, signIn, "code", "google", "https://example.com/callback", "", "", "")
 		require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
+		_, err = f.service.MergeAccounts(ctx, f.user.ID, signIn, other.Email, strongPW, "", "", false)
+		require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
+		require.Empty(t, f.user.PasswordHash)
+		require.Empty(t, other.MergedIntoUserID)
+		require.Zero(t, other.FailedLoginCount)
 		_, access, refresh, err := f.service.RefreshToken(ctx, login.RefreshToken, "", "", "")
 		require.NoError(t, err)
 		require.Equal(t, authTimeOf(t, f.service, login.AccessToken), authTimeOf(t, f.service, access))
@@ -147,4 +155,19 @@ func TestDOBCompletionPreservesEnrollmentProvenanceWithoutRenewal(t *testing.T) 
 		_, _, err = f.service.BeginPasskeyRegistration(ctx, f.user.ID, signIn, "replacement", false)
 		require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
 	}
+}
+
+func TestMergeCannotAttachCredentialsAfterEligibleSourceRemoval(t *testing.T) {
+	f := newReauthenticationFixture(t)
+	login := f.passkeyLogin(t, true)
+	f.service.cfg.AccountMergeEnabled = true
+	signIn := provenanceSignIn(t, f.service, login.AccessToken)
+	ctx := context.Background()
+	other := seedUser(f.repo, "merge-source@example.test", hashPW(t, strongPW), StatusActive)
+	other.EmailVerified = true
+	require.NoError(t, f.repo.DeletePasskeyCredential(ctx, f.user.ID, f.credentialID))
+	_, err := f.service.MergeAccounts(ctx, f.user.ID, signIn, other.Email, strongPW, "", "", false)
+	require.ErrorIs(t, err, ErrRecoveryReauthenticationRequired)
+	require.Empty(t, f.user.PasswordHash)
+	require.Empty(t, other.MergedIntoUserID)
 }
