@@ -60,6 +60,7 @@
   "parental_consent_granted",
   "parental_consent_revoked",
   "passkey_added",
+  "passkey_eligibility_verified",
   "passkey_removed",
   "passkey_used",
   "password_changed",

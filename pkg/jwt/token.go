@@ -84,8 +84,9 @@ type Claims struct {
 	AuthTime int64 `json:"auth_time,omitempty"`
 	// AMR is the "amr" claim (RFC 8176): how the sign-in that opened the
 	// session proved itself, where that limits what the session may do.
-	// identity sets it only on a session a recovery email opened
-	// (["recovery_email"]); every other token has no amr claim.
+	// Recovery sign-ins carry "recovery_email". Independently trusted
+	// enrollment carries "credential_enrollment", optionally with a live
+	// source-key marker. Unmarked and QR sessions carry no enrollment trust.
 	AMR []string `json:"amr,omitempty"`
 	// RecoveryEmailID is the "recovery_email_id" claim: the opaque id of the
 	// recovery email that opened the session, on every access token whose

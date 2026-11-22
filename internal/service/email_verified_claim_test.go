@@ -46,7 +46,7 @@ func TestAccessToken_EmailVerifiedClaim(t *testing.T) {
 			user := seedUser(repo, tc.email, "", StatusActive)
 			user.EmailVerified = tc.verified
 
-			access, _, err := svc.issueTokens(context.Background(), user, "", "")
+			access, _, err := svc.issueTokens(context.Background(), user, "", "", credentialEnrollment{Trusted: true})
 			require.NoError(t, err)
 			got, present := tokenPayload(t, access)["email_verified"]
 			if tc.want == nil {
@@ -97,7 +97,7 @@ func TestAccessToken_EmailVerifiedFollowsAnEmailChangeOnRefresh(t *testing.T) {
 	require.NoError(t, repo.UpdateUser(ctx, user.ID, map[string]any{"email_verified": true}))
 	user, err := repo.GetUser(ctx, user.ID)
 	require.NoError(t, err)
-	_, refresh, err := svc.issueTokens(ctx, user, "", "")
+	_, refresh, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 
 	// The write a directory sync makes when it moves the address elsewhere.

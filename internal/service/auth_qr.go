@@ -331,7 +331,7 @@ func (s *AuthService) PollQrLogin(ctx context.Context, sessionID, pollSecret, ip
 	// is new (its own absolute lifetime) but carries no auth_time, so it never
 	// counts as a recent sign-in, and its refreshes carry none either. It is
 	// still a sign-in for a pending deletion: the approving device signed in.
-	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, 0, 0, "")
+	accessToken, refreshToken, err := s.issueSignInTokens(ctx, user, ipAddr, userAgent, 0, 0, "", credentialEnrollment{})
 	if err != nil {
 		return nil, err
 	}

@@ -12,9 +12,8 @@ import (
 )
 
 // newTestProfileServiceWithRepo builds a ProfileService backed by the
-// full in-memory fakeRepo (for users + oauth links) and a fakeDB (for
-// passkeys, which live in the graph DB). The linked-identity flows touch
-// both: last-credential protection counts password (repo) and passkey (db).
+// in-memory user, OAuth and passkey repository with a graph fixture for
+// the remaining profile operations.
 func newTestProfileServiceWithRepo(repo *fakeRepo, db *fakeDB) *ProfileService {
 	auditLog := audit.NewLogger(nil, "test-tenant", zap.NewNop())
 	return NewProfileService(repo, db, "test-tenant", auditLog, zap.NewNop())
@@ -116,7 +115,8 @@ func TestProfileService_UnlinkIdentity_LastLinkAllowedWithPasskey(t *testing.T) 
 	// Single provider link, no password, but a registered passkey: the
 	// passkey is a remaining credential so the unlink is allowed.
 	u := seedUser(repo, "pk@example.com", "", "active")
-	db.addPasskey("pk-node", u.ID, "cred-1", "Phone")
+	_, err := repo.CreatePasskeyCredential(ctx, &PasskeyCredRecord{UserID: u.ID, CredentialID: "cred-1", DeviceName: "Phone"})
+	require.NoError(t, err)
 	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
 		UserID: u.ID, Provider: "google", ProviderUserID: "g-1", CreatedAt: 100,
 	}))
@@ -176,7 +176,7 @@ func TestAuthService_LinkIdentity_AttachesVerifiedIdentity(t *testing.T) {
 	// The fake exchanger derives the subject from the email argument as
 	// "sub-<email>". Drive a link for a Google identity.
 	code := fakeOAuthCode("linker@example.com", "Linker", "", "google")
-	oi, err := svc.LinkIdentity(ctx, u.ID, SessionSignIn{}, code, "google", "https://app/cb", "", "", "")
+	oi, err := svc.LinkIdentity(ctx, u.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, code, "google", "https://app/cb", "", "", "")
 	require.NoError(t, err)
 	require.NotNil(t, oi)
 	assert.Equal(t, u.ID, oi.UserID)
@@ -202,7 +202,7 @@ func TestAuthService_LinkIdentity_AlreadyLinked(t *testing.T) {
 	// identity (the fake exchanger maps the code's email to the subject).
 	attacker := seedUser(repo, "attacker@example.com", "hash", "active")
 	code := fakeOAuthCode("victim@example.com", "Victim", "", "google")
-	_, err := svc.LinkIdentity(ctx, attacker.ID, SessionSignIn{}, code, "google", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(ctx, attacker.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, code, "google", "https://app/cb", "", "", "")
 	assert.ErrorIs(t, err, ErrAlreadyExists)
 
 	// The link still points at the original owner.
@@ -218,6 +218,6 @@ func TestAuthService_LinkIdentity_RequiresAuth(t *testing.T) {
 	ctx := context.Background()
 
 	code := fakeOAuthCode("noauth@example.com", "NoAuth", "", "google")
-	_, err := svc.LinkIdentity(ctx, "", SessionSignIn{}, code, "google", "https://app/cb", "", "", "")
+	_, err := svc.LinkIdentity(ctx, "", SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}}, code, "google", "https://app/cb", "", "", "")
 	assert.ErrorIs(t, err, ErrUnauthenticated)
 }

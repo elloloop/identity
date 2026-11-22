@@ -175,8 +175,9 @@ func passkeyToProto(p *service.PasskeyInfo) *identitypb.PasskeyCredentialInfo {
 		return nil
 	}
 	pb := &identitypb.PasskeyCredentialInfo{
-		CredentialId: p.CredentialID,
-		DeviceName:   p.DeviceName,
+		CredentialId:             p.CredentialID,
+		ReauthenticationEligible: p.ReauthenticationEligible,
+		DeviceName:               p.DeviceName,
 	}
 	if !p.CreatedAt.IsZero() {
 		pb.CreatedAt = timestamppb.New(p.CreatedAt)

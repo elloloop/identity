@@ -54,6 +54,13 @@ func registerSpecPasskey(
 		t.Fatalf("CompletePasskeyRegistration: %v", err)
 	}
 
+	if !complete.Msg.GetCredential().GetReauthenticationEligible() {
+		t.Fatal("trusted registration must return server-written reauthentication eligibility")
+	}
+	listed, listErr := authed.ListPasskeys(ctx, connect.NewRequest(&identitypb.ListPasskeysRequest{}))
+	if listErr != nil || len(listed.Msg.Credentials) != 1 || !listed.Msg.Credentials[0].ReauthenticationEligible {
+		t.Fatalf("owner eligibility metadata not persisted: %v", listErr)
+	}
 	if got := complete.Msg.GetCredential().GetCredentialId(); got != specPasskeyCredentialID(t) {
 		t.Fatalf("credential id = %q, want %q", got, specPasskeyCredentialID(t))
 	}
@@ -102,6 +109,13 @@ func registerPasskeyForLogin(
 		t.Fatalf("CompletePasskeyRegistration: %v", err)
 	}
 
+	if !complete.Msg.GetCredential().GetReauthenticationEligible() {
+		t.Fatal("trusted registration must return server-written reauthentication eligibility")
+	}
+	listed, listErr := authed.ListPasskeys(ctx, connect.NewRequest(&identitypb.ListPasskeysRequest{}))
+	if listErr != nil || len(listed.Msg.Credentials) != 1 || !listed.Msg.Credentials[0].ReauthenticationEligible {
+		t.Fatalf("owner eligibility metadata not persisted: %v", listErr)
+	}
 	if got := complete.Msg.GetCredential().GetCredentialId(); got != specPasskeyLoginCredentialID(t) {
 		t.Fatalf("credential id = %q, want %q", got, specPasskeyLoginCredentialID(t))
 	}

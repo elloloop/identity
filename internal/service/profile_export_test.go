@@ -37,12 +37,16 @@ func TestExportMyData_AggregatesCallerData(t *testing.T) {
 		t.Fatalf("CreateUser bob: %v", err)
 	}
 
-	// Session + passkey live in the graph DB (what ListMySessions/ListMyPasskeys read).
+	// Sessions use the graph view; passkey metadata comes from the typed repository.
 	db.addRefreshToken("sess-alice", aliceID, farFuture)
-	db.addPasskey("pk-alice", aliceID, "cred-alice", "Alice iPhone")
+	if _, err := repo.CreatePasskeyCredential(ctx, &PasskeyCredRecord{UserID: aliceID, CredentialID: "cred-alice", DeviceName: "Alice iPhone"}); err != nil {
+		t.Fatal(err)
+	}
 	// Bob's session/passkey must never surface in Alice's export.
 	db.addRefreshToken("sess-bob", bobID, farFuture)
-	db.addPasskey("pk-bob", bobID, "cred-bob", "Bob Pixel")
+	if _, err := repo.CreatePasskeyCredential(ctx, &PasskeyCredRecord{UserID: bobID, CredentialID: "cred-bob", DeviceName: "Bob Pixel"}); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
 		UserID: aliceID, Provider: "google", ProviderUserID: "g-alice",

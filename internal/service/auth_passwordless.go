@@ -432,7 +432,7 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, "", ipAddr, userAgent)
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent, credentialEnrollment{Trusted: true})
 	if err != nil {
 		return nil, err
 	}

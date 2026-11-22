@@ -361,7 +361,7 @@ func (s *AuthService) RedeemOAuthCode(ctx context.Context, code, codeVerifier, i
 		return s.requireSecondFactor(ctx, user, decision.RequireSecondFactor, "", ipAddr, userAgent)
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent, credentialEnrollment{Trusted: true})
 	if err != nil {
 		return nil, err
 	}

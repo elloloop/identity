@@ -237,6 +237,35 @@ const complete = await fetch("/identity.v1.IdentityService/CompletePasskeyLogin"
 
   <h2>Reauthenticate for an operation</h2>
   <p>
+    Sensitive assertions require a passkey whose owner metadata has
+    <code>reauthentication_eligible: true</code>. Existing keys default to
+    false and remain usable for ordinary sign-in. A key count or successful
+    registration response alone does not prove eligibility: read
+    <code>ListPasskeys</code>. The server filters assertion options to
+    eligible keys and returns <code>reauthentication_key_enrollment_required</code>
+    with <code>FAILED_PRECONDITION</code> when there is none.
+  </p>
+  <p>
+    Recover by signing in freshly through an independent trusted method and
+    enrolling a new key or explicitly verifying an existing one. A legacy-key session, token refresh, recovery session
+    or QR handoff cannot manufacture trusted enrollment. An eligible-key
+    sign-in can enroll another key while its source credential remains on
+    file and the five-minute sign-in window is fresh. Eligibility is written
+    only by the server. Never infer it from client-supplied values.
+  </p>
+  <p>
+    To keep a legacy key on the same device, call
+    <code>BeginPasskeyEligibilityVerification</code> with its
+    <code>credential_id</code>. Run the returned user-verified assertion
+    ceremony, then call <code>CompletePasskeyEligibilityVerification</code>
+    with the same credential ID, challenge ID and assertion JSON. Both steps
+    require an independently fresh primary sign-in; a passkey-derived session
+    cannot authorize this upgrade. The two-minute challenge is bound to its
+    caller, project, purpose and credential, and is consumed once. Only the
+    still-present verified key is marked eligible. Cancelling leaves the key
+    unchanged, and ordinary sign-in continues to work.
+  </p>
+  <p>
     An authenticated, active account with a known adult profile can use an
     enrolled passkey without setting an Identity password.
     <code>BeginReauthentication</code> takes an <code>action</code> and

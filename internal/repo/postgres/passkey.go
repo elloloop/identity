@@ -15,14 +15,14 @@ import (
 const passkeyColumns = `
 	id, credential_id, user_id, public_key, sign_count,
 	device_name, aaguid, transports, backup_eligible, backup_state,
-	created_at_ms, last_used_at_ms`
+	created_at_ms, last_used_at_ms, reauthentication_eligible`
 
 func scanPasskey(row pgx.Row) (*service.PasskeyCredRecord, error) {
 	var c service.PasskeyCredRecord
 	if err := row.Scan(
 		&c.NodeID, &c.CredentialID, &c.UserID, &c.PublicKey, &c.SignCount,
 		&c.DeviceName, &c.AAGUID, &c.Transports, &c.BackupEligible, &c.BackupState,
-		&c.CreatedAt, &c.LastUsedAt,
+		&c.CreatedAt, &c.LastUsedAt, &c.ReauthenticationEligible,
 	); err != nil {
 		return nil, err
 	}
@@ -87,13 +87,13 @@ func (r *pgRepository) CreatePasskeyCredential(ctx context.Context, c *service.P
 		INSERT INTO passkeys (
 			id, project_id, credential_id, user_id, public_key, sign_count,
 			device_name, aaguid, transports, backup_eligible, backup_state,
-			created_at_ms, last_used_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+			created_at_ms, last_used_at_ms, reauthentication_eligible
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 	_, err := r.pool.Exec(
 		ctx, q,
 		id, r.projectID, c.CredentialID, c.UserID, c.PublicKey, c.SignCount,
 		c.DeviceName, c.AAGUID, c.Transports, c.BackupEligible, c.BackupState,
-		c.CreatedAt, c.LastUsedAt,
+		c.CreatedAt, c.LastUsedAt, c.ReauthenticationEligible,
 	)
 	if err != nil {
 		return "", wrapPgErr("CreatePasskeyCredential", err)
@@ -253,6 +253,17 @@ func (r *pgRepository) ConsumeReauthenticationChallenge(ctx context.Context, nod
 	result, err := r.pool.Exec(ctx, q, r.projectID, nodeID, userID, action, resourceID, atMs)
 	if err != nil {
 		return false, wrapPgErr("ConsumeReauthenticationChallenge", err)
+	}
+	return result.RowsAffected() == 1, nil
+}
+
+func (r *pgRepository) MarkPasskeyReauthenticationEligible(ctx context.Context, verified *service.PasskeyCredRecord) (bool, error) {
+	if verified == nil || verified.NodeID == "" || verified.UserID == "" || verified.PublicKey == "" {
+		return false, nil
+	}
+	result, err := r.pool.Exec(ctx, `UPDATE passkeys SET reauthentication_eligible=true WHERE project_id=$1 AND id=$2 AND user_id=$3 AND credential_id=$4 AND public_key=$5`, r.projectID, verified.NodeID, verified.UserID, verified.CredentialID, verified.PublicKey)
+	if err != nil {
+		return false, wrapPgErr("MarkPasskeyReauthenticationEligible", err)
 	}
 	return result.RowsAffected() == 1, nil
 }

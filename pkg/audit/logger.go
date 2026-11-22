@@ -86,19 +86,20 @@ type ProjectScoper func(ctx context.Context) (writer NodeWriter, projectID strin
 type EventType string
 
 const (
-	EventLoginSuccess    EventType = "login_success"
-	EventLoginFailure    EventType = "login_failure"
-	EventLoginLocked     EventType = "login_locked"   // login attempt while account is in lockout window
-	EventAccountLocked   EventType = "account_locked" // threshold tripped, lockout window opened
-	EventLogout          EventType = "logout"
-	EventPasswordChanged EventType = "password_changed"
-	EventPasswordReset   EventType = "password_reset"
-	EventTotpEnabled     EventType = "totp_enabled"
-	EventTotpDisabled    EventType = "totp_disabled"
-	EventTotpVerified    EventType = "totp_verified"
-	EventPasskeyAdded    EventType = "passkey_added"
-	EventPasskeyRemoved  EventType = "passkey_removed"
-	EventPasskeyUsed     EventType = "passkey_used"
+	EventLoginSuccess               EventType = "login_success"
+	EventLoginFailure               EventType = "login_failure"
+	EventLoginLocked                EventType = "login_locked"   // login attempt while account is in lockout window
+	EventAccountLocked              EventType = "account_locked" // threshold tripped, lockout window opened
+	EventLogout                     EventType = "logout"
+	EventPasswordChanged            EventType = "password_changed"
+	EventPasswordReset              EventType = "password_reset"
+	EventTotpEnabled                EventType = "totp_enabled"
+	EventTotpDisabled               EventType = "totp_disabled"
+	EventTotpVerified               EventType = "totp_verified"
+	EventPasskeyAdded               EventType = "passkey_added"
+	EventPasskeyRemoved             EventType = "passkey_removed"
+	EventPasskeyUsed                EventType = "passkey_used"
+	EventPasskeyEligibilityVerified EventType = "passkey_eligibility_verified" // #nosec G101 -- public audit event name, not a credential.
 	// EventAssuranceAttested records a client-attestation attempt
 	// (App Attest / Play Integrity / web captcha exchange). Actor-less:
 	// assurance verifies the client before anyone signs in.
@@ -495,6 +496,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventPasskeyAdded:                  {},
 	EventPasskeyRemoved:                {},
 	EventPasskeyUsed:                   {},
+	EventPasskeyEligibilityVerified:    {},
 	EventAssuranceAttested:             {},
 	EventSessionRevoked:                {},
 	EventUserInvited:                   {},

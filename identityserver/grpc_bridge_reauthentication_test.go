@@ -8,7 +8,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"strconv"
 	"testing"
+	"time"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/service"
@@ -30,7 +32,7 @@ func TestReauthenticationNativeGRPCBoundProof(t *testing.T) {
 	require.NoError(t, err)
 	b64 := base64.RawURLEncoding.EncodeToString
 	credentialID := b64([]byte("native-passkey-fixture"))
-	_, err = repo.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{UserID: user, CredentialID: credentialID, PublicKey: base64.StdEncoding.EncodeToString(public)})
+	_, err = repo.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{UserID: user, CredentialID: credentialID, PublicKey: base64.StdEncoding.EncodeToString(public), ReauthenticationEligible: true})
 	require.NoError(t, err)
 	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("x-project-key", "pk_native", "x-authenticated-user-id", user))
 	begin, err := client.BeginReauthentication(ctx, &identitypb.BeginReauthenticationRequest{Action: "account.pin.set", ResourceId: user})
@@ -68,4 +70,17 @@ func TestReauthenticationNativeGRPCRequiresProject(t *testing.T) {
 		_, err := client.BeginReauthentication(ctx, &identitypb.BeginReauthenticationRequest{Action: "account.pin.set", ResourceId: family.GuardianUserId})
 		require.Equal(t, codes.Unauthenticated, status.Code(err))
 	}
+}
+
+func TestPasskeyEligibilityNativeGRPCDoesNotTrustUnvouchedClaims(t *testing.T) {
+	client, _, family := nativeChildFixture(t)
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs(
+		"x-project-key", "pk_native", "x-authenticated-user-id", family.GuardianUserId,
+		"x-authenticated-auth-time", strconv.FormatInt(time.Now().Unix(), 10),
+		"x-authenticated-amr", service.AMRCredentialEnrollment,
+	))
+	_, err := client.BeginPasskeyEligibilityVerification(ctx, &identitypb.BeginPasskeyEligibilityVerificationRequest{CredentialId: "target"})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	_, err = client.CompletePasskeyEligibilityVerification(ctx, &identitypb.CompletePasskeyEligibilityVerificationRequest{CredentialId: "target", ChallengeId: "id", CredentialJson: "{}"})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 }

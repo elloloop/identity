@@ -168,7 +168,7 @@ func TestRefreshToken_SessionMode_IdleTimeoutRevokesAccessSession(t *testing.T) 
 	user := seedUser(repo, "alice@acme.com", "", "active")
 
 	// Initial login mints an access session (sid) + refresh token.
-	access, raw, err := svc.issueTokens(ctx, user, "", "")
+	access, raw, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 	require.NoError(t, err)
@@ -211,7 +211,7 @@ func TestRefreshToken_TTLMode_IdleTimeoutLeavesSessionStoreUntouched(t *testing.
 	ctx := withProject("proj-1")
 
 	user := seedUser(repo, "alice@acme.com", "", "active")
-	access, raw, err := svc.issueTokens(ctx, user, "", "")
+	access, raw, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 
 	// mode=ttl mints no session and no sid claim.
@@ -281,7 +281,7 @@ func TestRefreshToken_AbsoluteTimeoutAnchoredAcrossRefreshes(t *testing.T) {
 	user := seedUser(repo, "alice@acme.com", "", "active")
 
 	// Initial login anchors the session's absolute lifetime at `start`.
-	_, raw, err := svc.issueTokens(ctx, user, "", "")
+	_, raw, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 	require.NotEmpty(t, raw)
 

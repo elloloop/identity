@@ -410,7 +410,7 @@ func TestModeSession_RevokeFailureIsBestEffort(t *testing.T) {
 // refresh token and the sid its access token carries.
 func openSession(t *testing.T, svc *AuthService, user *User) (string, string) {
 	t.Helper()
-	access, refresh, err := svc.issueTokens(context.Background(), user, "", "")
+	access, refresh, err := svc.issueTokens(context.Background(), user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 	claims, err := jwt.VerifyAccessToken(access, svc.signer, "", "", false)
 	require.NoError(t, err)

@@ -38,7 +38,7 @@ func TestIssueTokens_VerifiedEmailGate(t *testing.T) {
 			user.EmailVerified = tc.verified
 			user.IsAnonymous = tc.anonymous
 
-			access, refresh, err := svc.issueTokens(context.Background(), user, "", "")
+			access, refresh, err := svc.issueTokens(context.Background(), user, "", "", credentialEnrollment{Trusted: true})
 			if !tc.wantErr {
 				require.NoError(t, err)
 				assert.NotEmpty(t, access)
@@ -70,7 +70,7 @@ func TestRefreshToken_VerifiedEmailGate(t *testing.T) {
 	ctx := context.Background()
 	user := seedUser(repo, "later@example.com", "", StatusActive)
 	user.EmailVerified = true
-	_, refresh, err := svc.issueTokens(ctx, user, "", "")
+	_, refresh, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 
 	svc.cfg.AuthRequireVerifiedEmail = true
@@ -95,7 +95,7 @@ func TestRefreshToken_VerifiedEmailGateSendsNoEmail(t *testing.T) {
 	ctx := context.Background()
 	user := seedUser(repo, "quiet@example.com", "", StatusActive)
 	user.EmailVerified = true
-	_, refresh, err := svc.issueTokens(ctx, user, "", "")
+	_, refresh, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 
 	svc.cfg.AuthRequireVerifiedEmail = true
@@ -196,7 +196,7 @@ func TestIssueTokensWithSessionStart_VerifiedEmailBackstop(t *testing.T) {
 	svc.cfg.AuthRequireVerifiedEmail = true
 	user := seedUser(repo, "backstop@example.com", "", StatusActive)
 
-	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", sessionGateSignIn, 0, 0, 0, "", "")
+	_, _, err := svc.issueTokensWithSessionStart(context.Background(), user, "", "", sessionGateSignIn, 0, 0, 0, "", "", credentialEnrollment{})
 	require.ErrorIs(t, err, ErrEmailVerificationRequired)
 	assert.Zero(t, writer.countByEventType("login_failure"))
 }
@@ -228,7 +228,7 @@ func TestRefreshToken_VerifiedEmailGateRunsBeforeTheDOBStep(t *testing.T) {
 	ctx := context.Background()
 	user := seedUser(repo, "nodob@example.com", "", StatusActive)
 	user.EmailVerified = true
-	_, refresh, err := svc.issueTokens(ctx, user, "", "")
+	_, refresh, err := svc.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	require.NoError(t, err)
 
 	svc.cfg.AuthRequireVerifiedEmail = true

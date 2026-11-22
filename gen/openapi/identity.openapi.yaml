@@ -1186,6 +1186,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.BeginOAuthLoginResponse'
+  /identity.v1.IdentityService/BeginPasskeyEligibilityVerification:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: BeginPasskeyEligibilityVerification
+      operationId: identity.v1.IdentityService.BeginPasskeyEligibilityVerification
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.BeginPasskeyEligibilityVerificationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.BeginPasskeyEligibilityVerificationResponse'
   /identity.v1.IdentityService/BeginPasskeyLogin:
     post:
       tags:
@@ -1473,6 +1508,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ChangePasswordResponse'
+  /identity.v1.IdentityService/CompletePasskeyEligibilityVerification:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CompletePasskeyEligibilityVerification
+      operationId: identity.v1.IdentityService.CompletePasskeyEligibilityVerification
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CompletePasskeyEligibilityVerificationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CompletePasskeyEligibilityVerificationResponse'
   /identity.v1.IdentityService/CompletePasskeyLogin:
     post:
       tags:
@@ -8194,6 +8264,30 @@ components:
           format: int32
       title: BeginOAuthLoginResponse
       additionalProperties: false
+    identity.v1.BeginPasskeyEligibilityVerificationRequest:
+      type: object
+      properties:
+        credentialId:
+          type: string
+          title: credential_id
+      title: BeginPasskeyEligibilityVerificationRequest
+      additionalProperties: false
+      description: |-
+        An explicit migration ceremony for an existing owned passkey. Both steps
+         require independently trusted authentication within five minutes. Legacy
+         passkey, recovery, QR and unmarked sessions cannot authorize it. No request
+         can assert eligibility. Cancelling leaves the credential unchanged.
+    identity.v1.BeginPasskeyEligibilityVerificationResponse:
+      type: object
+      properties:
+        optionsJson:
+          type: string
+          title: options_json
+        challengeId:
+          type: string
+          title: challenge_id
+      title: BeginPasskeyEligibilityVerificationResponse
+      additionalProperties: false
     identity.v1.BeginPasskeyLoginRequest:
       type: object
       properties:
@@ -8373,6 +8467,32 @@ components:
     identity.v1.ChangePasswordResponse:
       type: object
       title: ChangePasswordResponse
+      additionalProperties: false
+    identity.v1.CompletePasskeyEligibilityVerificationRequest:
+      type: object
+      properties:
+        credentialId:
+          type: string
+          title: credential_id
+        challengeId:
+          type: string
+          title: challenge_id
+        credentialJson:
+          type: string
+          title: credential_json
+      title: CompletePasskeyEligibilityVerificationRequest
+      additionalProperties: false
+    identity.v1.CompletePasskeyEligibilityVerificationResponse:
+      type: object
+      properties:
+        credential:
+          title: credential
+          description: |-
+            Owner-visible metadata after the server verifies and atomically consumes
+             a user-verified assertion for this exact account, project and credential.
+             The credential remains the same ordinary sign-in key.
+          $ref: '#/components/schemas/identity.v1.PasskeyCredentialInfo'
+      title: CompletePasskeyEligibilityVerificationResponse
       additionalProperties: false
     identity.v1.CompletePasskeyLoginRequest:
       type: object
@@ -11424,6 +11544,16 @@ components:
         lastUsedAt:
           title: last_used_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
+        reauthenticationEligible:
+          type: boolean
+          title: reauthentication_eligible
+          description: |-
+            Server-written provenance for sensitive operation assertions. False on
+             pre-upgrade or otherwise unproven enrolments, which remain usable for
+             ordinary sign-in. A legacy-key session, refresh or product-session
+             exchange cannot make another key eligible. Sign in through an independent
+             trusted method and enrol or explicitly reverify a key. This metadata is visible only to its
+             owner and cannot be supplied on a registration request.
       title: PasskeyCredentialInfo
       additionalProperties: false
     identity.v1.PasskeyReauthentication:

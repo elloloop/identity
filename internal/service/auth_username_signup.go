@@ -141,7 +141,7 @@ func (s *AuthService) UsernameSignup(ctx context.Context, username, password, na
 	s.logger.Info("username_signup_success", zap.String("user_id", id))
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, user)
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, "", "")
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, "", "", credentialEnrollment{Trusted: true})
 	if err != nil {
 		return nil, err
 	}

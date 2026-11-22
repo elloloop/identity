@@ -1750,6 +1750,9 @@ func TestDeletePasskey_Success(t *testing.T) {
 	pwHash := mustHash(t, strongPW)
 	h.db.addUserWithPassword("u-pk", "u@e.com", "U", "member", "active", pwHash)
 	h.db.addPasskey("pk-1", "u-pk", "cred-1", "iPhone")
+	if _, err := h.repo.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{NodeID: "pk-1", UserID: "u-pk", CredentialID: "cred-1", DeviceName: "iPhone", ReauthenticationEligible: true}); err != nil {
+		t.Fatal(err)
+	}
 
 	// ListPasskeys success.
 	lp, err := h.client.ListPasskeys(ctx,
@@ -1757,8 +1760,8 @@ func TestDeletePasskey_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list passkeys: %v", err)
 	}
-	if len(lp.Msg.Credentials) == 0 {
-		t.Fatal("expected at least one passkey")
+	if len(lp.Msg.Credentials) != 1 || !lp.Msg.Credentials[0].ReauthenticationEligible {
+		t.Fatal("expected one server-eligible passkey")
 	}
 
 	// DeletePasskey success.

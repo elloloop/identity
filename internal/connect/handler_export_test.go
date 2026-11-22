@@ -30,7 +30,9 @@ func TestExportMyData_HappyPath(t *testing.T) {
 	})
 
 	h.db.addRefreshToken("sess-1", u.ID, farFuture)
-	h.db.addPasskey("pk-1", u.ID, "cred-1", "My Laptop")
+	if _, err := h.repo.CreatePasskeyCredential(ctx, &service.PasskeyCredRecord{UserID: u.ID, CredentialID: "cred-1", DeviceName: "My Laptop", ReauthenticationEligible: true}); err != nil {
+		t.Fatal(err)
+	}
 	if err := h.repo.CreateOAuthIdentity(ctx, &service.OAuthIdentity{
 		UserID: u.ID, Provider: "google", ProviderUserID: "g-1",
 		EmailAtLinkTime: "export@e.com", CreatedAt: 100,

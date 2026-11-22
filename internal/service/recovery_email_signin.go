@@ -172,5 +172,5 @@ func (s *AuthService) startRecoveryEmailSession(ctx context.Context, user *User,
 			"your agent machines and teammate keys, and the owners and roles of your tenants.",
 			addr, time.UnixMilli(until).UTC().Format("2 January 2006 at 15:04 UTC")),
 	})
-	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, recoveryEmailID)
+	return s.issueSignInTokens(ctx, user, ipAddr, userAgent, now, now, recoveryEmailID, credentialEnrollment{})
 }

@@ -34,7 +34,7 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID strin
 	}
 	if !enrolment {
 		var err error
-		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
+		ctx, err = s.credentialEnrollmentContext(ctx, userID, signIn)
 		if err != nil {
 			return "", "", err
 		}
@@ -138,7 +138,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID st
 	}
 	if !issueSession {
 		var err error
-		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
+		ctx, err = s.credentialEnrollmentContext(ctx, userID, signIn)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -205,17 +205,18 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID st
 
 	now := s.nowMs()
 	_, err = s.repo(ctx).CreatePasskeyCredential(ctx, &PasskeyCredRecord{
-		CredentialID:   result.CredentialID,
-		UserID:         userID,
-		PublicKey:      result.PublicKey,
-		SignCount:      int64(result.SignCount),
-		DeviceName:     deviceName,
-		AAGUID:         result.AAGUID,
-		Transports:     result.Transports,
-		BackupEligible: result.BackupEligible,
-		BackupState:    result.BackupState,
-		CreatedAt:      now,
-		LastUsedAt:     now,
+		CredentialID:             result.CredentialID,
+		UserID:                   userID,
+		PublicKey:                result.PublicKey,
+		ReauthenticationEligible: !issueSession,
+		SignCount:                int64(result.SignCount),
+		DeviceName:               deviceName,
+		AAGUID:                   result.AAGUID,
+		Transports:               result.Transports,
+		BackupEligible:           result.BackupEligible,
+		BackupState:              result.BackupState,
+		CreatedAt:                now,
+		LastUsedAt:               now,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("storing credential: %w", err)
@@ -244,10 +245,11 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID st
 	)
 
 	info := &PasskeyInfo{
-		CredentialID: result.CredentialID,
-		DeviceName:   deviceName,
-		CreatedAt:    msToTime(now),
-		LastUsedAt:   msToTime(now),
+		CredentialID:             result.CredentialID,
+		ReauthenticationEligible: !issueSession,
+		DeviceName:               deviceName,
+		CreatedAt:                msToTime(now),
+		LastUsedAt:               msToTime(now),
 	}
 	if !issueSession {
 		return info, nil, nil
@@ -269,7 +271,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID st
 	if err := s.checkAccountStatus(ctx, user, ipAddr, userAgent, sessionGateSignIn); err != nil {
 		return nil, nil, err
 	}
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent, credentialEnrollment{})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -459,7 +461,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		return nil, err
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, ipAddr, userAgent, credentialEnrollment{Trusted: cred.ReauthenticationEligible, PasskeyID: cred.CredentialID})
 	if err != nil {
 		return nil, err
 	}
