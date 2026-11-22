@@ -612,7 +612,7 @@ func (r *sqliteRepository) deleteUser(ctx context.Context, userID, guardianID st
  JOIN users guardian ON guardian.project_id=child.project_id AND guardian.id=$3
  JOIN guardian_edges edge ON edge.project_id=child.project_id AND edge.child_user_id=child.id AND edge.guardian_user_id=guardian.id
  WHERE child.project_id=$1 AND child.id=$2
- AND lower(guardian.status) IN ('','active') AND lower(child.status) IN ('','active','deactivated')
+ AND lower(guardian.status) IN ('','active') AND lower(child.status) IN ('','active','deactivated','pending_deletion')
  AND NOT guardian.is_anonymous AND guardian.kind<>'agent' AND guardian.merged_into_user_id=''
  AND NOT child.is_anonymous AND child.kind<>'agent' AND child.merged_into_user_id='' `, r.projectID, userID, guardianID).Scan(&id)
 		if noRows(err) {

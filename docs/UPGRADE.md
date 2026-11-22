@@ -5,7 +5,8 @@
 `DeleteManagedChildAccount` records an exact project, initiating guardian and
 child completion receipt in the same transaction that erases the user. That
 transaction locks and rechecks the guardian edge and current participant
-status. A child re-gated for withdrawn consent, an inactive guardian or a
+status, also checked before session revocation or group cleanup. Active,
+deactivated and pending-self-deletion children remain erasable. A child re-gated for withdrawn consent, an inactive guardian or a
 removed edge prevents final erasure and creates no receipt. Ordinary/admin
 `DeleteUser` never creates guardian completion receipts.
 

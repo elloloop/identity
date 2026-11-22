@@ -47,7 +47,7 @@ var ErrGuardianRightsExpired = errors.New("the managed account has reached the a
 // Re-gating a child on consent withdrawal must defeat a concurrent deletion.
 func GuardianDeletionParticipantsAllowed(guardian, child *User) bool {
 	return isActivePerson(guardian) && isPermanentPerson(child) &&
-		(isActiveStatus(child.Status) || strings.ToLower(child.Status) == StatusDeactivated)
+		(isActiveStatus(child.Status) || strings.ToLower(child.Status) == StatusDeactivated || strings.ToLower(child.Status) == StatusPendingDeletion)
 }
 
 // guardianOperation pairs each operation with its audit event and proof binding.
@@ -503,6 +503,13 @@ func (s *AuthService) DeleteManagedChildAccount(
 	ctx, child, err := s.authorizeGuardianAction(ctx, guardianOpDeleteChild, guardianUserID, signIn, childUserID, stepUpPassword, stepUpPasskey, ip, userAgent)
 	if err != nil {
 		return err
+	}
+	guardian, err := s.repo(ctx).GetUser(ctx, guardianUserID)
+	if err != nil {
+		return fmt.Errorf("check erasure participants: %w", err)
+	}
+	if !GuardianDeletionParticipantsAllowed(guardian, child) {
+		return fmt.Errorf("%w: %s", ErrPermissionDenied, guardianRefusalNotAllowed)
 	}
 	if s.purger == nil {
 		return fmt.Errorf("%w: account erasure is not wired on this deployment", ErrServiceUnavailable)

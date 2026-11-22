@@ -23,6 +23,18 @@ func guardianDeletionPair(t *testing.T, repo service.Repository) (string, string
 
 func runGuardianDeletionConformance(t *testing.T, driver Driver) {
 	t.Helper()
+	for _, status := range []string{service.StatusActive, service.StatusDeactivated, service.StatusPendingDeletion} {
+		t.Run(driver.Name+"/GuardianDeletionAllowedStatus/"+status, func(t *testing.T) {
+			repo := driver.NewRepo(t)
+			guardian, child := guardianDeletionPair(t, repo)
+			ctx := context.Background()
+			require.NoError(t, repo.UpdateUser(ctx, child, map[string]any{"status": status}))
+			require.NoError(t, repo.DeleteUserWithGuardianReceipt(ctx, child, guardian, 1000))
+			completed, err := repo.HasGuardianDeletionReceipt(ctx, guardian, child)
+			require.NoError(t, err)
+			require.True(t, completed)
+		})
+	}
 	t.Run(driver.Name+"/GuardianDeletionReceipt", func(t *testing.T) {
 		repo := driver.NewRepo(t)
 		guardian, child := guardianDeletionPair(t, repo)

@@ -101,3 +101,50 @@ func TestGuardianDeletionReceiptOutageFailsClosed(t *testing.T) {
 	f.service.defaultRepo = unavailableGuardianReceipts{f.repo}
 	require.ErrorIs(t, f.service.DeleteManagedChildAccount(context.Background(), f.user.ID, SessionSignIn{}, "child", "", proof, "", ""), ErrServiceUnavailable)
 }
+
+func TestGuardianDeletionParticipantPolicy(t *testing.T) {
+	for _, status := range []string{"", StatusActive, StatusDeactivated, StatusPendingDeletion} {
+		require.True(t, GuardianDeletionParticipantsAllowed(&User{Status: StatusActive}, &User{Status: status}))
+	}
+	for _, invalid := range []*User{
+		nil,
+		{Status: StatusPendingParentalConsent},
+		{Status: StatusInvited},
+		{Status: " active "},
+		{Kind: UserKindAgent},
+		{IsAnonymous: true},
+		{MergedIntoUserID: "other"},
+	} {
+		require.False(t, GuardianDeletionParticipantsAllowed(&User{Status: StatusActive}, invalid))
+		require.False(t, GuardianDeletionParticipantsAllowed(invalid, &User{Status: StatusActive}))
+	}
+	require.False(t, GuardianDeletionParticipantsAllowed(&User{Status: StatusDeactivated}, &User{Status: StatusActive}))
+}
+
+func TestGuardianDeletionChecksStatusBeforeDestructiveCleanup(t *testing.T) {
+	for _, status := range []string{StatusPendingDeletion, StatusPendingParentalConsent} {
+		t.Run(status, func(t *testing.T) {
+			f := newReauthenticationFixture(t)
+			child := seedManagedChild(t, f.repo, "child.example", f.service.nowFunc().AddDate(-8, 0, 0).UnixMilli())
+			child.Status = status
+			ctx := context.Background()
+			seedGuardianEdge(ctx, t, f.repo, f.user.ID, child.ID)
+			seedChildSession(t, f.repo, child.ID)
+			purger := &fakePurger{repo: f.repo}
+			f.service.WithAccountPurger(purger)
+			proof := f.proof(t, "guardian.delete_child", child.ID, true)
+			err := f.service.DeleteManagedChildAccount(ctx, f.user.ID, SessionSignIn{}, child.ID, "", proof, "", "")
+			if status == StatusPendingDeletion {
+				require.NoError(t, err)
+				require.Len(t, purger.calls, 1)
+			} else {
+				require.ErrorIs(t, err, ErrPermissionDenied)
+				require.Empty(t, purger.calls)
+				session, err := f.repo.GetSessionBySid(ctx, "sess-"+child.ID)
+				require.NoError(t, err)
+				require.NotNil(t, session)
+				require.Zero(t, session.RevokedAtMs)
+			}
+		})
+	}
+}
