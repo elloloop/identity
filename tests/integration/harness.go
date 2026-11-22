@@ -1546,6 +1546,18 @@ func (r *MemRepo) DeletePasskeyChallenge(_ context.Context, nodeID string) error
 	return nil
 }
 
+func (r *MemRepo) ConsumeReauthenticationChallenge(_ context.Context, nodeID, userID, action, resourceID string, atMs int64) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c := r.passkeyChallenges[nodeID]
+	if c == nil || action == "" || c.UserID != userID || c.Action != action || c.ResourceID != resourceID ||
+		c.ChallengeType != "authentication" || c.CreatedAt > atMs || c.ExpiresAt <= atMs {
+		return false, nil
+	}
+	delete(r.passkeyChallenges, nodeID)
+	return true, nil
+}
+
 // ── QR Login Sessions ─────────────────────────────────────────────
 
 func (r *MemRepo) FindQrLoginSession(_ context.Context, sessionID string) (*service.QrLoginSessionRecord, error) {

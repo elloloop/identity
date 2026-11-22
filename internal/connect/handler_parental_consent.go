@@ -35,7 +35,7 @@ func (h *IdentityHandler) GrantParentalConsent(
 		req.Msg.GetChildUserId(),
 		req.Msg.GetPolicyVersion(),
 		req.Msg.GetStepUpPassword(),
-		clientIP(req.Header()),
+		passkeyReauthentication(req.Msg.GetStepUpPasskey()), clientIP(req.Header()),
 		clientUserAgent(req.Header()),
 	)
 	if err != nil {

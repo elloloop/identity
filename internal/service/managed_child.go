@@ -30,7 +30,7 @@ import (
 //
 // The same two server-enforced checks as GrantParentalConsent apply to the
 // calling adult: a strong verified factor on the adult's account AND a
-// step-up password re-entry. Both are mandatory; a modified client cannot
+// password re-entry or a fresh user-verified passkey assertion. A modified client cannot
 // bypass either (the caller's identity comes from the verified session,
 // never from the request).
 
@@ -112,6 +112,7 @@ type ManagedChildAccountRequest struct {
 	PasskeyEnrolment bool   // bootstrap passkey enrolment instead of a password
 	PolicyVersion    string // consent policy version, as in GrantParentalConsent
 	StepUpPassword   string // the calling adult's password re-entry
+	StepUpPasskey    *PasskeyReauthentication
 }
 
 // ManagedChildAccountResult is the outcome of a successful creation: the
@@ -218,7 +219,7 @@ func (s *AuthService) CreateManagedChildAccount(
 	// 2. Step-up re-authentication + strong verified factor — the same two
 	// mandatory checks as GrantParentalConsent, verified before any state
 	// change so a caller holding only a session token cannot create accounts.
-	admitted, reauthenticated := s.stepUp(ctx, caller, req.StepUpPassword)
+	admitted, reauthenticated := s.stepUp(ctx, caller, req.StepUpPassword, req.StepUpPasskey, "guardian.create_child", "")
 	if !admitted {
 		s.auditManagedChildFailure(ctx, callerUserID, "step_up", ip, userAgent)
 		return nil, ErrParentalConsentStepUpFailed

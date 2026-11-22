@@ -164,11 +164,11 @@ func TestAnonymousAccount_CannotAttachCredentialsOutsideUpgrade(t *testing.T) {
 			return err
 		}},
 		{"BeginPasskeyRegistration", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
-			_, _, err := svc.BeginPasskeyRegistration(ctx, id, SessionSignIn{}, "device")
+			_, _, err := svc.BeginPasskeyRegistration(ctx, id, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "device", false)
 			return err
 		}},
 		{"CompletePasskeyRegistration", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {
-			_, _, err := svc.CompletePasskeyRegistration(ctx, id, SessionSignIn{}, "challenge", `{"id":"x"}`, "device", false, "", "")
+			_, _, err := svc.CompletePasskeyRegistration(ctx, id, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "challenge", `{"id":"x"}`, "device", false, "", "")
 			return err
 		}},
 		{"RequestPhoneVerification", func(_ *fakeRepo, svc *AuthService, ctx context.Context, id string) error {

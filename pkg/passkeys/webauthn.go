@@ -232,8 +232,16 @@ func (s *WebAuthnService) CompleteRegistration(
 func (s *WebAuthnService) BeginAuthentication(
 	allowedCredIDs []string,
 ) (optionsJSON string, challenge string, err error) {
+	return s.beginAuthentication(allowedCredIDs, protocol.VerificationPreferred)
+}
+
+func (s *WebAuthnService) BeginUserVerifiedAuthentication(allowedCredIDs []string) (string, string, error) {
+	return s.beginAuthentication(allowedCredIDs, protocol.VerificationRequired)
+}
+
+func (s *WebAuthnService) beginAuthentication(allowedCredIDs []string, verification protocol.UserVerificationRequirement) (string, string, error) {
 	opts := []webauthn.LoginOption{
-		webauthn.WithUserVerification(protocol.VerificationPreferred),
+		webauthn.WithUserVerification(verification),
 	}
 
 	var (
@@ -296,6 +304,14 @@ func (s *WebAuthnService) CompleteAuthentication(
 	backupEligible bool,
 	backupState bool,
 ) (newSignCount uint32, err error) {
+	return s.completeAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64, storedSignCount, storedCredentialID, userID, backupEligible, backupState, false)
+}
+
+func (s *WebAuthnService) CompleteUserVerifiedAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64 string, storedSignCount uint32, storedCredentialID, userID string, backupEligible, backupState bool) (uint32, error) {
+	return s.completeAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64, storedSignCount, storedCredentialID, userID, backupEligible, backupState, true)
+}
+
+func (s *WebAuthnService) completeAuthentication(credentialJSON, expectedChallenge, storedPublicKeyB64 string, storedSignCount uint32, storedCredentialID, userID string, backupEligible, backupState, requireVerification bool) (uint32, error) {
 	credIDBytes, decErr := b64urlDecode(storedCredentialID)
 	if decErr != nil {
 		return 0, fmt.Errorf("passkeys: decoding stored credential ID: %w", decErr)
@@ -343,6 +359,9 @@ func (s *WebAuthnService) CompleteAuthentication(
 	session := webauthn.SessionData{
 		Challenge: expectedChallenge,
 		UserID:    user.ID,
+	}
+	if requireVerification {
+		session.UserVerification = protocol.VerificationRequired
 	}
 
 	credential, loginErr := s.wa.ValidateLogin(user, session, parsedResponse)

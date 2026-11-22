@@ -980,7 +980,7 @@ func TestBeginPasskeyRegistration_ReturnsOptions(t *testing.T) {
 	svc := newTestAuthService(t, repo)
 	u := seedUser(repo, "passkey@example.com", "", "active")
 
-	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, SessionSignIn{}, "My Key")
+	optionsJSON, challengeID, err := svc.BeginPasskeyRegistration(context.Background(), u.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}, "My Key", false)
 	require.NoError(t, err)
 	assert.NotEmpty(t, optionsJSON)
 	assert.NotEmpty(t, challengeID)

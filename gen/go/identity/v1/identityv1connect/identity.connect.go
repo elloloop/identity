@@ -569,6 +569,12 @@ const (
 	// IdentityServiceMatchTenantMemberPhonesProcedure is the fully-qualified name of the
 	// IdentityService's MatchTenantMemberPhones RPC.
 	IdentityServiceMatchTenantMemberPhonesProcedure = "/identity.v1.IdentityService/MatchTenantMemberPhones"
+	// IdentityServiceBeginReauthenticationProcedure is the fully-qualified name of the
+	// IdentityService's BeginReauthentication RPC.
+	IdentityServiceBeginReauthenticationProcedure = "/identity.v1.IdentityService/BeginReauthentication"
+	// IdentityServiceVerifyReauthenticationProcedure is the fully-qualified name of the
+	// IdentityService's VerifyReauthentication RPC.
+	IdentityServiceVerifyReauthenticationProcedure = "/identity.v1.IdentityService/VerifyReauthentication"
 	// IdentityServiceGetProjectEmailDeliveryProcedure is the fully-qualified name of the
 	// IdentityService's GetProjectEmailDelivery RPC.
 	IdentityServiceGetProjectEmailDeliveryProcedure = "/identity.v1.IdentityService/GetProjectEmailDelivery"
@@ -1302,6 +1308,12 @@ type IdentityServiceClient interface {
 	// as directory_phone_match with the tenant and the number of hashes asked
 	// for and matched, never the hashes.
 	MatchTenantMemberPhones(context.Context, *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error)
+	// BeginReauthentication requires an active known adult with enrolled passkeys.
+	// The challenge requests user verification and expires after at most two minutes.
+	BeginReauthentication(context.Context, *connect.Request[v1.BeginReauthenticationRequest]) (*connect.Response[v1.BeginReauthenticationResponse], error)
+	// VerifyReauthentication checks and consumes the exact action/resource-bound
+	// assertion for the authenticated adult. It issues no token or session.
+	VerifyReauthentication(context.Context, *connect.Request[v1.VerifyReauthenticationRequest]) (*connect.Response[v1.VerifyReauthenticationResponse], error)
 	// GetProjectEmailDelivery exposes only the resolved project's email policy.
 	// Resolve the project exactly as for authentication and recovery calls.
 	// This request requires no user session or email address.
@@ -2387,6 +2399,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("MatchTenantMemberPhones")),
 			connect.WithClientOptions(opts...),
 		),
+		beginReauthentication: connect.NewClient[v1.BeginReauthenticationRequest, v1.BeginReauthenticationResponse](
+			httpClient,
+			baseURL+IdentityServiceBeginReauthenticationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("BeginReauthentication")),
+			connect.WithClientOptions(opts...),
+		),
+		verifyReauthentication: connect.NewClient[v1.VerifyReauthenticationRequest, v1.VerifyReauthenticationResponse](
+			httpClient,
+			baseURL+IdentityServiceVerifyReauthenticationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("VerifyReauthentication")),
+			connect.WithClientOptions(opts...),
+		),
 		getProjectEmailDelivery: connect.NewClient[v1.GetProjectEmailDeliveryRequest, v1.GetProjectEmailDeliveryResponse](
 			httpClient,
 			baseURL+IdentityServiceGetProjectEmailDeliveryProcedure,
@@ -2577,6 +2601,8 @@ type identityServiceClient struct {
 	getManagedChildAuthorization      *connect.Client[v1.GetManagedChildAuthorizationRequest, v1.GetManagedChildAuthorizationResponse]
 	lookupUsers                       *connect.Client[v1.LookupUsersRequest, v1.LookupUsersResponse]
 	matchTenantMemberPhones           *connect.Client[v1.MatchTenantMemberPhonesRequest, v1.MatchTenantMemberPhonesResponse]
+	beginReauthentication             *connect.Client[v1.BeginReauthenticationRequest, v1.BeginReauthenticationResponse]
+	verifyReauthentication            *connect.Client[v1.VerifyReauthenticationRequest, v1.VerifyReauthenticationResponse]
 	getProjectEmailDelivery           *connect.Client[v1.GetProjectEmailDeliveryRequest, v1.GetProjectEmailDeliveryResponse]
 }
 
@@ -3472,6 +3498,16 @@ func (c *identityServiceClient) MatchTenantMemberPhones(ctx context.Context, req
 	return c.matchTenantMemberPhones.CallUnary(ctx, req)
 }
 
+// BeginReauthentication calls identity.v1.IdentityService.BeginReauthentication.
+func (c *identityServiceClient) BeginReauthentication(ctx context.Context, req *connect.Request[v1.BeginReauthenticationRequest]) (*connect.Response[v1.BeginReauthenticationResponse], error) {
+	return c.beginReauthentication.CallUnary(ctx, req)
+}
+
+// VerifyReauthentication calls identity.v1.IdentityService.VerifyReauthentication.
+func (c *identityServiceClient) VerifyReauthentication(ctx context.Context, req *connect.Request[v1.VerifyReauthenticationRequest]) (*connect.Response[v1.VerifyReauthenticationResponse], error) {
+	return c.verifyReauthentication.CallUnary(ctx, req)
+}
+
 // GetProjectEmailDelivery calls identity.v1.IdentityService.GetProjectEmailDelivery.
 func (c *identityServiceClient) GetProjectEmailDelivery(ctx context.Context, req *connect.Request[v1.GetProjectEmailDeliveryRequest]) (*connect.Response[v1.GetProjectEmailDeliveryResponse], error) {
 	return c.getProjectEmailDelivery.CallUnary(ctx, req)
@@ -4196,6 +4232,12 @@ type IdentityServiceHandler interface {
 	// as directory_phone_match with the tenant and the number of hashes asked
 	// for and matched, never the hashes.
 	MatchTenantMemberPhones(context.Context, *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error)
+	// BeginReauthentication requires an active known adult with enrolled passkeys.
+	// The challenge requests user verification and expires after at most two minutes.
+	BeginReauthentication(context.Context, *connect.Request[v1.BeginReauthenticationRequest]) (*connect.Response[v1.BeginReauthenticationResponse], error)
+	// VerifyReauthentication checks and consumes the exact action/resource-bound
+	// assertion for the authenticated adult. It issues no token or session.
+	VerifyReauthentication(context.Context, *connect.Request[v1.VerifyReauthenticationRequest]) (*connect.Response[v1.VerifyReauthenticationResponse], error)
 	// GetProjectEmailDelivery exposes only the resolved project's email policy.
 	// Resolve the project exactly as for authentication and recovery calls.
 	// This request requires no user session or email address.
@@ -5277,6 +5319,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("MatchTenantMemberPhones")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceBeginReauthenticationHandler := connect.NewUnaryHandler(
+		IdentityServiceBeginReauthenticationProcedure,
+		svc.BeginReauthentication,
+		connect.WithSchema(identityServiceMethods.ByName("BeginReauthentication")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceVerifyReauthenticationHandler := connect.NewUnaryHandler(
+		IdentityServiceVerifyReauthenticationProcedure,
+		svc.VerifyReauthentication,
+		connect.WithSchema(identityServiceMethods.ByName("VerifyReauthentication")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceGetProjectEmailDeliveryHandler := connect.NewUnaryHandler(
 		IdentityServiceGetProjectEmailDeliveryProcedure,
 		svc.GetProjectEmailDelivery,
@@ -5642,6 +5696,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceLookupUsersHandler.ServeHTTP(w, r)
 		case IdentityServiceMatchTenantMemberPhonesProcedure:
 			identityServiceMatchTenantMemberPhonesHandler.ServeHTTP(w, r)
+		case IdentityServiceBeginReauthenticationProcedure:
+			identityServiceBeginReauthenticationHandler.ServeHTTP(w, r)
+		case IdentityServiceVerifyReauthenticationProcedure:
+			identityServiceVerifyReauthenticationHandler.ServeHTTP(w, r)
 		case IdentityServiceGetProjectEmailDeliveryProcedure:
 			identityServiceGetProjectEmailDeliveryHandler.ServeHTTP(w, r)
 		default:
@@ -6363,6 +6421,14 @@ func (UnimplementedIdentityServiceHandler) LookupUsers(context.Context, *connect
 
 func (UnimplementedIdentityServiceHandler) MatchTenantMemberPhones(context.Context, *connect.Request[v1.MatchTenantMemberPhonesRequest]) (*connect.Response[v1.MatchTenantMemberPhonesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.MatchTenantMemberPhones is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) BeginReauthentication(context.Context, *connect.Request[v1.BeginReauthenticationRequest]) (*connect.Response[v1.BeginReauthenticationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.BeginReauthentication is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) VerifyReauthentication(context.Context, *connect.Request[v1.VerifyReauthenticationRequest]) (*connect.Response[v1.VerifyReauthenticationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.VerifyReauthentication is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) GetProjectEmailDelivery(context.Context, *connect.Request[v1.GetProjectEmailDeliveryRequest]) (*connect.Response[v1.GetProjectEmailDeliveryResponse], error) {

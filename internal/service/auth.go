@@ -456,6 +456,9 @@ type Repository interface {
 	GetPasskeyChallenge(ctx context.Context, nodeID string) (*PasskeyChallengeRecord, error)
 	CreatePasskeyChallenge(ctx context.Context, r *PasskeyChallengeRecord) (string, error)
 	DeletePasskeyChallenge(ctx context.Context, nodeID string) error
+	// ConsumeReauthenticationChallenge deletes only a live challenge with the
+	// exact caller and action binding. Concurrent callers have one winner.
+	ConsumeReauthenticationChallenge(ctx context.Context, nodeID, userID, action, resourceID string, atMs int64) (bool, error)
 
 	// Assurance: hardware-attested devices and their one-shot challenges.
 	// CreateAttestedDevice returns ErrAlreadyExists when the project
@@ -1024,6 +1027,8 @@ type PasskeyChallengeRecord struct {
 	Challenge     string // base64url
 	UserID        string
 	ChallengeType string // "registration" or "authentication"
+	Action        string
+	ResourceID    string
 	// Email binds the account a passkey-first signup challenge will create the
 	// user under (see BeginPasskeySignup); empty for add-a-passkey
 	// registration and for authentication challenges.

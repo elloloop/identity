@@ -73,6 +73,16 @@ import { Code } from "astro-expressive-code/components";
     The user must already be authenticated (e.g. they signed in with
     password). The flow is two RPCs.
   </p>
+  <p>
+    Every project requires a trusted sign-in from the last five minutes at
+    both registration steps. Missing or
+    stale <code>auth_time</code> and unvouched native
+    gRPC claims fail with <code>reauthentication_required</code>. Sign in again
+    before enrolling a passkey. Recovery-email sessions are also refused,
+    retaining their recovery-session or hold refusal where applicable.
+    Refreshing tokens preserves the original
+    sign-in time. The managed-child enrolment ticket remains a separate flow.
+  </p>
 
   <h3>1. Begin</h3>
   <Code code={`curl -sX POST http://localhost/identity.v1.IdentityService/BeginPasskeyRegistration \\
@@ -223,6 +233,34 @@ const complete = await fetch("/identity.v1.IdentityService/CompletePasskeyLogin"
     one an administrator changed through SCIM) is rejected with
     <code>FailedPrecondition</code> ("email verification required") and a
     verification email is sent; route the user to verify.
+  </p>
+
+  <h2>Reauthenticate for an operation</h2>
+  <p>
+    An authenticated, active account with a known adult profile can use an
+    enrolled passkey without setting an Identity password.
+    <code>BeginReauthentication</code> takes an <code>action</code> and
+    <code>resource_id</code>. Its two-minute challenge binds the project,
+    caller, action and resource. Run the returned WebAuthn assertion ceremony,
+    which requires user verification. An ordinary login assertion cannot be
+    reused for this purpose.
+  </p>
+  <p>
+    For an application-owned operation, pass the assertion to
+    <code>VerifyReauthentication</code> with the same action and resource.
+    Check its returned <code>user_id</code> against the authenticated caller
+    and enforce the resource's authorization before applying the change.
+    Verification atomically consumes the challenge, and returns no token or
+    session. Errors must prevent the operation.
+  </p>
+  <p>
+    For guardian RPCs, send the challenge ID and assertion in
+    <code>step_up_passkey</code> directly to the operation. Do not call
+    <code>VerifyReauthentication</code> first: each proof can be used only
+    once. Password and passkey proof are mutually exclusive. Consent,
+    guardianship and adult-profile checks still apply. The fixed actions and
+    resource bindings are listed in the
+    <a href="https://github.com/elloloop/identity/blob/main/docs/UPGRADE.md">upgrade guide</a>.
   </p>
 
   <h2>Managing passkeys</h2>

@@ -21,7 +21,7 @@ import (
 // authenticated user. Returns (optionsJSON, challengeID, error). A session a
 // recovery hold binds is refused (RecoveryHoldError): a passkey it
 // registered would outlast the hold.
-func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID string, signIn SessionSignIn, deviceName string) (string, string, error) {
+func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID string, signIn SessionSignIn, deviceName string, enrolment bool) (string, string, error) {
 	// Refused at BEGIN, not only at completion: this call persists a
 	// challenge row, and the anonymous retention sweep does not reach the
 	// challenge tables (no FK to users), so an anonymous caller could
@@ -31,6 +31,13 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID strin
 	}
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return "", "", err
+	}
+	if !enrolment {
+		var err error
+		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
+		if err != nil {
+			return "", "", err
+		}
 	}
 	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
@@ -128,6 +135,13 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID st
 	}
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return nil, nil, err
+	}
+	if !issueSession {
+		var err error
+		ctx, err = s.passkeyRegistrationContext(ctx, signIn)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// On the managed-child enrolment path the ticket stood in for a session,
@@ -354,6 +368,9 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 	}
 	if challenge.ChallengeType != "authentication" {
 		return nil, fmt.Errorf("%w: challenge is not an authentication challenge", ErrInvalidArgument)
+	}
+	if challenge.Action != "" {
+		return nil, fmt.Errorf("%w: challenge is for reauthentication", ErrUnauthenticated)
 	}
 	if challenge.ExpiresAt < s.nowMs() {
 		_ = s.repo(ctx).DeletePasskeyChallenge(ctx, challenge.NodeID)

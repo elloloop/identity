@@ -331,6 +331,8 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	recoveryEmailLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0)
 	phoneLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitPhonePerIP, 0)
 	limits := []middleware.PathLimit{
+		{PathPrefix: "/identity.v1.IdentityService/BeginReauthentication", Tag: "guardian", Limiter: guardianLimiter},
+		{PathPrefix: "/identity.v1.IdentityService/VerifyReauthentication", Tag: "guardian", Limiter: guardianLimiter},
 		{
 			PathPrefix: "/identity.v1.IdentityService/PasswordSignup", Tag: "signup",
 			Limiter: signupLimiter,

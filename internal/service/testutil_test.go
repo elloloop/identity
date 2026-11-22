@@ -2697,3 +2697,14 @@ func (*fakeRepo) UpdateOAuthClient(context.Context, string, int64, *OAuthClientR
 func (*fakeRepo) ListOAuthClients(context.Context, string, int) ([]*OAuthClient, error) {
 	return nil, ErrServiceUnavailable
 }
+
+func (r *fakeRepo) ConsumeReauthenticationChallenge(_ context.Context, nodeID, userID, action, resourceID string, atMs int64) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	record := r.passkeyChallenges[nodeID]
+	if record == nil || action == "" || userID == "" || record.UserID != userID || record.Action != action || record.ResourceID != resourceID || record.ExpiresAt <= atMs || record.CreatedAt > atMs || record.ChallengeType != "authentication" {
+		return false, nil
+	}
+	delete(r.passkeyChallenges, nodeID)
+	return true, nil
+}

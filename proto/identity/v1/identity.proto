@@ -1213,7 +1213,7 @@ message ConsentRecord {
   // consenting adult's account at the moment of consent. Always >= 1.
   repeated ParentalConsentVerificationFactor verification_factors = 6;
   // stepped_up records whether the consenting adult re-authenticated with a
-  // password at the moment of consent. False only when the deployment enabled
+  // password or user-verified passkey at the moment of consent. False only when the deployment enabled
   // GATEWAY_GUARDIAN_STEPUP_ALLOW_NO_PASSWORD and the adult's account holds no
   // password. Recorded explicitly so the artifact is self-describing.
   bool stepped_up = 7;
@@ -1262,11 +1262,12 @@ message GrantParentalConsentRequest {
   string policy_version = 2;
   // step_up_password re-authenticates the consenting adult at the moment of
   // consent. The adult's identity is taken from the authenticated session,
-  // never from this request; requiring the password here proves the live
+  // never from this request. Requiring credential proof here proves the live
   // actor is the account owner, not merely the holder of a valid session
-  // token (closing the "spoofable consent" risk). The account must have a
-  // password set.
+  // token. Use step_up_passkey instead for a registered passkey, without a password.
   string step_up_password = 3;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 4;
 }
 
 message GrantParentalConsentResponse {
@@ -1513,7 +1514,7 @@ message GetGuardiansResponse {
 // The calling adult is always the session user — the request deliberately
 // carries no caller identity field. Both consent checks from
 // GrantParentalConsent apply here unchanged: a strong verified factor on the
-// adult's account AND a step-up password re-entry.
+// adult's account AND password re-entry or a fresh user-verified passkey assertion.
 //
 // This is NOT self-signup: the project access mode (open/allowlist/invite/
 // closed) does not gate it. An active authenticated adult in the project may
@@ -1557,6 +1558,8 @@ message CreateManagedChildAccountRequest {
   // negative timestamps are valid dates. On requests, a nonzero legacy
   // date_of_birth_ms must agree when both fields are supplied.
   optional int64 date_of_birth_unix_ms = 10;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 11;
 }
 
 message CreateManagedChildAccountResponse {
@@ -1583,7 +1586,7 @@ message CreateManagedChildAccountResponse {
 //
 //  1. an active guardianOf edge from the authenticated caller to the target
 //     child — the caller is always the session user, never a request field;
-//  2. a step-up password re-entry at the moment of action — a stolen session
+//  2. password re-entry or a bound, user-verified passkey at the moment of action — a stolen session
 //     token must not be enough to take over a child's account.
 //
 // A caller holding no edge receives PERMISSION_DENIED with an
@@ -1609,6 +1612,8 @@ message GetManagedChildProfileRequest {
   // step_up_password re-authenticates the CALLING GUARDIAN (verified against
   // the guardian's stored password hash). Required on every call.
   string step_up_password = 2;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 3;
 }
 
 message GetManagedChildProfileResponse {
@@ -1624,6 +1629,8 @@ message SetManagedChildPasswordRequest {
   // self-service paths enforce for the resolved project.
   string new_password = 2;
   string step_up_password = 3;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 4;
 }
 
 // Setting the password revokes the child's sessions and refresh tokens, so a
@@ -1640,6 +1647,8 @@ message SetManagedChildUsernameRequest {
   // the project is ALREADY_EXISTS.
   string username = 2;
   string step_up_password = 3;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 4;
 }
 
 message SetManagedChildUsernameResponse {
@@ -1650,6 +1659,8 @@ message SetManagedChildUsernameResponse {
 message RevokeManagedChildSessionsRequest {
   string child_user_id = 1;
   string step_up_password = 2;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 3;
 }
 
 // Every session and refresh token of the child is invalidated
@@ -1661,6 +1672,8 @@ message DeactivateManagedChildAccountRequest {
   // reason is optional free text retained on the audit event.
   string reason = 2;
   string step_up_password = 3;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 4;
 }
 
 // Deactivation is reversible by the same guardian via
@@ -1670,6 +1683,8 @@ message DeactivateManagedChildAccountResponse {}
 message ReactivateManagedChildAccountRequest {
   string child_user_id = 1;
   string step_up_password = 2;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 3;
 }
 
 // Reactivation moves a deactivated child account back to
@@ -1681,6 +1696,8 @@ message ReactivateManagedChildAccountResponse {}
 message DeleteManagedChildAccountRequest {
   string child_user_id = 1;
   string step_up_password = 2;
+  // Alternative to step_up_password. The action and resource are fixed by this RPC.
+  PasskeyReauthentication step_up_passkey = 3;
 }
 
 // Deletion runs the same hard-delete erasure cascade as the admin DeleteUser
@@ -1754,8 +1771,9 @@ message PasskeyCredentialInfo {
   google.protobuf.Timestamp last_used_at = 4;
 }
 
-// Registration (requires an authenticated session, OR a passkey-enrolment
-// ticket minted by CreateManagedChildAccount for a passwordless child account)
+// Registration requires a trusted non-recovery sign-in within five minutes
+// at both steps, OR a verified passkey-enrolment ticket minted by
+// CreateManagedChildAccount for a passwordless child account.
 message BeginPasskeyRegistrationRequest {
   string device_name = 1;
   // enrolment_token redeems a managed-child passkey-enrolment ticket (JWT
@@ -3618,6 +3636,34 @@ message GetProjectEmailDeliveryResponse {
   bool disabled = 1;
 }
 
+// A fresh assertion from the calling account's enrolled passkey. A challenge
+// is bound to one project, account, action and resource and can be used once.
+message PasskeyReauthentication {
+  string challenge_id = 1;
+  string credential_json = 2;
+}
+
+message BeginReauthenticationRequest {
+  string action = 1;
+  string resource_id = 2;
+}
+
+message BeginReauthenticationResponse {
+  string options_json = 1;
+  string challenge_id = 2;
+}
+
+message VerifyReauthenticationRequest {
+  string challenge_id = 1;
+  string credential_json = 2;
+  string action = 3;
+  string resource_id = 4;
+}
+
+message VerifyReauthenticationResponse {
+  string user_id = 1;
+}
+
 service IdentityService {
   rpc CreateAgentMachineChallenge(CreateAgentMachineChallengeRequest) returns (CreateAgentMachineChallengeResponse);
   rpc RegisterAgentMachineAgentKey(RegisterAgentMachineAgentKeyRequest) returns (RegisterAgentMachineAgentKeyResponse);
@@ -4379,6 +4425,13 @@ service IdentityService {
   // as directory_phone_match with the tenant and the number of hashes asked
   // for and matched, never the hashes.
   rpc MatchTenantMemberPhones(MatchTenantMemberPhonesRequest) returns (MatchTenantMemberPhonesResponse);
+
+  // BeginReauthentication requires an active known adult with enrolled passkeys.
+  // The challenge requests user verification and expires after at most two minutes.
+  rpc BeginReauthentication(BeginReauthenticationRequest) returns (BeginReauthenticationResponse);
+  // VerifyReauthentication checks and consumes the exact action/resource-bound
+  // assertion for the authenticated adult. It issues no token or session.
+  rpc VerifyReauthentication(VerifyReauthenticationRequest) returns (VerifyReauthenticationResponse);
 
   // GetProjectEmailDelivery exposes only the resolved project's email policy.
   // Resolve the project exactly as for authentication and recovery calls.

@@ -743,7 +743,7 @@ func TestPasskeyHandlers_Glue(t *testing.T) {
 		t.Fatalf("expected unauth, got %v", connectCodeOf(err))
 	}
 	respReg, err := h.client.BeginPasskeyRegistration(ctx,
-		authedReq(connect.NewRequest(&identitypb.BeginPasskeyRegistrationRequest{DeviceName: "iPhone"}), u.ID))
+		signedIn(connect.NewRequest(&identitypb.BeginPasskeyRegistrationRequest{DeviceName: "iPhone"}), u.ID))
 	if err != nil {
 		t.Fatalf("begin reg: %v", err)
 	}
@@ -753,7 +753,7 @@ func TestPasskeyHandlers_Glue(t *testing.T) {
 
 	// CompletePasskeyRegistration with bad challenge → error.
 	_, err = h.client.CompletePasskeyRegistration(ctx,
-		authedReq(connect.NewRequest(&identitypb.CompletePasskeyRegistrationRequest{
+		signedIn(connect.NewRequest(&identitypb.CompletePasskeyRegistrationRequest{
 			ChallengeId: "nope", CredentialJson: "{}", DeviceName: "X",
 		}), u.ID))
 	if err == nil {
@@ -1702,14 +1702,14 @@ func TestProfileAndPasskeyPostAuthErrors(t *testing.T) {
 	h.db.err = nil
 
 	// BeginPasskeyRegistration with missing user.
-	if _, err := h.client.BeginPasskeyRegistration(ctx, authedReq(connect.NewRequest(&identitypb.BeginPasskeyRegistrationRequest{
+	if _, err := h.client.BeginPasskeyRegistration(ctx, signedIn(connect.NewRequest(&identitypb.BeginPasskeyRegistrationRequest{
 		DeviceName: "X",
 	}), "no-such-user")); err == nil {
 		t.Fatal("expected begin-passkey-reg error")
 	}
 
 	// CompletePasskeyRegistration with bogus challenge.
-	if _, err := h.client.CompletePasskeyRegistration(ctx, authedReq(connect.NewRequest(&identitypb.CompletePasskeyRegistrationRequest{
+	if _, err := h.client.CompletePasskeyRegistration(ctx, signedIn(connect.NewRequest(&identitypb.CompletePasskeyRegistrationRequest{
 		ChallengeId: "no", CredentialJson: "{}", DeviceName: "X",
 	}), u.ID)); err == nil {
 		t.Fatal("expected complete-passkey-reg error")

@@ -189,13 +189,13 @@ func (r *pgRepository) GetPasskeyChallenge(ctx context.Context, nodeID string) (
 		return nil, nil
 	}
 	const q = `
-		SELECT id, challenge, user_id, challenge_type, email, expires_at_ms, created_at_ms
+		SELECT id, challenge, user_id, challenge_type, email, expires_at_ms, created_at_ms, action, resource_id
 		  FROM passkey_challenges
 		 WHERE project_id = $1 AND id = $2`
 	var c service.PasskeyChallengeRecord
 	err := r.pool.QueryRow(ctx, q, r.projectID, nodeID).Scan(
 		&c.NodeID, &c.Challenge, &c.UserID, &c.ChallengeType, &c.Email,
-		&c.ExpiresAt, &c.CreatedAt,
+		&c.ExpiresAt, &c.CreatedAt, &c.Action, &c.ResourceID,
 	)
 	if noRows(err) {
 		return nil, nil
@@ -217,12 +217,12 @@ func (r *pgRepository) CreatePasskeyChallenge(ctx context.Context, c *service.Pa
 	const q = `
 		INSERT INTO passkey_challenges (
 			id, project_id, challenge, user_id, challenge_type, email,
-			expires_at_ms, created_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+			expires_at_ms, created_at_ms, action, resource_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
 	_, err := r.pool.Exec(
 		ctx, q,
 		id, r.projectID, c.Challenge, c.UserID, c.ChallengeType, c.Email,
-		c.ExpiresAt, c.CreatedAt,
+		c.ExpiresAt, c.CreatedAt, c.Action, c.ResourceID,
 	)
 	if err != nil {
 		return "", wrapPgErr("CreatePasskeyChallenge", err)
@@ -240,4 +240,19 @@ func (r *pgRepository) DeletePasskeyChallenge(ctx context.Context, nodeID string
 		return wrapPgErr("DeletePasskeyChallenge", err)
 	}
 	return nil
+}
+
+func (r *pgRepository) ConsumeReauthenticationChallenge(ctx context.Context, nodeID, userID, action, resourceID string, atMs int64) (bool, error) {
+	if nodeID == "" || userID == "" || action == "" {
+		return false, nil
+	}
+	const q = `DELETE FROM passkey_challenges
+      WHERE project_id = $1 AND id = $2 AND user_id = $3 AND action = $4
+      AND resource_id = $5 AND expires_at_ms > $6 AND created_at_ms <= $6
+      AND challenge_type = 'authentication'`
+	result, err := r.pool.Exec(ctx, q, r.projectID, nodeID, userID, action, resourceID, atMs)
+	if err != nil {
+		return false, wrapPgErr("ConsumeReauthenticationChallenge", err)
+	}
+	return result.RowsAffected() == 1, nil
 }
