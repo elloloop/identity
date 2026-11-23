@@ -332,3 +332,21 @@ func TestRegisterGRPC_WarnsWhenOtherKeysAreTrustedButNotTheAMR(t *testing.T) {
 		})
 	}
 }
+
+func TestAccountClassificationSharesHTTPAndNativeBudget(t *testing.T) {
+	srv := newTestServerWith(t, func(c *config.Config) { c.RateLimitAccountClassificationPerIP = 2 }, nil)
+	httpSrv := httptest.NewServer(srv.Handler())
+	t.Cleanup(httpSrv.Close)
+	httpClient := identityconnectgen.NewIdentityServiceClient(httpSrv.Client(), httpSrv.URL)
+	grpcClient := serveGRPC(t, srv)
+	req := &identitypb.ClassifyAccountsRequest{UserIds: []string{"user-1"}}
+	if _, err := httpClient.ClassifyAccounts(context.Background(), connect.NewRequest(req)); connect.CodeOf(err) != connect.CodeUnimplemented {
+		t.Fatalf("HTTP: %v", err)
+	}
+	if _, err := grpcClient.ClassifyAccounts(context.Background(), req); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("native: %v", err)
+	}
+	if _, err := grpcClient.ClassifyAccounts(context.Background(), req); status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("native over quota: %v", err)
+	}
+}

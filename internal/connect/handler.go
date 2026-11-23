@@ -61,6 +61,7 @@ type IdentityHandler struct {
 	directory                 *service.DirectoryService
 	cfg                       *config.Config
 	managedChildAuthorization *service.ManagedChildAuthorizationService
+	accountClassification     *service.AccountClassificationService
 }
 
 // NewIdentityHandler creates a new IdentityHandler wired to the service

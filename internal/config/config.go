@@ -121,6 +121,9 @@ const (
 	// DefaultRateLimitManagedChildAuthPerIP budgets per-operation checks from
 	// shared backend egress separately from account-directory enumeration.
 	DefaultRateLimitManagedChildAuthPerIP = 1200
+
+	// DefaultRateLimitAccountClassificationPerIP bounds backend standing checks.
+	DefaultRateLimitAccountClassificationPerIP = 1200
 	// DefaultRateLimitPhoneMatchPerTenant is the cap per window on the
 	// MatchTenantMemberPhones calls one directory_reader credential makes
 	// against one tenant (RateLimitPhoneMatchPerTenant) when none is
@@ -1378,6 +1381,10 @@ type Config struct {
 	// Zero selects DefaultRateLimitManagedChildAuthPerIP; negative is invalid.
 	// It never disables throttling.
 	RateLimitManagedChildAuthPerIP int
+	// RateLimitAccountClassificationPerIP bounds ClassifyAccounts independently.
+	// Zero selects the default; negative is invalid and the limit cannot be disabled.
+	// Env: GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP.
+	RateLimitAccountClassificationPerIP int
 	// RateLimitPhoneMatchPerTenant is the cap per window on the
 	// MatchTenantMemberPhones calls one directory_reader credential makes
 	// against one tenant, each matching up to 3000 phone-number hashes. It is
@@ -1903,24 +1910,25 @@ func loadFromEnv() *Config {
 			"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32,::1/128",
 		),
 
-		RateLimitWindowSeconds:         envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
-		RateLimitSignupPerIP:           envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
-		RateLimitUsernameTakenPerIP:    envInt("GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP", 5),
-		RateLimitLoginPerIP:            envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
-		RateLimitResetPerIP:            envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
-		RateLimitVerifyPerIP:           envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
-		RateLimitPasswordlessPerIP:     envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
-		RateLimitAssurancePerIP:        envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
-		RateLimitPhonePerIP:            envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
-		RateLimitInvitationPerIP:       envInt("GATEWAY_RATE_LIMIT_INVITATION_PER_IP", 20),
-		RateLimitDomainPerIP:           envInt("GATEWAY_RATE_LIMIT_DOMAIN_PER_IP", 20),
-		RateLimitIDVPerIP:              envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
-		RateLimitBootstrapPerIP:        envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
-		RateLimitDirectoryPerIP:        envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
-		RateLimitPhoneMatchPerTenant:   envInt("GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT", DefaultRateLimitPhoneMatchPerTenant),
-		RateLimitSCIMPerIP:             envInt("GATEWAY_RATE_LIMIT_SCIM_PER_IP", DefaultRateLimitSCIMPerIP),
-		RateLimitQrPollPerIP:           envInt("GATEWAY_RATE_LIMIT_QR_POLL_PER_IP", DefaultRateLimitQrPollPerIP),
-		RateLimitManagedChildAuthPerIP: envInt("GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP", DefaultRateLimitManagedChildAuthPerIP),
+		RateLimitWindowSeconds:              envInt("GATEWAY_RATE_LIMIT_WINDOW_SECONDS", 60),
+		RateLimitSignupPerIP:                envInt("GATEWAY_RATE_LIMIT_SIGNUP_PER_IP", 10),
+		RateLimitUsernameTakenPerIP:         envInt("GATEWAY_RATE_LIMIT_USERNAME_TAKEN_PER_IP", 5),
+		RateLimitLoginPerIP:                 envInt("GATEWAY_RATE_LIMIT_LOGIN_PER_IP", 30),
+		RateLimitResetPerIP:                 envInt("GATEWAY_RATE_LIMIT_RESET_PER_IP", 5),
+		RateLimitVerifyPerIP:                envInt("GATEWAY_RATE_LIMIT_VERIFY_PER_IP", 20),
+		RateLimitPasswordlessPerIP:          envInt("GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP", 5),
+		RateLimitAssurancePerIP:             envInt("GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP", 20),
+		RateLimitPhonePerIP:                 envInt("GATEWAY_RATE_LIMIT_PHONE_PER_IP", 5),
+		RateLimitInvitationPerIP:            envInt("GATEWAY_RATE_LIMIT_INVITATION_PER_IP", 20),
+		RateLimitDomainPerIP:                envInt("GATEWAY_RATE_LIMIT_DOMAIN_PER_IP", 20),
+		RateLimitIDVPerIP:                   envInt("GATEWAY_RATE_LIMIT_IDV_PER_IP", 5),
+		RateLimitBootstrapPerIP:             envInt("GATEWAY_RATE_LIMIT_BOOTSTRAP_PER_IP", 5),
+		RateLimitDirectoryPerIP:             envInt("GATEWAY_RATE_LIMIT_DIRECTORY_PER_IP", DefaultRateLimitDirectoryPerIP),
+		RateLimitPhoneMatchPerTenant:        envInt("GATEWAY_RATE_LIMIT_PHONE_MATCH_PER_TENANT", DefaultRateLimitPhoneMatchPerTenant),
+		RateLimitSCIMPerIP:                  envInt("GATEWAY_RATE_LIMIT_SCIM_PER_IP", DefaultRateLimitSCIMPerIP),
+		RateLimitQrPollPerIP:                envInt("GATEWAY_RATE_LIMIT_QR_POLL_PER_IP", DefaultRateLimitQrPollPerIP),
+		RateLimitManagedChildAuthPerIP:      envInt("GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP", DefaultRateLimitManagedChildAuthPerIP),
+		RateLimitAccountClassificationPerIP: envInt("GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP", DefaultRateLimitAccountClassificationPerIP),
 
 		PostgresDSN:           envStr("GATEWAY_POSTGRES_DSN", ""),
 		PostgresMaxConns:      envInt("GATEWAY_POSTGRES_MAX_CONNS", 25),
@@ -2807,6 +2815,12 @@ func (c *Config) validateSAML() error {
 // refuses a negative limit. Those limits cannot be turned off; the SCIM,
 // QR-poll and username-taken limits are off at 0.
 func (c *Config) validateRateLimits() error {
+	switch {
+	case c.RateLimitAccountClassificationPerIP == 0:
+		c.RateLimitAccountClassificationPerIP = DefaultRateLimitAccountClassificationPerIP
+	case c.RateLimitAccountClassificationPerIP < 0:
+		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP=%d must not be negative (0 selects the default, %d; the limit cannot be disabled)", c.RateLimitAccountClassificationPerIP, DefaultRateLimitAccountClassificationPerIP)
+	}
 	switch {
 	case c.RateLimitManagedChildAuthPerIP == 0:
 		c.RateLimitManagedChildAuthPerIP = DefaultRateLimitManagedChildAuthPerIP

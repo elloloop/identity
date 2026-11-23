@@ -1,0 +1,65 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Account classification">
+  <h1>Account classification</h1>
+  <p>
+    A backend can check the current standing of one or two known account IDs
+    with <code>ClassifyAccounts</code>. Each result contains only the requested
+    ID and a coarse classification: denied, active known adult, or active
+    known minor. A minor includes both the child and teen age bands.
+    No birth date, email, name, contacts, tokens or profile fields are returned.
+  </p>
+  <h2>Backend credential and project</h2>
+  <p>
+    Create an <code>account_classifier</code> credential with
+    <code>AdminCreateProjectCredential</code>. Its <code>ak_</code> raw key is
+    shown once; store it encrypted on the backend and send it only in
+    <code>X-Account-Classifier-Key</code>. It grants no directory lookup,
+    profile, session, write or guardian authorization rights. Other credential
+    kinds and user JWTs do not authorize this operation.
+  </p>
+  <p>
+    The credential must belong to the resolved project. HTTP resolves that
+    project from its normal hostname or public project key; native gRPC
+    requires <code>X-Project-Key</code>. The classifier credential itself
+    cannot select a project. A revoked key or suspended project is refused on
+    its next call. Without a control plane and project resolver, the RPC is
+    disabled with <code>UNIMPLEMENTED</code>.
+  </p>
+  <h2>Request and result</h2>
+  <p>
+    Send <code>user_ids</code> with one or two distinct exact account IDs,
+    each at most 128 bytes. Email discovery, blank IDs, control characters and
+    duplicate IDs are refused. The response's <code>accounts</code> list has
+    exactly one result for each input in the same order.
+  </p>
+  <ul>
+    <li><code>ACCOUNT_CLASSIFICATION_ACTIVE_KNOWN_ADULT</code>: an active permanent person with a known adult age band.</li>
+    <li><code>ACCOUNT_CLASSIFICATION_ACTIVE_KNOWN_MINOR</code>: an active permanent person with a known child or teen age band.</li>
+    <li><code>ACCOUNT_CLASSIFICATION_DENIED</code>: missing or foreign-project account, unknown age, anonymous or machine account, merged account, empty or unknown kind/status, or any inactive state.</li>
+  </ul>
+  <p>
+    Project and user-market age thresholds are read for each check. Disabled
+    age gating, future or implausible birth dates yield denied. Treat an
+    omitted or unknown classification, missing result or any RPC error as
+    denied. A storage outage never produces a partial affirmative response.
+  </p>
+  <h2>Standing is separate from authorization</h2>
+  <p>
+    A classification grants no permission to contact someone or act for
+    them. Recheck it on admission, refresh and reconciliation. Never cache an
+    affirmative result. Applications must independently verify household,
+    contact, consent and device rules, and call
+    <code>GetManagedChildAuthorization</code> for every minor involved.
+  </p>
+  <h2>Capacity and audit</h2>
+  <p>
+    <code>GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP</code> sets a
+    separate HTTP/native shared budget per rate-limit window, default 1200.
+    Zero selects the default, negative is invalid and the limit cannot be
+    disabled. <code>accounts_classified</code> audit events record the
+    credential actor and request count without account profiles or birth dates.
+  </p>
+</DocsLayout>

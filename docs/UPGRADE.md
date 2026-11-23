@@ -1,5 +1,39 @@
 # Upgrade guide
 
+## Next — ID-only account classification (PostgreSQL 0066)
+
+`ClassifyAccounts` returns coarse live standing for one or two exact account
+IDs: denied, active known adult or active known minor (child or teen). It
+returns no DOB, profile, contacts or authentication data. Unknown age, missing
+or foreign-project users, anonymous/agent/merged accounts and every inactive
+state are denied. Empty/unknown account status or kind also denies.
+Disabled age gating also denies; project and user-market
+thresholds are authoritative.
+
+Only the new `account_classifier` credential kind in
+`X-Account-Classifier-Key` authorizes the RPC. Its `ak_` raw key is shown once
+by `AdminCreateProjectCredential`; keep it on the backend in encrypted secret
+storage. A user JWT, admin secret, directory key or guardian-reader credential
+cannot substitute. The resolved project must match; native gRPC requires an
+explicit `X-Project-Key`. The classifier key never selects a project itself.
+Revocation and project suspension are checked on every call.
+
+This is standing, not permission. Applications still check their household,
+contacts, consent, devices and live `GetManagedChildAuthorization` for every
+minor. Recheck standing at admission, refresh and reconciliation; never cache
+an affirmative result. An omitted/unknown enum, missing result or any error
+must deny access. Each successful response has exactly one result per input
+in request order. Email discovery and batches over two IDs are refused.
+
+`GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP` is an independent shared
+HTTP/native budget per rate-limit window (default 1200; zero selects the
+default; negative is invalid). It cannot be disabled. Audit events use
+`accounts_classified` with a credential actor and count, never profile data.
+Without project resolution and control-plane credential storage this surface
+is disabled (`UNIMPLEMENTED`). Migration 0066 widens only the credential kind
+constraint. Its down migration removes classifier credentials and leaves all
+other credential kinds and accounts intact; rotate/remint after re-upgrading.
+
 ## Next — current-user age classification (no migration or protocol change)
 
 `GetCurrentUser` derives `age_band` and `is_minor` from the stored DOB and

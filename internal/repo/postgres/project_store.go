@@ -48,7 +48,7 @@ type Project struct {
 type ProjectCredential struct {
 	ID           string
 	ProjectID    string
-	Kind         string // publishable | secret | mtls
+	Kind         string
 	PublicID     string
 	SecretHash   string
 	Status       string // active | revoked

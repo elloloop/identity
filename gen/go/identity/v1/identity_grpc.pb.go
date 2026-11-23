@@ -195,6 +195,7 @@ const (
 	IdentityService_AdminSetProjectOAuthHostClient_FullMethodName         = "/identity.v1.IdentityService/AdminSetProjectOAuthHostClient"
 	IdentityService_AdminDeleteProjectOAuthHostClient_FullMethodName      = "/identity.v1.IdentityService/AdminDeleteProjectOAuthHostClient"
 	IdentityService_GetManagedChildAuthorization_FullMethodName           = "/identity.v1.IdentityService/GetManagedChildAuthorization"
+	IdentityService_ClassifyAccounts_FullMethodName                       = "/identity.v1.IdentityService/ClassifyAccounts"
 	IdentityService_LookupUsers_FullMethodName                            = "/identity.v1.IdentityService/LookupUsers"
 	IdentityService_MatchTenantMemberPhones_FullMethodName                = "/identity.v1.IdentityService/MatchTenantMemberPhones"
 	IdentityService_BeginReauthentication_FullMethodName                  = "/identity.v1.IdentityService/BeginReauthentication"
@@ -885,6 +886,12 @@ type IdentityServiceClient interface {
 	// managed_child_reader project credential. Errors and false must fail closed;
 	// callers must recheck before each operation, never cache a true response.
 	GetManagedChildAuthorization(ctx context.Context, in *GetManagedChildAuthorizationRequest, opts ...grpc.CallOption) (*GetManagedChildAuthorizationResponse, error)
+	// ID-only live standing for an account_classifier project credential in
+	// X-Account-Classifier-Key. The resolved project must match the credential;
+	// native gRPC requires X-Project-Key. Recheck on admission, refresh and
+	// reconciliation; never cache an affirmative classification. This grants
+	// neither household/contact authority nor guardian/consent authorization.
+	ClassifyAccounts(ctx context.Context, in *ClassifyAccountsRequest, opts ...grpc.CallOption) (*ClassifyAccountsResponse, error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT
 	// but by a directory_reader project credential (minted with
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
@@ -2707,6 +2714,16 @@ func (c *identityServiceClient) GetManagedChildAuthorization(ctx context.Context
 	return out, nil
 }
 
+func (c *identityServiceClient) ClassifyAccounts(ctx context.Context, in *ClassifyAccountsRequest, opts ...grpc.CallOption) (*ClassifyAccountsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClassifyAccountsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ClassifyAccounts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) LookupUsers(ctx context.Context, in *LookupUsersRequest, opts ...grpc.CallOption) (*LookupUsersResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LookupUsersResponse)
@@ -3458,6 +3475,12 @@ type IdentityServiceServer interface {
 	// managed_child_reader project credential. Errors and false must fail closed;
 	// callers must recheck before each operation, never cache a true response.
 	GetManagedChildAuthorization(context.Context, *GetManagedChildAuthorizationRequest) (*GetManagedChildAuthorizationResponse, error)
+	// ID-only live standing for an account_classifier project credential in
+	// X-Account-Classifier-Key. The resolved project must match the credential;
+	// native gRPC requires X-Project-Key. Recheck on admission, refresh and
+	// reconciliation; never cache an affirmative classification. This grants
+	// neither household/contact authority nor guardian/consent authorization.
+	ClassifyAccounts(context.Context, *ClassifyAccountsRequest) (*ClassifyAccountsResponse, error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT
 	// but by a directory_reader project credential (minted with
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
@@ -4047,6 +4070,9 @@ func (UnimplementedIdentityServiceServer) AdminDeleteProjectOAuthHostClient(cont
 }
 func (UnimplementedIdentityServiceServer) GetManagedChildAuthorization(context.Context, *GetManagedChildAuthorizationRequest) (*GetManagedChildAuthorizationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetManagedChildAuthorization not implemented")
+}
+func (UnimplementedIdentityServiceServer) ClassifyAccounts(context.Context, *ClassifyAccountsRequest) (*ClassifyAccountsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClassifyAccounts not implemented")
 }
 func (UnimplementedIdentityServiceServer) LookupUsers(context.Context, *LookupUsersRequest) (*LookupUsersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LookupUsers not implemented")
@@ -7258,6 +7284,24 @@ func _IdentityService_GetManagedChildAuthorization_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_ClassifyAccounts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClassifyAccountsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ClassifyAccounts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ClassifyAccounts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ClassifyAccounts(ctx, req.(*ClassifyAccountsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_LookupUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(LookupUsersRequest)
 	if err := dec(in); err != nil {
@@ -8094,6 +8138,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetManagedChildAuthorization",
 			Handler:    _IdentityService_GetManagedChildAuthorization_Handler,
+		},
+		{
+			MethodName: "ClassifyAccounts",
+			Handler:    _IdentityService_ClassifyAccounts_Handler,
 		},
 		{
 			MethodName: "LookupUsers",

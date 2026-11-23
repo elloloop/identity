@@ -1548,6 +1548,15 @@
     "anchor": "qr-cross-device-login"
   },
   {
+    "name": "GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP",
+    "type": "integer",
+    "default": "1200",
+    "required": false,
+    "description": "bounds ClassifyAccounts independently.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
     "name": "GATEWAY_RATE_LIMIT_ASSURANCE_PER_IP",
     "type": "integer",
     "default": "20",
