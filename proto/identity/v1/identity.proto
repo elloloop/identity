@@ -2470,6 +2470,8 @@ message AdminCreateProjectCredentialRequest {
   string project_id = 1;
   // kind selects the credential type: "publishable" (a public lookup key,
   // no secret), "secret" (a key whose secret half is shown ONCE),
+  // "account_classifier" (a once-shown secret for ClassifyAccounts in
+  // X-Account-Classifier-Key, no profile/write/guardian rights),
   // "managed_child_reader" (a once-shown secret for GetManagedChildAuthorization
   // in X-Managed-Child-Key, no profile/write rights),
   // "directory_reader" (a machine credential whose secret half is shown ONCE
@@ -2499,8 +2501,8 @@ message AdminCreateProjectCredentialResponse {
 
 // AdminRevokeProjectCredentialRequest names the credential to revoke by the
 // credential_id AdminCreateProjectCredential returned, together with the
-// project it belongs to. A revoked directory_reader, teammate_key_manager or
-// tenant_operator key is refused on its next call; a revoked publishable,
+// project it belongs to. A revoked directory_reader, managed_child_reader,
+// account_classifier, teammate_key_manager or tenant_operator key is refused on its next call; a revoked publishable,
 // secret or mTLS key stops selecting its
 // project within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS (default 30s) on
 // each replica, which caches project resolution. The row is kept for audit.
@@ -3121,6 +3123,32 @@ message GetManagedChildAuthorizationResponse {
   // JSON omits authorized when false; only an explicit true authorizes access.
   // This is a point-in-time check, not a reusable authorization token.
   bool authorized = 1;
+}
+
+// AccountClassification is coarse live standing, never a consent or contact grant.
+// Unknown values and the omitted zero value must be treated as denied.
+enum AccountClassification {
+  ACCOUNT_CLASSIFICATION_UNSPECIFIED = 0;
+  ACCOUNT_CLASSIFICATION_DENIED = 1;
+  ACCOUNT_CLASSIFICATION_ACTIVE_KNOWN_ADULT = 2;
+  ACCOUNT_CLASSIFICATION_ACTIVE_KNOWN_MINOR = 3;
+}
+
+message ClassifyAccountsRequest {
+  // One or two distinct exact account IDs, each at most 128 bytes. No email lookup.
+  repeated string user_ids = 1;
+}
+
+message ClassifiedAccount {
+  string user_id = 1;
+  AccountClassification classification = 2;
+}
+
+message ClassifyAccountsResponse {
+  // One result per input, in the same order. Missing, foreign-project, unknown-age,
+  // non-person and inactive accounts are denied. No profile fields are returned.
+  // This is a live point-in-time read, not a token; errors must fail closed.
+  repeated ClassifiedAccount accounts = 1;
 }
 
 // ─── Directory lookup (machine credential) ──────────────────────────
@@ -4417,6 +4445,13 @@ service IdentityService {
   // managed_child_reader project credential. Errors and false must fail closed;
   // callers must recheck before each operation, never cache a true response.
   rpc GetManagedChildAuthorization(GetManagedChildAuthorizationRequest) returns (GetManagedChildAuthorizationResponse);
+
+  // ID-only live standing for an account_classifier project credential in
+  // X-Account-Classifier-Key. The resolved project must match the credential;
+  // native gRPC requires X-Project-Key. Recheck on admission, refresh and
+  // reconciliation; never cache an affirmative classification. This grants
+  // neither household/contact authority nor guardian/consent authorization.
+  rpc ClassifyAccounts(ClassifyAccountsRequest) returns (ClassifyAccountsResponse);
 
   // Read-only directory lookup for services. Authenticated NOT by a user JWT
   // but by a directory_reader project credential (minted with

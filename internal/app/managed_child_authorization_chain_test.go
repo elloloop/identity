@@ -30,7 +30,7 @@ func (managedChildChainResolver) ResolveByHostname(context.Context, string) (*se
 	return &service.ResolvedProject{ID: chainDirectoryProject}, nil
 }
 
-func newManagedChildChainApp(t *testing.T, cfg *config.Config, resolver service.ProjectResolver) (http.Handler, service.Repository) {
+func newAccountProofChainApp(t *testing.T, cfg *config.Config, resolver service.ProjectResolver, kind string) (http.Handler, service.Repository) {
 	t.Helper()
 	sum := sha256.Sum256([]byte(chainDirectorySecret))
 	pk, err := passkeys.NewWebAuthnService(passkeys.Config{RPID: "localhost", RPName: "Identity Test", Origin: "http://localhost:9002"})
@@ -51,7 +51,7 @@ func newManagedChildChainApp(t *testing.T, cfg *config.Config, resolver service.
 		DirectoryCredentials: chainCredentials{cred: &service.AdminProjectCredential{
 			ID:         "cred-chain",
 			ProjectID:  chainDirectoryProject,
-			Kind:       service.CredentialKindManagedChildReader,
+			Kind:       kind,
 			PublicID:   chainDirectoryPublic,
 			SecretHash: hex.EncodeToString(sum[:]),
 		}},
@@ -70,7 +70,7 @@ func TestManagedChildAuthorization_ServedChain(t *testing.T) {
 	cfg.AgeGateEnabled = true
 	cfg.AgeGateChildMaxAge = 12
 	cfg.AgeGateAdultAge = 18
-	h, repo := newManagedChildChainApp(t, cfg, managedChildChainResolver{})
+	h, repo := newAccountProofChainApp(t, cfg, managedChildChainResolver{}, service.CredentialKindManagedChildReader)
 	ctx := context.Background()
 	scoped := repo.WithProject(chainDirectoryProject)
 	child, err := scoped.CreateUser(ctx, &service.User{Username: "child", Kind: service.UserKindPerson, Status: service.StatusActive, DateOfBirthMs: new(time.Now().AddDate(-8, 0, 0).UnixMilli())})
@@ -119,7 +119,7 @@ func TestManagedChildAuthorization_ServedChain(t *testing.T) {
 func TestManagedChildKey_GrantsNoOtherRPC(t *testing.T) {
 	cfg := newTestConfig()
 	cfg.DefaultProjectID = chainDirectoryProject
-	h, _ := newManagedChildChainApp(t, cfg, managedChildChainResolver{})
+	h, _ := newAccountProofChainApp(t, cfg, managedChildChainResolver{}, service.CredentialKindManagedChildReader)
 	headers := map[string]string{identityconnect.ManagedChildKeyHeader: chainDirectoryKey, "Authorization": "Bearer " + chainDirectoryKey}
 	methods := identitypb.File_identity_v1_identity_proto.Services().ByName("IdentityService").Methods()
 	for i := 0; i < methods.Len(); i++ {
@@ -139,7 +139,7 @@ func TestManagedChildKey_GrantsNoOtherRPC(t *testing.T) {
 func TestManagedChildAuthorization_NoProjectResolverIsUnavailable(t *testing.T) {
 	cfg := newTestConfig()
 	cfg.DefaultProjectID = chainDirectoryProject
-	h, _ := newManagedChildChainApp(t, cfg, nil)
+	h, _ := newAccountProofChainApp(t, cfg, nil, service.CredentialKindManagedChildReader)
 	rec := postRPC(t, h, "/identity.v1.IdentityService/GetManagedChildAuthorization", `{"childUserId":"child","guardianUserId":"guardian"}`, map[string]string{identityconnect.ManagedChildKeyHeader: chainDirectoryKey, "X-Project-Key": "pk_invalid"})
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("credential store without project policy resolver: %d %s", rec.Code, rec.Body.String())

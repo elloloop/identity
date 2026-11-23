@@ -80,7 +80,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 		directoryLimits[procedure] = limit
 	}
 	machineLimits := make(map[string]middleware.PathLimit)
-	for _, procedure := range []string{identityv1connect.IdentityServiceGetManagedChildAuthorizationProcedure, identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
+	for _, procedure := range []string{identityv1connect.IdentityServiceClassifyAccountsProcedure, identityv1connect.IdentityServiceGetManagedChildAuthorizationProcedure, identityv1connect.IdentityServiceCreateAgentMachineChallengeProcedure, identityv1connect.IdentityServiceRegisterAgentMachineAgentKeyProcedure, identityv1connect.IdentityServiceRegisterAgentMachineProcedure, identityv1connect.IdentityServiceListAgentMachinesProcedure, identityv1connect.IdentityServiceSelectAgentMachineAgentsProcedure, identityv1connect.IdentityServiceRevokeAgentMachineProcedure, identityv1connect.IdentityServiceExchangeAgentMachineCredentialProcedure, identityv1connect.IdentityServiceListAgentMachineAgentsProcedure, identityv1connect.IdentityServiceIntrospectAgentMachineProcedure} {
 		if limit, found := middleware.MatchPathLimit(built.RateLimits, procedure); found {
 			machineLimits[procedure] = limit
 		}
@@ -323,7 +323,7 @@ func (b *grpcBridge) reauthenticationContext(ctx context.Context, procedure stri
 	if err := b.throttle(ctx, limit); err != nil {
 		return nil, err
 	}
-	return b.managedChildProjectContext(ctx)
+	return b.accountProofProjectContext(ctx)
 }
 
 func (b *grpcBridge) BeginReauthentication(ctx context.Context, in *identitypb.BeginReauthenticationRequest) (*identitypb.BeginReauthenticationResponse, error) {
@@ -1134,11 +1134,22 @@ func (b *grpcBridge) RegisterAgentMachineAgentKey(ctx context.Context, in *ident
 	return invoke(ctx, b, in, b.h.RegisterAgentMachineAgentKey)
 }
 
+func (b *grpcBridge) ClassifyAccounts(ctx context.Context, in *identitypb.ClassifyAccountsRequest) (*identitypb.ClassifyAccountsResponse, error) {
+	if err := b.throttle(ctx, b.machineLimits[identityv1connect.IdentityServiceClassifyAccountsProcedure]); err != nil {
+		return nil, err
+	}
+	ctx, err := b.accountProofProjectContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.ClassifyAccounts)
+}
+
 func (b *grpcBridge) GetManagedChildAuthorization(ctx context.Context, in *identitypb.GetManagedChildAuthorizationRequest) (*identitypb.GetManagedChildAuthorizationResponse, error) {
 	if err := b.throttle(ctx, b.machineLimits[identityv1connect.IdentityServiceGetManagedChildAuthorizationProcedure]); err != nil {
 		return nil, err
 	}
-	ctx, err := b.managedChildProjectContext(ctx)
+	ctx, err := b.accountProofProjectContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1147,9 +1158,9 @@ func (b *grpcBridge) GetManagedChildAuthorization(ctx context.Context, in *ident
 
 // Unlike HTTP there is no host/default project middleware on native gRPC.
 // Require an explicit public project key and never downgrade an invalid key.
-func (b *grpcBridge) managedChildProjectContext(ctx context.Context) (context.Context, error) {
+func (b *grpcBridge) accountProofProjectContext(ctx context.Context) (context.Context, error) {
 	if b.projectResolver == nil {
-		return nil, status.Error(codes.Unimplemented, "managed child authorization requires a project resolver")
+		return nil, status.Error(codes.Unimplemented, "account proof requires a project resolver")
 	}
 	key := incomingMetadata(ctx)(middleware.ProjectKeyHeader)
 	if key == "" {

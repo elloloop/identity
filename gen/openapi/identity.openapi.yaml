@@ -1508,6 +1508,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ChangePasswordResponse'
+  /identity.v1.IdentityService/ClassifyAccounts:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ClassifyAccounts
+      description: |-
+        ID-only live standing for an account_classifier project credential in
+         X-Account-Classifier-Key. The resolved project must match the credential;
+         native gRPC requires X-Project-Key. Recheck on admission, refresh and
+         reconciliation; never cache an affirmative classification. This grants
+         neither household/contact authority nor guardian/consent authorization.
+      operationId: identity.v1.IdentityService.ClassifyAccounts
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ClassifyAccountsRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ClassifyAccountsResponse'
   /identity.v1.IdentityService/CompletePasskeyEligibilityVerification:
     post:
       tags:
@@ -7374,6 +7415,17 @@ components:
           $ref: '#/components/schemas/identity.v1.TenantMembership'
       title: AcceptTenantInvitationResponse
       additionalProperties: false
+    identity.v1.AccountClassification:
+      type: string
+      title: AccountClassification
+      enum:
+        - ACCOUNT_CLASSIFICATION_UNSPECIFIED
+        - ACCOUNT_CLASSIFICATION_DENIED
+        - ACCOUNT_CLASSIFICATION_ACTIVE_KNOWN_ADULT
+        - ACCOUNT_CLASSIFICATION_ACTIVE_KNOWN_MINOR
+      description: |-
+        AccountClassification is coarse live standing, never a consent or contact grant.
+         Unknown values and the omitted zero value must be treated as denied.
     identity.v1.AddGroupMemberRequest:
       type: object
       properties:
@@ -7513,6 +7565,8 @@ components:
           description: |-
             kind selects the credential type: "publishable" (a public lookup key,
              no secret), "secret" (a key whose secret half is shown ONCE),
+             "account_classifier" (a once-shown secret for ClassifyAccounts in
+             X-Account-Classifier-Key, no profile/write/guardian rights),
              "managed_child_reader" (a once-shown secret for GetManagedChildAuthorization
              in X-Managed-Child-Key, no profile/write rights),
              "directory_reader" (a machine credential whose secret half is shown ONCE
@@ -7853,8 +7907,8 @@ components:
       description: |-
         AdminRevokeProjectCredentialRequest names the credential to revoke by the
          credential_id AdminCreateProjectCredential returned, together with the
-         project it belongs to. A revoked directory_reader, teammate_key_manager or
-         tenant_operator key is refused on its next call; a revoked publishable,
+         project it belongs to. A revoked directory_reader, managed_child_reader,
+         account_classifier, teammate_key_manager or tenant_operator key is refused on its next call; a revoked publishable,
          secret or mTLS key stops selecting its
          project within GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS (default 30s) on
          each replica, which caches project resolution. The row is kept for audit.
@@ -8467,6 +8521,42 @@ components:
     identity.v1.ChangePasswordResponse:
       type: object
       title: ChangePasswordResponse
+      additionalProperties: false
+    identity.v1.ClassifiedAccount:
+      type: object
+      properties:
+        userId:
+          type: string
+          title: user_id
+        classification:
+          title: classification
+          $ref: '#/components/schemas/identity.v1.AccountClassification'
+      title: ClassifiedAccount
+      additionalProperties: false
+    identity.v1.ClassifyAccountsRequest:
+      type: object
+      properties:
+        userIds:
+          type: array
+          items:
+            type: string
+          title: user_ids
+          description: One or two distinct exact account IDs, each at most 128 bytes. No email lookup.
+      title: ClassifyAccountsRequest
+      additionalProperties: false
+    identity.v1.ClassifyAccountsResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.ClassifiedAccount'
+          title: accounts
+          description: |-
+            One result per input, in the same order. Missing, foreign-project, unknown-age,
+             non-person and inactive accounts are denied. No profile fields are returned.
+             This is a live point-in-time read, not a token; errors must fail closed.
+      title: ClassifyAccountsResponse
       additionalProperties: false
     identity.v1.CompletePasskeyEligibilityVerificationRequest:
       type: object

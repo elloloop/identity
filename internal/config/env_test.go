@@ -694,3 +694,27 @@ func TestTenantSelectionEnabled_DefaultsOff(t *testing.T) {
 		t.Fatal("GATEWAY_TENANT_SELECTION_ENABLED=true must turn it on")
 	}
 }
+
+func TestAccountClassificationBudget(t *testing.T) {
+	clearGatewayEnv(t)
+	c := Load()
+	if c.RateLimitAccountClassificationPerIP != DefaultRateLimitAccountClassificationPerIP {
+		t.Fatal("missing default classifier budget")
+	}
+	t.Setenv("GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP", "7")
+	c = Load()
+	if c.RateLimitAccountClassificationPerIP != 7 {
+		t.Fatal("ignored classifier budget")
+	}
+	c.RateLimitAccountClassificationPerIP = 0
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if c.RateLimitAccountClassificationPerIP != DefaultRateLimitAccountClassificationPerIP {
+		t.Fatal("zero disabled the budget")
+	}
+	c.RateLimitAccountClassificationPerIP = -1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP") {
+		t.Fatalf("negative classifier budget: %v", err)
+	}
+}

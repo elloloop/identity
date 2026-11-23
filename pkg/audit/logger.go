@@ -236,6 +236,7 @@ const (
 	// for each decision. Refused credential presentations carry a reason and
 	// omit the requested child target; no profile or secret is recorded.
 	EventManagedChildAuthorization EventType = "managed_child_authorization"
+	EventAccountsClassified        EventType = "accounts_classified"
 
 	// EventDirectoryPhoneMatch records a service matching phone-number
 	// hashes against a tenant's members through MatchTenantMemberPhones with
@@ -535,6 +536,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectCredentialRevoked:      {},
 	EventDirectoryLookup:               {},
 	EventManagedChildAuthorization:     {},
+	EventAccountsClassified:            {},
 	EventDirectoryPhoneMatch:           {},
 	EventSCIMAuthFailed:                {},
 	EventParentalConsentGranted:        {},

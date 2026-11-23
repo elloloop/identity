@@ -1535,3 +1535,24 @@ func TestControlPlaneAdmin_CreateManagedChildReaderCredential(t *testing.T) {
 		}
 	}
 }
+
+func TestControlPlaneAdmin_CreateAccountClassifierCredential(t *testing.T) {
+	f := newAdminFixture(testAdminSecret)
+	minted, err := f.svc.AdminCreateProjectCredential(context.Background(), testAdminSecret, "proj-1", CredentialKindAccountClassifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, secret, ok := strings.Cut(minted.RawKey, rawKeySeparator)
+	if !ok || !strings.HasPrefix(public, accountClassifierKeyPrefix) || public != minted.PublicID || secret == "" {
+		t.Fatal("invalid account-classifier credential shape")
+	}
+	stored := f.projects.credentials[minted.ID]
+	if stored == nil || stored.Kind != CredentialKindAccountClassifier || stored.ProjectID != "proj-1" || stored.SecretHash != sha256Hex(secret) {
+		t.Fatal("credential kind, scope or stored secret incorrect")
+	}
+	for _, entry := range f.audit.details {
+		if strings.Contains(entry, secret) || strings.Contains(entry, stored.SecretHash) {
+			t.Fatal("credential audit disclosed secret")
+		}
+	}
+}

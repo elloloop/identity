@@ -563,6 +563,9 @@ const (
 	// IdentityServiceGetManagedChildAuthorizationProcedure is the fully-qualified name of the
 	// IdentityService's GetManagedChildAuthorization RPC.
 	IdentityServiceGetManagedChildAuthorizationProcedure = "/identity.v1.IdentityService/GetManagedChildAuthorization"
+	// IdentityServiceClassifyAccountsProcedure is the fully-qualified name of the IdentityService's
+	// ClassifyAccounts RPC.
+	IdentityServiceClassifyAccountsProcedure = "/identity.v1.IdentityService/ClassifyAccounts"
 	// IdentityServiceLookupUsersProcedure is the fully-qualified name of the IdentityService's
 	// LookupUsers RPC.
 	IdentityServiceLookupUsersProcedure = "/identity.v1.IdentityService/LookupUsers"
@@ -1274,6 +1277,12 @@ type IdentityServiceClient interface {
 	// managed_child_reader project credential. Errors and false must fail closed;
 	// callers must recheck before each operation, never cache a true response.
 	GetManagedChildAuthorization(context.Context, *connect.Request[v1.GetManagedChildAuthorizationRequest]) (*connect.Response[v1.GetManagedChildAuthorizationResponse], error)
+	// ID-only live standing for an account_classifier project credential in
+	// X-Account-Classifier-Key. The resolved project must match the credential;
+	// native gRPC requires X-Project-Key. Recheck on admission, refresh and
+	// reconciliation; never cache an affirmative classification. This grants
+	// neither household/contact authority nor guardian/consent authorization.
+	ClassifyAccounts(context.Context, *connect.Request[v1.ClassifyAccountsRequest]) (*connect.Response[v1.ClassifyAccountsResponse], error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT
 	// but by a directory_reader project credential (minted with
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
@@ -2395,6 +2404,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("GetManagedChildAuthorization")),
 			connect.WithClientOptions(opts...),
 		),
+		classifyAccounts: connect.NewClient[v1.ClassifyAccountsRequest, v1.ClassifyAccountsResponse](
+			httpClient,
+			baseURL+IdentityServiceClassifyAccountsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ClassifyAccounts")),
+			connect.WithClientOptions(opts...),
+		),
 		lookupUsers: connect.NewClient[v1.LookupUsersRequest, v1.LookupUsersResponse](
 			httpClient,
 			baseURL+IdentityServiceLookupUsersProcedure,
@@ -2619,6 +2634,7 @@ type identityServiceClient struct {
 	adminSetProjectOAuthHostClient         *connect.Client[v1.AdminSetProjectOAuthHostClientRequest, v1.AdminSetProjectOAuthHostClientResponse]
 	adminDeleteProjectOAuthHostClient      *connect.Client[v1.AdminDeleteProjectOAuthHostClientRequest, v1.AdminDeleteProjectOAuthHostClientResponse]
 	getManagedChildAuthorization           *connect.Client[v1.GetManagedChildAuthorizationRequest, v1.GetManagedChildAuthorizationResponse]
+	classifyAccounts                       *connect.Client[v1.ClassifyAccountsRequest, v1.ClassifyAccountsResponse]
 	lookupUsers                            *connect.Client[v1.LookupUsersRequest, v1.LookupUsersResponse]
 	matchTenantMemberPhones                *connect.Client[v1.MatchTenantMemberPhonesRequest, v1.MatchTenantMemberPhonesResponse]
 	beginReauthentication                  *connect.Client[v1.BeginReauthenticationRequest, v1.BeginReauthenticationResponse]
@@ -3510,6 +3526,11 @@ func (c *identityServiceClient) GetManagedChildAuthorization(ctx context.Context
 	return c.getManagedChildAuthorization.CallUnary(ctx, req)
 }
 
+// ClassifyAccounts calls identity.v1.IdentityService.ClassifyAccounts.
+func (c *identityServiceClient) ClassifyAccounts(ctx context.Context, req *connect.Request[v1.ClassifyAccountsRequest]) (*connect.Response[v1.ClassifyAccountsResponse], error) {
+	return c.classifyAccounts.CallUnary(ctx, req)
+}
+
 // LookupUsers calls identity.v1.IdentityService.LookupUsers.
 func (c *identityServiceClient) LookupUsers(ctx context.Context, req *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error) {
 	return c.lookupUsers.CallUnary(ctx, req)
@@ -4226,6 +4247,12 @@ type IdentityServiceHandler interface {
 	// managed_child_reader project credential. Errors and false must fail closed;
 	// callers must recheck before each operation, never cache a true response.
 	GetManagedChildAuthorization(context.Context, *connect.Request[v1.GetManagedChildAuthorizationRequest]) (*connect.Response[v1.GetManagedChildAuthorizationResponse], error)
+	// ID-only live standing for an account_classifier project credential in
+	// X-Account-Classifier-Key. The resolved project must match the credential;
+	// native gRPC requires X-Project-Key. Recheck on admission, refresh and
+	// reconciliation; never cache an affirmative classification. This grants
+	// neither household/contact authority nor guardian/consent authorization.
+	ClassifyAccounts(context.Context, *connect.Request[v1.ClassifyAccountsRequest]) (*connect.Response[v1.ClassifyAccountsResponse], error)
 	// Read-only directory lookup for services. Authenticated NOT by a user JWT
 	// but by a directory_reader project credential (minted with
 	// AdminCreateProjectCredential) in the "X-Directory-Key" header, and scoped
@@ -5343,6 +5370,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("GetManagedChildAuthorization")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceClassifyAccountsHandler := connect.NewUnaryHandler(
+		IdentityServiceClassifyAccountsProcedure,
+		svc.ClassifyAccounts,
+		connect.WithSchema(identityServiceMethods.ByName("ClassifyAccounts")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceLookupUsersHandler := connect.NewUnaryHandler(
 		IdentityServiceLookupUsersProcedure,
 		svc.LookupUsers,
@@ -5740,6 +5773,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAdminDeleteProjectOAuthHostClientHandler.ServeHTTP(w, r)
 		case IdentityServiceGetManagedChildAuthorizationProcedure:
 			identityServiceGetManagedChildAuthorizationHandler.ServeHTTP(w, r)
+		case IdentityServiceClassifyAccountsProcedure:
+			identityServiceClassifyAccountsHandler.ServeHTTP(w, r)
 		case IdentityServiceLookupUsersProcedure:
 			identityServiceLookupUsersHandler.ServeHTTP(w, r)
 		case IdentityServiceMatchTenantMemberPhonesProcedure:
@@ -6465,6 +6500,10 @@ func (UnimplementedIdentityServiceHandler) AdminDeleteProjectOAuthHostClient(con
 
 func (UnimplementedIdentityServiceHandler) GetManagedChildAuthorization(context.Context, *connect.Request[v1.GetManagedChildAuthorizationRequest]) (*connect.Response[v1.GetManagedChildAuthorizationResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetManagedChildAuthorization is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ClassifyAccounts(context.Context, *connect.Request[v1.ClassifyAccountsRequest]) (*connect.Response[v1.ClassifyAccountsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ClassifyAccounts is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) LookupUsers(context.Context, *connect.Request[v1.LookupUsersRequest]) (*connect.Response[v1.LookupUsersResponse], error) {

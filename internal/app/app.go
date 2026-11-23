@@ -590,6 +590,10 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitDirectoryPerIP, 0),
 		},
 		{
+			PathPrefix: identityconnectgen.IdentityServiceClassifyAccountsProcedure, Tag: "account_classification",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitAccountClassificationPerIP, 0),
+		},
+		{
 			PathPrefix: identityconnectgen.IdentityServiceGetManagedChildAuthorizationProcedure, Tag: "managed_child_authorization",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitManagedChildAuthPerIP, 0),
 		},
@@ -933,6 +937,7 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf("agent exchange metrics: %w", err)
 	}
 	handler.WithManagedChildAuthorization(buildManagedChildAuthorization(deps, authSvc, logger))
+	handler.WithAccountClassification(buildAccountClassification(deps, authSvc, logger))
 	handler.WithTeammateKeys(teammateKeys).WithAgentExchangeMetrics(exchanges)
 
 	mux := http.NewServeMux()
@@ -1474,6 +1479,15 @@ func buildControlPlaneAdminService(deps Deps, users service.UserDirectory, audit
 		auditLog,
 		logger,
 	)
+}
+
+func buildAccountClassification(deps Deps, auth *service.AuthService, logger *zap.Logger) *service.AccountClassificationService {
+	if deps.ProjectResolver == nil || deps.DirectoryCredentials == nil {
+		logger.Info("account_classification_disabled", zap.String("hint", "ClassifyAccounts requires a project resolver and account_classifier credentials from the postgres control plane"))
+		return nil
+	}
+	logger.Info("account_classification_enabled", zap.Int("rate_limit_per_ip", deps.Config.RateLimitAccountClassificationPerIP), zap.Duration("rate_limit_window", rateLimitWindow(deps.Config)))
+	return service.NewAccountClassificationService(deps.DirectoryCredentials, auth)
 }
 
 // buildManagedChildAuthorization keeps incomplete control-plane wiring disabled

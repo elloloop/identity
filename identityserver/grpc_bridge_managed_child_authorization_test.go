@@ -54,11 +54,14 @@ func (nativeChildProjects) ResolveByHostname(context.Context, string) (*service.
 type nativeChildCredential struct{}
 
 func (nativeChildCredential) CredentialByPublicIDInActiveProject(_ context.Context, id string) (*service.AdminProjectCredential, error) {
-	if id != "ck_native" {
+	kind := service.CredentialKindManagedChildReader
+	if id == "ak_native" {
+		kind = service.CredentialKindAccountClassifier
+	} else if id != "ck_native" {
 		return nil, nil
 	}
 	sum := sha256.Sum256([]byte("fixture-secret"))
-	return &service.AdminProjectCredential{ID: "native-credential", ProjectID: nativeChildProject, Kind: service.CredentialKindManagedChildReader, PublicID: id, SecretHash: hex.EncodeToString(sum[:])}, nil
+	return &service.AdminProjectCredential{ID: "native-credential", ProjectID: nativeChildProject, Kind: kind, PublicID: id, SecretHash: hex.EncodeToString(sum[:])}, nil
 }
 
 func nativeChildFixture(t *testing.T) (identitypb.IdentityServiceClient, service.Repository, *identitypb.GetManagedChildAuthorizationRequest) {
