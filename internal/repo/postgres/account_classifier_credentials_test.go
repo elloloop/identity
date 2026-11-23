@@ -13,7 +13,7 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// A account_classifier credential is stored like any other kind and read back
+// An account_classifier credential is stored like any other kind and read back
 // uncached by its public id, which is how the operator service checks one on
 // every call. It never selects a project as X-Project-Key.
 func TestAccountClassifierCredential_StoredAndReadByPublicID(t *testing.T) {
@@ -41,7 +41,7 @@ func TestAccountClassifierCredential_StoredAndReadByPublicID(t *testing.T) {
 
 	resolved, err := store.ResolveByCredential(ctx, "ak_store")
 	require.NoError(t, err)
-	require.Nil(t, resolved, "a account classifier key must not select a project as X-Project-Key")
+	require.Nil(t, resolved, "an account classifier key must not select a project as X-Project-Key")
 }
 
 // 0066 widens the kind check to admit account_classifier; rolling it back

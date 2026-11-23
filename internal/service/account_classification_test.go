@@ -141,3 +141,65 @@ func TestAccountClassificationExactIDBounds(t *testing.T) {
 	}
 	require.NoError(t, validateAccountClassificationIDs([]string{"user-1", "user-2"}))
 }
+
+type classificationTestDeterminer struct {
+	enabled bool
+	result  agegate.Decision
+}
+
+func (classificationTestDeterminer) Name() string    { return "fixture" }
+func (d classificationTestDeterminer) Enabled() bool { return d.enabled }
+func (d classificationTestDeterminer) Determine(*int64, time.Time) agegate.Decision {
+	return d.result
+}
+
+func TestAccountClassificationRequiresEnabledKnownAge(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		gate agegate.Determiner
+	}{
+		{name: "absent provider"},
+		{name: "disabled provider reports adult", gate: classificationTestDeterminer{result: agegate.Decision{Band: agegate.BandAdult, HasDOB: true}}},
+		{name: "adult without known DOB", gate: classificationTestDeterminer{enabled: true, result: agegate.Decision{Band: agegate.BandAdult}}},
+		{name: "unknown band", gate: classificationTestDeterminer{enabled: true, result: agegate.Decision{HasDOB: true}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDirectoryFixture(t)
+			repo := f.repos.project(dirTestProjectA)
+			auth := newTestAuthService(t, repo)
+			auth.defaultRepo = f.repos
+			auth.ageGate = tc.gate
+			user := seedPerson(repo, "adult@example.test")
+			user.DateOfBirthMs = new(dobAgeMs(35))
+			key := f.mint(t, dirTestProjectA, CredentialKindAccountClassifier)
+			ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: dirTestProjectA})
+			out, err := NewAccountClassificationService(f.store, auth).ClassifyAccounts(ctx, key.RawKey, []string{user.ID})
+			require.NoError(t, err)
+			require.Equal(t, []ClassifiedAccount{{UserID: user.ID, Classification: AccountClassificationDenied}}, out)
+		})
+	}
+}
+
+func TestAccountClassificationRefreshesProjectJurisdiction(t *testing.T) {
+	f := newDirectoryFixture(t)
+	repo := f.repos.project(dirTestProjectA)
+	auth := newTestAuthService(t, repo)
+	auth.defaultRepo = f.repos
+	enableAgeGate(t, auth, false)
+	project := &AdminProject{ID: dirTestProjectA, Jurisdictions: ProjectJurisdictionsConfig{
+		Default: "EX", Thresholds: map[string]JurisdictionThresholds{"EX": {ChildMaxAge: 12, AdultAge: 21}},
+	}}
+	auth.WithActiveProjects(&fakeActiveProjects{active: map[string]*AdminProject{project.ID: project}})
+	user := seedPerson(repo, "profile@example.test")
+	user.DateOfBirthMs = new(dobAgeMs(19))
+	key := f.mint(t, dirTestProjectA, CredentialKindAccountClassifier)
+	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: dirTestProjectA})
+	svc := NewAccountClassificationService(f.store, auth)
+	out, err := svc.ClassifyAccounts(ctx, key.RawKey, []string{user.ID})
+	require.NoError(t, err)
+	require.Equal(t, AccountClassificationActiveKnownMinor, out[0].Classification)
+	project.Jurisdictions.Thresholds["EX"] = JurisdictionThresholds{ChildMaxAge: 12, AdultAge: 18}
+	out, err = svc.ClassifyAccounts(ctx, key.RawKey, []string{user.ID})
+	require.NoError(t, err)
+	require.Equal(t, AccountClassificationActiveKnownAdult, out[0].Classification)
+}

@@ -9,6 +9,7 @@ or foreign-project users, anonymous/agent/merged accounts and every inactive
 state are denied. Empty/unknown account status or kind also denies.
 Disabled age gating also denies; project and user-market
 thresholds are authoritative.
+Known age is derived from stored DOB, not independent identity verification.
 
 Only the new `account_classifier` credential kind in
 `X-Account-Classifier-Key` authorizes the RPC. Its `ak_` raw key is shown once
@@ -33,6 +34,13 @@ Without project resolution and control-plane credential storage this surface
 is disabled (`UNIMPLEMENTED`). Migration 0066 widens only the credential kind
 constraint. Its down migration removes classifier credentials and leaves all
 other credential kinds and accounts intact; rotate/remint after re-upgrading.
+
+Run migration 0066 before starting this release. The constraint change uses a
+10-second lock acquisition timeout. Existing RPCs remain usable during a roll;
+wait until every replica supports the new RPC before minting classifier keys
+or enabling its consumers. Roll back only with consumers stopped or failing
+closed and a coordinated schema downgrade; older images do not support schema
+66. Prefer a fix-forward release rather than deleting the new credentials.
 
 ## Next — current-user age classification (no migration or protocol change)
 

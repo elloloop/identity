@@ -96,7 +96,14 @@ func (s *AccountClassificationService) ClassifyAccounts(ctx context.Context, pre
 		if !isActivePerson(user) || user.Status != StatusActive || user.Kind != UserKindPerson {
 			continue
 		}
-		band := s.auth.determinerForUser(ctx, user).Determine(user.DateOfBirthMs, now)
+		gate := s.auth.determinerForUser(ctx, user)
+		if gate == nil || !gate.Enabled() {
+			continue
+		}
+		band := gate.Determine(user.DateOfBirthMs, now)
+		if !band.HasDOB {
+			continue
+		}
 		switch band.Band {
 		case agegate.BandAdult:
 			classes[user.ID] = AccountClassificationActiveKnownAdult
