@@ -2661,6 +2661,10 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*User,
 	if userID == "" {
 		return nil, fmt.Errorf("%w: missing user ID", ErrUnauthenticated)
 	}
+	ctx, err := s.activeProjectPolicyContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -2668,6 +2672,7 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (*User,
 	if user == nil {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
+	s.stampAgeBand(ctx, user)
 	return user, nil
 }
 

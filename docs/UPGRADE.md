@@ -1,5 +1,14 @@
 # Upgrade guide
 
+## Next — current-user age classification (no migration or protocol change)
+
+`GetCurrentUser` derives `age_band` and `is_minor` from the stored DOB and
+the current project's jurisdiction policy on each read, matching sign-in
+responses. Unknown or implausible dates and disabled classification remain
+unknown. This changes no stored profile, account status, consent or session;
+clients must continue to refuse unknown age where a known adult is required.
+No configuration change is needed.
+
 ## Next — passkey provenance for sensitive reauthentication (PostgreSQL 0065 / SQLite 0033)
 
 Passkeys and sessions now carry server-written enrollment provenance.
