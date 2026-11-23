@@ -153,7 +153,7 @@ jobs:
           go test -count=1 -tags="integration realpostgres" -race -timeout=180s
           -run '^TestAccountClassificationRealPostgres$'
           -coverprofile=cover.account-classification.out
-          -coverpkg=./internal/...,./pkg/...
+          -coverpkg=./internal/app,./internal/config,./internal/connect,./internal/middleware,./internal/repo/postgres,./internal/service,./pkg/audit
           ./tests/integration/...
 
       - name: Name the profile artifact
