@@ -145,6 +145,17 @@ jobs:
           GATEWAY_TEST_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
         run: bash scripts/run-coverage.sh
 
+      - name: Account classification full-stack PostgreSQL journeys
+        if: matrix.part == 'realpostgres'
+        env:
+          GATEWAY_POSTGRES_DSN: postgres://identity:identity@localhost:5432/identity?sslmode=disable
+        run: >-
+          go test -count=1 -tags="integration realpostgres" -race -timeout=180s
+          -run '^TestAccountClassificationRealPostgres$'
+          -coverprofile=cover.account-classification.out
+          -coverpkg=./internal/...,./pkg/...
+          ./tests/integration/...
+
       - name: Name the profile artifact
         id: artifact
         run: echo "name=cover-${COVERAGE_PART//[:\/]/-}" >> "$GITHUB_OUTPUT"
