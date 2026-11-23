@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## v4.44.1 — current-user age classification (no migration or protocol change)
+## Next — current-user age classification (no migration or protocol change)
 
 `GetCurrentUser` derives `age_band` and `is_minor` from the stored DOB and
 the current project's jurisdiction policy on each read, matching sign-in

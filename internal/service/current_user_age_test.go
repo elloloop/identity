@@ -88,12 +88,25 @@ func TestGetCurrentUser_AgeClassificationDisabled(t *testing.T) {
 
 func TestGetCurrentUser_ProjectPolicyUnavailableFailsClosed(t *testing.T) {
 	t.Parallel()
-	repo := newFakeRepo()
-	svc := newTestAuthService(t, repo)
-	enableAgeGate(t, svc, false)
-	svc.WithActiveProjects(&fakeActiveProjects{err: ErrServiceUnavailable})
-	id, err := repo.CreateUser(context.Background(), &User{Email: "profile@example.test", DateOfBirthMs: new(dobAgeMs(30))})
-	require.NoError(t, err)
-	_, err = svc.GetCurrentUser(context.Background(), id)
-	require.ErrorIs(t, err, ErrUnavailable)
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+	}{
+		{name: "classification disabled"},
+		{name: "classification enabled", enabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := newFakeRepo()
+			svc := newTestAuthService(t, repo)
+			if tc.enabled {
+				enableAgeGate(t, svc, false)
+			}
+			svc.WithActiveProjects(&fakeActiveProjects{err: ErrServiceUnavailable})
+			id, err := repo.CreateUser(context.Background(), &User{Email: "profile@example.test", DateOfBirthMs: new(dobAgeMs(30))})
+			require.NoError(t, err)
+			_, err = svc.GetCurrentUser(context.Background(), id)
+			require.ErrorIs(t, err, ErrUnavailable)
+		})
+	}
 }
