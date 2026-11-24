@@ -154,6 +154,25 @@ func (f *fakeInvitationStore) SetInvitationStatus(_ context.Context, projectID, 
 	return nil
 }
 
+// RevokeInvitation mirrors the postgres store: only the tenant's own pending
+// invitation is revoked, an accepted one is ErrInvitationUsed, and a revoked
+// or expired one is returned unchanged.
+func (f *fakeInvitationStore) RevokeInvitation(_ context.Context, projectID, tenantID, invitationID string) (*TenantInvitation, bool, error) {
+	inv, ok := f.byID[f.key(projectID, invitationID)]
+	if !ok || inv.TenantID != tenantID {
+		return nil, false, ErrNotFound
+	}
+	changed := false
+	switch inv.Status {
+	case InvitationStatusAccepted:
+		return nil, false, ErrInvitationUsed
+	case InvitationStatusPending:
+		inv.Status, changed = InvitationStatusRevoked, true
+	}
+	out := *inv
+	return &out, changed, nil
+}
+
 func (f *fakeInvitationStore) ListInvitationsForTenant(_ context.Context, projectID, tenantID string) ([]*TenantInvitation, error) {
 	if f.listErr != nil {
 		return nil, f.listErr

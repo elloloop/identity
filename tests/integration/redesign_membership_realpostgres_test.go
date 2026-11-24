@@ -100,6 +100,75 @@ func TestRedesign_Membership_InviteAcceptList(t *testing.T) {
 	}
 }
 
+// TestRedesign_Membership_RevokeStopsTheToken drives a revocation over the
+// Connect client against a real Postgres: the owner revokes a pending
+// invitation, its emailed token no longer redeems, a retry returns it
+// unchanged, and an accepted invitation is refused.
+func TestRedesign_Membership_RevokeStopsTheToken(t *testing.T) {
+	h := startRedesignHarness(t)
+	ctx := context.Background()
+
+	owner := signupOwner(t, h, "mem-revoke-owner")
+	inviteeEmail := fmt.Sprintf("mem-revoke-invitee-%d@example-corp.com", time.Now().UnixNano())
+	invitee := signupVerifiedUser(t, h, inviteeEmail)
+	revoke := func(invitationID string) (*identitypb.TenantInvitation, error) {
+		t.Helper()
+		resp, err := owner.client.RevokeTenantInvitation(ctx, connect.NewRequest(&identitypb.RevokeTenantInvitationRequest{
+			TenantId:     owner.tenantID,
+			InvitationId: invitationID,
+		}))
+		if err != nil {
+			return nil, err
+		}
+		return resp.Msg.GetInvitation(), nil
+	}
+
+	created, err := owner.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+		TenantId: owner.tenantID,
+		Email:    inviteeEmail,
+	}))
+	if err != nil {
+		t.Fatalf("CreateTenantInvitation: %v", err)
+	}
+	invitationID, rawToken := created.Msg.GetInvitation().GetId(), extractMailedToken(t, h, inviteeEmail)
+	for range 2 {
+		got, err := revoke(invitationID)
+		if err != nil {
+			t.Fatalf("RevokeTenantInvitation: %v", err)
+		}
+		if got.GetId() != invitationID || got.GetStatus() != service.InvitationStatusRevoked {
+			t.Fatalf("revoked invitation = %+v", got)
+		}
+	}
+	_, err = invitee.client.AcceptTenantInvitation(ctx, connect.NewRequest(&identitypb.AcceptTenantInvitationRequest{Token: rawToken}))
+	if connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("AcceptTenantInvitation after revoke = %v, want PermissionDenied", err)
+	}
+	if mem, err := h.Stores.memberships.GetMembership(ctx, h.ProjectID, owner.tenantID, invitee.userID); err != nil || mem != nil {
+		t.Fatalf("membership after a revoked invitation = %+v, %v; want none", mem, err)
+	}
+
+	// The resend cooldown keeps the owner from inviting the address again at
+	// once, so the accepted invitation goes to a second address.
+	acceptedEmail := fmt.Sprintf("mem-revoke-accepted-%d@example-corp.com", time.Now().UnixNano())
+	acceptor := signupVerifiedUser(t, h, acceptedEmail)
+	created, err = owner.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+		TenantId: owner.tenantID,
+		Email:    acceptedEmail,
+	}))
+	if err != nil {
+		t.Fatalf("CreateTenantInvitation: %v", err)
+	}
+	if _, err := acceptor.client.AcceptTenantInvitation(ctx, connect.NewRequest(&identitypb.AcceptTenantInvitationRequest{
+		Token: extractMailedToken(t, h, acceptedEmail),
+	})); err != nil {
+		t.Fatalf("AcceptTenantInvitation: %v", err)
+	}
+	if _, err := revoke(created.Msg.GetInvitation().GetId()); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("RevokeTenantInvitation of an accepted invitation = %v, want FailedPrecondition", err)
+	}
+}
+
 // TestRedesign_Membership_WrongEmailDenied asserts a leaked token cannot be
 // redeemed by an account whose email differs from the invitation's.
 func TestRedesign_Membership_WrongEmailDenied(t *testing.T) {

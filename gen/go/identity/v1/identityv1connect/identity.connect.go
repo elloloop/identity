@@ -410,6 +410,9 @@ const (
 	// IdentityServiceListTenantInvitationsProcedure is the fully-qualified name of the
 	// IdentityService's ListTenantInvitations RPC.
 	IdentityServiceListTenantInvitationsProcedure = "/identity.v1.IdentityService/ListTenantInvitations"
+	// IdentityServiceRevokeTenantInvitationProcedure is the fully-qualified name of the
+	// IdentityService's RevokeTenantInvitation RPC.
+	IdentityServiceRevokeTenantInvitationProcedure = "/identity.v1.IdentityService/RevokeTenantInvitation"
 	// IdentityServiceListTenantMembersProcedure is the fully-qualified name of the IdentityService's
 	// ListTenantMembers RPC.
 	IdentityServiceListTenantMembersProcedure = "/identity.v1.IdentityService/ListTenantMembers"
@@ -890,6 +893,21 @@ type IdentityServiceClient interface {
 	CreateTenantInvitation(context.Context, *connect.Request[v1.CreateTenantInvitationRequest]) (*connect.Response[v1.CreateTenantInvitationResponse], error)
 	AcceptTenantInvitation(context.Context, *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error)
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
+	// RevokeTenantInvitation withdraws a pending invitation: it becomes
+	// "revoked" and its token no longer redeems (AcceptTenantInvitation is
+	// PERMISSION_DENIED). The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+	// An invitation_id that is not one of tenant_id's invitations, unknown or
+	// another tenant's, is NOT_FOUND, and an accepted invitation is
+	// FAILED_PRECONDITION: remove the member instead. Revoking a revoked or
+	// expired invitation returns it unchanged and records nothing; a revocation
+	// is audited. A missing tenant_id or invitation_id is INVALID_ARGUMENT. A
+	// revoke never overwrites an invitation accepted before it, but an accept
+	// that had already read the invitation as pending still completes, so a
+	// successful revoke does not prove nobody joined: read ListTenantMembers.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	RevokeTenantInvitation(context.Context, *connect.Request[v1.RevokeTenantInvitationRequest]) (*connect.Response[v1.RevokeTenantInvitationResponse], error)
 	ListTenantMembers(context.Context, *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error)
 	// RemoveTenantMember removes user_id's membership of tenant_id. The caller
 	// must be an active owner or admin of a tenant that is not suspended
@@ -2098,6 +2116,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("ListTenantInvitations")),
 			connect.WithClientOptions(opts...),
 		),
+		revokeTenantInvitation: connect.NewClient[v1.RevokeTenantInvitationRequest, v1.RevokeTenantInvitationResponse](
+			httpClient,
+			baseURL+IdentityServiceRevokeTenantInvitationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("RevokeTenantInvitation")),
+			connect.WithClientOptions(opts...),
+		),
 		listTenantMembers: connect.NewClient[v1.ListTenantMembersRequest, v1.ListTenantMembersResponse](
 			httpClient,
 			baseURL+IdentityServiceListTenantMembersProcedure,
@@ -2583,6 +2607,7 @@ type identityServiceClient struct {
 	createTenantInvitation                 *connect.Client[v1.CreateTenantInvitationRequest, v1.CreateTenantInvitationResponse]
 	acceptTenantInvitation                 *connect.Client[v1.AcceptTenantInvitationRequest, v1.AcceptTenantInvitationResponse]
 	listTenantInvitations                  *connect.Client[v1.ListTenantInvitationsRequest, v1.ListTenantInvitationsResponse]
+	revokeTenantInvitation                 *connect.Client[v1.RevokeTenantInvitationRequest, v1.RevokeTenantInvitationResponse]
 	listTenantMembers                      *connect.Client[v1.ListTenantMembersRequest, v1.ListTenantMembersResponse]
 	removeTenantMember                     *connect.Client[v1.RemoveTenantMemberRequest, v1.RemoveTenantMemberResponse]
 	suspendTenantMember                    *connect.Client[v1.SuspendTenantMemberRequest, v1.SuspendTenantMemberResponse]
@@ -3269,6 +3294,11 @@ func (c *identityServiceClient) ListTenantInvitations(ctx context.Context, req *
 	return c.listTenantInvitations.CallUnary(ctx, req)
 }
 
+// RevokeTenantInvitation calls identity.v1.IdentityService.RevokeTenantInvitation.
+func (c *identityServiceClient) RevokeTenantInvitation(ctx context.Context, req *connect.Request[v1.RevokeTenantInvitationRequest]) (*connect.Response[v1.RevokeTenantInvitationResponse], error) {
+	return c.revokeTenantInvitation.CallUnary(ctx, req)
+}
+
 // ListTenantMembers calls identity.v1.IdentityService.ListTenantMembers.
 func (c *identityServiceClient) ListTenantMembers(ctx context.Context, req *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error) {
 	return c.listTenantMembers.CallUnary(ctx, req)
@@ -3860,6 +3890,21 @@ type IdentityServiceHandler interface {
 	CreateTenantInvitation(context.Context, *connect.Request[v1.CreateTenantInvitationRequest]) (*connect.Response[v1.CreateTenantInvitationResponse], error)
 	AcceptTenantInvitation(context.Context, *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error)
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
+	// RevokeTenantInvitation withdraws a pending invitation: it becomes
+	// "revoked" and its token no longer redeems (AcceptTenantInvitation is
+	// PERMISSION_DENIED). The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+	// An invitation_id that is not one of tenant_id's invitations, unknown or
+	// another tenant's, is NOT_FOUND, and an accepted invitation is
+	// FAILED_PRECONDITION: remove the member instead. Revoking a revoked or
+	// expired invitation returns it unchanged and records nothing; a revocation
+	// is audited. A missing tenant_id or invitation_id is INVALID_ARGUMENT. A
+	// revoke never overwrites an invitation accepted before it, but an accept
+	// that had already read the invitation as pending still completes, so a
+	// successful revoke does not prove nobody joined: read ListTenantMembers.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	RevokeTenantInvitation(context.Context, *connect.Request[v1.RevokeTenantInvitationRequest]) (*connect.Response[v1.RevokeTenantInvitationResponse], error)
 	ListTenantMembers(context.Context, *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error)
 	// RemoveTenantMember removes user_id's membership of tenant_id. The caller
 	// must be an active owner or admin of a tenant that is not suspended
@@ -5064,6 +5109,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("ListTenantInvitations")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceRevokeTenantInvitationHandler := connect.NewUnaryHandler(
+		IdentityServiceRevokeTenantInvitationProcedure,
+		svc.RevokeTenantInvitation,
+		connect.WithSchema(identityServiceMethods.ByName("RevokeTenantInvitation")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceListTenantMembersHandler := connect.NewUnaryHandler(
 		IdentityServiceListTenantMembersProcedure,
 		svc.ListTenantMembers,
@@ -5671,6 +5722,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceAcceptTenantInvitationHandler.ServeHTTP(w, r)
 		case IdentityServiceListTenantInvitationsProcedure:
 			identityServiceListTenantInvitationsHandler.ServeHTTP(w, r)
+		case IdentityServiceRevokeTenantInvitationProcedure:
+			identityServiceRevokeTenantInvitationHandler.ServeHTTP(w, r)
 		case IdentityServiceListTenantMembersProcedure:
 			identityServiceListTenantMembersHandler.ServeHTTP(w, r)
 		case IdentityServiceRemoveTenantMemberProcedure:
@@ -6296,6 +6349,10 @@ func (UnimplementedIdentityServiceHandler) AcceptTenantInvitation(context.Contex
 
 func (UnimplementedIdentityServiceHandler) ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListTenantInvitations is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) RevokeTenantInvitation(context.Context, *connect.Request[v1.RevokeTenantInvitationRequest]) (*connect.Response[v1.RevokeTenantInvitationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.RevokeTenantInvitation is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) ListTenantMembers(context.Context, *connect.Request[v1.ListTenantMembersRequest]) (*connect.Response[v1.ListTenantMembersResponse], error) {

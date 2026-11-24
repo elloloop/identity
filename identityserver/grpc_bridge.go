@@ -927,6 +927,10 @@ func (b *grpcBridge) ListTenantInvitations(ctx context.Context, in *identitypb.L
 	return invoke(ctx, b, in, b.h.ListTenantInvitations)
 }
 
+func (b *grpcBridge) RevokeTenantInvitation(ctx context.Context, in *identitypb.RevokeTenantInvitationRequest) (*identitypb.RevokeTenantInvitationResponse, error) {
+	return invoke(ctx, b, in, b.h.RevokeTenantInvitation)
+}
+
 func (b *grpcBridge) ListTenantMembers(ctx context.Context, in *identitypb.ListTenantMembersRequest) (*identitypb.ListTenantMembersResponse, error) {
 	return invoke(ctx, b, in, b.h.ListTenantMembers)
 }

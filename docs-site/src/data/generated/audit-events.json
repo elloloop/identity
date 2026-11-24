@@ -89,6 +89,7 @@
   "teammate_key_revoked",
   "tenant_admin_added",
   "tenant_created",
+  "tenant_invitation_revoked",
   "tenant_joined_by_domain",
   "tenant_member_added",
   "tenant_member_removed",

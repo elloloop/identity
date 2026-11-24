@@ -385,6 +385,27 @@ RestoreTenantMember(tenant_id, user_id)
     (<code>PERMISSION_DENIED</code>; the invitation stays open).
   </p>
   <p>
+    An owner or admin withdraws a pending invitation, and its link stops
+    working at once:
+  </p>
+  <Code
+    code={`RevokeTenantInvitation(tenant_id, invitation_id)
+  -> invitation { status: "revoked" }   # also if already revoked; one marked expired comes back "expired"
+  -> FAILED_PRECONDITION   # accepted: remove the member instead
+  -> NOT_FOUND             # not one of tenant_id's invitations, another tenant's or nobody's
+  -> PERMISSION_DENIED     # not an active owner or admin of tenant_id, or the tenant is suspended`}
+    lang="bash"
+  />
+  <p>
+    A revocation is audited as <code>tenant_invitation_revoked</code>; a call
+    that changes nothing records nothing. A revoke never overwrites an
+    invitation accepted before it, but an accept already under way, one that
+    read the invitation as pending before the revoke landed, still completes
+    and leaves the invitation accepted and its invitee a member. A successful
+    revoke therefore does not prove that nobody joined: read
+    <code>ListTenantMembers</code> where that matters.
+  </p>
+  <p>
     The email links to the page set in
     <code>GATEWAY_TENANT_INVITATION_PAGE_URL</code> when one is set, otherwise
     to <code>/auth/accept-invitation?token=…</code> on the project's primary

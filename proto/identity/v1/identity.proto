@@ -2321,6 +2321,19 @@ message ListTenantInvitationsResponse {
   repeated TenantInvitation invitations = 1;
 }
 
+// RevokeTenantInvitationRequest names the invitation an owner or admin of its
+// tenant withdraws.
+message RevokeTenantInvitationRequest {
+  string tenant_id = 1;
+  string invitation_id = 2;
+}
+
+message RevokeTenantInvitationResponse {
+  // invitation is the invitation as it now stands: status "revoked", or
+  // "expired" for one AcceptTenantInvitation had already marked expired.
+  TenantInvitation invitation = 1;
+}
+
 message ListTenantMembersRequest {
   string tenant_id = 1;
 }
@@ -4048,6 +4061,21 @@ service IdentityService {
   rpc CreateTenantInvitation(CreateTenantInvitationRequest) returns (CreateTenantInvitationResponse);
   rpc AcceptTenantInvitation(AcceptTenantInvitationRequest) returns (AcceptTenantInvitationResponse);
   rpc ListTenantInvitations(ListTenantInvitationsRequest) returns (ListTenantInvitationsResponse);
+  // RevokeTenantInvitation withdraws a pending invitation: it becomes
+  // "revoked" and its token no longer redeems (AcceptTenantInvitation is
+  // PERMISSION_DENIED). The caller must be an active owner or admin of
+  // tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+  // An invitation_id that is not one of tenant_id's invitations, unknown or
+  // another tenant's, is NOT_FOUND, and an accepted invitation is
+  // FAILED_PRECONDITION: remove the member instead. Revoking a revoked or
+  // expired invitation returns it unchanged and records nothing; a revocation
+  // is audited. A missing tenant_id or invitation_id is INVALID_ARGUMENT. A
+  // revoke never overwrites an invitation accepted before it, but an accept
+  // that had already read the invitation as pending still completes, so a
+  // successful revoke does not prove nobody joined: read ListTenantMembers.
+  // Available only on the postgres control-plane driver; the memory and
+  // SQLite drivers return Unimplemented.
+  rpc RevokeTenantInvitation(RevokeTenantInvitationRequest) returns (RevokeTenantInvitationResponse);
   rpc ListTenantMembers(ListTenantMembersRequest) returns (ListTenantMembersResponse);
   // RemoveTenantMember removes user_id's membership of tenant_id. The caller
   // must be an active owner or admin of a tenant that is not suspended

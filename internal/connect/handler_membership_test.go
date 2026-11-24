@@ -66,6 +66,23 @@ func (s *connectInvitationStore) OpenInvitationForEmail(_ context.Context, _, _ 
 	return nil, nil
 }
 
+func (s *connectInvitationStore) RevokeInvitation(_ context.Context, _, tenantID, invitationID string) (*service.TenantInvitation, bool, error) {
+	inv, ok := s.byID[invitationID]
+	if !ok || inv.TenantID != tenantID {
+		return nil, false, service.ErrNotFound
+	}
+	switch inv.Status {
+	case service.InvitationStatusPending:
+		inv.Status = service.InvitationStatusRevoked
+		cp := *inv
+		return &cp, true, nil
+	case service.InvitationStatusAccepted:
+		return nil, false, service.ErrInvitationUsed
+	}
+	cp := *inv
+	return &cp, false, nil
+}
+
 func (s *connectInvitationStore) ListInvitationsForTenant(_ context.Context, _, _ string) ([]*service.TenantInvitation, error) {
 	return s.listResp, nil
 }
@@ -142,6 +159,10 @@ func TestMembershipRPCs_NilService_ReturnUnimplemented(t *testing.T) {
 		withAuth(&identitypb.ListTenantInvitationsRequest{TenantId: "t"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
 
+	_, err = srv.client.RevokeTenantInvitation(ctx,
+		withAuth(&identitypb.RevokeTenantInvitationRequest{TenantId: "t", InvitationId: "inv-1"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+
 	_, err = srv.client.ListTenantMembers(ctx,
 		withAuth(&identitypb.ListTenantMembersRequest{TenantId: "t"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
@@ -201,6 +222,10 @@ func TestMembershipRPCs_MissingAuth_Unauthenticated(t *testing.T) {
 
 	_, err = srv.client.ListTenantInvitations(ctx,
 		connect.NewRequest(&identitypb.ListTenantInvitationsRequest{TenantId: "t"}))
+	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.RevokeTenantInvitation(ctx,
+		connect.NewRequest(&identitypb.RevokeTenantInvitationRequest{TenantId: "t", InvitationId: "inv-1"}))
 	requireCode(t, err, connect.CodeUnauthenticated)
 
 	_, err = srv.client.ListTenantMembers(ctx,
@@ -285,6 +310,64 @@ func TestMembership_InviteThenAccept_Handler(t *testing.T) {
 	if members.upserted == nil || members.upserted.UserID != "invitee" {
 		t.Fatalf("membership was not upserted: %+v", members.upserted)
 	}
+}
+
+// ── Revoke through the handler ──────────────────────────────────────────
+
+// A revoked invitation comes back with status "revoked", again unchanged on a
+// retry, and its token no longer redeems; another tenant's or an unknown id is
+// NOT_FOUND, and an accepted one FAILED_PRECONDITION.
+func TestMembership_RevokeTenantInvitation_Handler(t *testing.T) {
+	invitations := newConnectInvitationStore()
+	members := &connectMembershipStore{member: &service.TenantMembership{
+		Role: service.RoleOwner, Status: service.MembershipStatusActive,
+	}}
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"invitee": {ID: "invitee", Email: "invitee@acme.com", EmailVerified: true},
+	}}
+	srv := startMembershipServer(t, newMembershipSvc(invitations, members, claimedTenantStore(), users))
+	ctx := context.Background()
+	invite := func() string {
+		created, err := srv.client.CreateTenantInvitation(ctx, withAuth(&identitypb.CreateTenantInvitationRequest{
+			TenantId: "tenant-1", Email: "invitee@acme.com",
+		}, "owner-1"))
+		if err != nil {
+			t.Fatalf("CreateTenantInvitation: %v", err)
+		}
+		return created.Msg.GetRawToken()
+	}
+	revoke := func(tenantID, invitationID string) (*connect.Response[identitypb.RevokeTenantInvitationResponse], error) {
+		return srv.client.RevokeTenantInvitation(ctx, withAuth(&identitypb.RevokeTenantInvitationRequest{
+			TenantId: tenantID, InvitationId: invitationID,
+		}, "owner-1"))
+	}
+
+	token := invite()
+	for range 2 {
+		revoked, err := revoke("tenant-1", "inv-1")
+		if err != nil {
+			t.Fatalf("RevokeTenantInvitation: %v", err)
+		}
+		if got := revoked.Msg.GetInvitation(); got.GetId() != "inv-1" || got.GetStatus() != service.InvitationStatusRevoked {
+			t.Fatalf("invitation = %+v, want inv-1 revoked", got)
+		}
+	}
+	_, err := srv.client.AcceptTenantInvitation(ctx, withAuth(&identitypb.AcceptTenantInvitationRequest{Token: token}, "invitee"))
+	requireCode(t, err, connect.CodePermissionDenied)
+
+	_, err = revoke("tenant-2", "inv-1")
+	requireCode(t, err, connect.CodeNotFound)
+	_, err = revoke("tenant-1", "inv-unknown")
+	requireCode(t, err, connect.CodeNotFound)
+	_, err = revoke("tenant-1", " ")
+	requireCode(t, err, connect.CodeInvalidArgument)
+
+	token = invite()
+	if _, err := srv.client.AcceptTenantInvitation(ctx, withAuth(&identitypb.AcceptTenantInvitationRequest{Token: token}, "invitee")); err != nil {
+		t.Fatalf("AcceptTenantInvitation: %v", err)
+	}
+	_, err = revoke("tenant-1", "inv-1")
+	requireCode(t, err, connect.CodeFailedPrecondition)
 }
 
 type fixedResultMailer struct{ err error }

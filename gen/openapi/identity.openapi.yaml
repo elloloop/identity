@@ -5850,6 +5850,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RevokeSessionResponse'
+  /identity.v1.IdentityService/RevokeTenantInvitation:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: RevokeTenantInvitation
+      description: |-
+        RevokeTenantInvitation withdraws a pending invitation: it becomes
+         "revoked" and its token no longer redeems (AcceptTenantInvitation is
+         PERMISSION_DENIED). The caller must be an active owner or admin of
+         tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+         An invitation_id that is not one of tenant_id's invitations, unknown or
+         another tenant's, is NOT_FOUND, and an accepted invitation is
+         FAILED_PRECONDITION: remove the member instead. Revoking a revoked or
+         expired invitation returns it unchanged and records nothing; a revocation
+         is audited. A missing tenant_id or invitation_id is INVALID_ARGUMENT. A
+         revoke never overwrites an invitation accepted before it, but an accept
+         that had already read the invitation as pending still completes, so a
+         successful revoke does not prove nobody joined: read ListTenantMembers.
+         Available only on the postgres control-plane driver; the memory and
+         SQLite drivers return Unimplemented.
+      operationId: identity.v1.IdentityService.RevokeTenantInvitation
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.RevokeTenantInvitationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.RevokeTenantInvitationResponse'
   /identity.v1.IdentityService/SelectAgentMachineAgents:
     post:
       tags:
@@ -13001,6 +13051,31 @@ components:
              the claim has no key.
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: RevokeTeammateKeyResponse
+      additionalProperties: false
+    identity.v1.RevokeTenantInvitationRequest:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          title: tenant_id
+        invitationId:
+          type: string
+          title: invitation_id
+      title: RevokeTenantInvitationRequest
+      additionalProperties: false
+      description: |-
+        RevokeTenantInvitationRequest names the invitation an owner or admin of its
+         tenant withdraws.
+    identity.v1.RevokeTenantInvitationResponse:
+      type: object
+      properties:
+        invitation:
+          title: invitation
+          description: |-
+            invitation is the invitation as it now stands: status "revoked", or
+             "expired" for one AcceptTenantInvitation had already marked expired.
+          $ref: '#/components/schemas/identity.v1.TenantInvitation'
+      title: RevokeTenantInvitationResponse
       additionalProperties: false
     identity.v1.SelectAgentMachineAgentsRequest:
       type: object

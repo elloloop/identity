@@ -473,6 +473,13 @@ const (
 	// records nothing.
 	EventTenantMemberRestored EventType = "tenant_member_restored"
 
+	// EventTenantInvitationRevoked records a tenant owner or admin revoking a
+	// pending invitation (RevokeTenantInvitation): actor the caller and
+	// target the invitation, with the project and tenant ids, the role it
+	// offered and its inviter in the details. Revoking a revoked or expired
+	// invitation records nothing.
+	EventTenantInvitationRevoked EventType = "tenant_invitation_revoked"
+
 	// EventTenantOperatorRefused records a tenant_operator credential of an
 	// active project being refused on a tenant operation, under its own
 	// project: actor the credential ("credential:<id>"), success=false, and a
@@ -591,6 +598,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantMemberRemoved:           {},
 	EventTenantMemberSuspended:         {},
 	EventTenantMemberRestored:          {},
+	EventTenantInvitationRevoked:       {},
 	EventTenantOperatorRefused:         {},
 }
 

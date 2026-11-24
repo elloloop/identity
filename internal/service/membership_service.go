@@ -385,6 +385,55 @@ func (s *MembershipService) ListTenantInvitations(ctx context.Context, callerID,
 	return s.invitations.ListInvitationsForTenant(ctx, projectID, tenantID)
 }
 
+// RevokeTenantInvitation withdraws tenantID's pending invitation
+// invitationID: it becomes revoked, and AcceptTenantInvitation refuses its
+// token from then on. callerID must be an active owner or admin of a tenant
+// that may be governed, asking from a session no recovery hold binds. An id
+// that is not one of the tenant's invitations is ErrNotFound, whichever
+// tenant holds it, and an accepted invitation is ErrInvitationUsed: its
+// member is removed with RemoveTenantMember. Revoking a revoked or expired
+// invitation returns it unchanged and records nothing; a revocation is
+// audited as EventTenantInvitationRevoked.
+func (s *MembershipService) RevokeTenantInvitation(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, invitationID, ip, userAgent string) (*TenantInvitation, error) {
+	projectID, err := s.requireProject(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if callerID == "" {
+		return nil, ErrUnauthenticated
+	}
+	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
+		return nil, err
+	}
+	tenantID, invitationID = strings.TrimSpace(tenantID), strings.TrimSpace(invitationID)
+	if tenantID == "" {
+		return nil, fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
+	}
+	if invitationID == "" {
+		return nil, fmt.Errorf("%w: missing invitation_id", ErrInvalidArgument)
+	}
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+		return nil, err
+	}
+	inv, changed, err := s.invitations.RevokeInvitation(ctx, projectID, tenantID, invitationID)
+	if err != nil {
+		return nil, err
+	}
+	if changed && s.audit != nil {
+		s.audit.Log(ctx, audit.EventTenantInvitationRevoked,
+			audit.WithActor(callerID), audit.WithTarget(inv.ID),
+			audit.WithIP(ip), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(true), audit.WithDetails(map[string]any{
+				"project_id": projectID,
+				"tenant_id":  inv.TenantID,
+				"role":       inv.Role,
+				"invited_by": inv.InvitedBy,
+			}),
+		)
+	}
+	return inv, nil
+}
+
 // ListTenantMembers returns every membership in a tenant. callerID must be an
 // active owner/admin member of the tenant.
 func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, tenantID string) ([]*TenantMembership, error) {

@@ -1189,6 +1189,49 @@ func (s *InvitationStore) SetInvitationStatus(ctx context.Context, projectID, in
 	return nil
 }
 
+// RevokeInvitation implements service.InvitationStore. It reads the
+// invitation FOR UPDATE and writes in the same transaction, so it never
+// overwrites an invitation accepted meanwhile, and of two concurrent revokes
+// one alone reports the change.
+func (s *InvitationStore) RevokeInvitation(ctx context.Context, projectID, tenantID, invitationID string) (*service.TenantInvitation, bool, error) {
+	if projectID == "" || tenantID == "" || invitationID == "" {
+		return nil, false, fmt.Errorf("%w: project_id, tenant_id and invitation_id are required", service.ErrInvalidArgument)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, wrapPgErr("RevokeInvitation", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	inv, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+`
+		FROM tenant_invitations WHERE project_id = $1 AND tenant_id = $2 AND id = $3
+		FOR UPDATE`, projectID, tenantID, invitationID))
+	if noRows(err) {
+		return nil, false, fmt.Errorf("%w: invitation", service.ErrNotFound)
+	}
+	if err != nil {
+		return nil, false, wrapPgErr("RevokeInvitation(read)", err)
+	}
+	switch inv.Status {
+	case service.InvitationStatusPending:
+	case service.InvitationStatusAccepted:
+		return nil, false, fmt.Errorf("%w: remove the member instead", service.ErrInvitationUsed)
+	default:
+		return inv, false, nil
+	}
+	revoked, err := scanInvitation(tx.QueryRow(ctx, `
+		UPDATE tenant_invitations SET status = 'revoked'
+		WHERE project_id = $1 AND id = $2
+		RETURNING `+invitationColumns, projectID, inv.ID))
+	if err != nil {
+		return nil, false, wrapPgErr("RevokeInvitation", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, wrapPgErr("RevokeInvitation(commit)", err)
+	}
+	return revoked, true, nil
+}
+
 // ListInvitationsForTenant returns every invitation in a tenant, newest
 // first.
 func (s *InvitationStore) ListInvitationsForTenant(ctx context.Context, projectID, tenantID string) ([]*service.TenantInvitation, error) {

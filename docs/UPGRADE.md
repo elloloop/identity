@@ -1,5 +1,42 @@
 # Upgrade guide
 
+## Next — an owner or admin revokes a pending tenant invitation: `RevokeTenantInvitation` (additive RPC and audit event `tenant_invitation_revoked`; no migration; `InvitationStore.RevokeInvitation` (Go API))
+
+A tenant's owners and admins could invite and list invitations, but the only
+way to withdraw one was to invite the same address again, which revoked the
+open invitation and sent a new one.
+
+- **`RevokeTenantInvitation(tenant_id, invitation_id)`** makes a pending
+  invitation `revoked`, and `AcceptTenantInvitation` refuses its token from
+  then on (`PERMISSION_DENIED`, as for any invitation that is not pending). The
+  response carries the invitation as it now stands.
+- **Who may call it.** An active owner or admin of `tenant_id`, a tenant that is
+  not suspended; anyone else is `PERMISSION_DENIED` before the invitation is
+  read. A session a recovery email opened is held from it as from
+  `CreateTenantInvitation`.
+- **What it refuses.** An `invitation_id` that is not one of `tenant_id`'s
+  invitations, another tenant's or nobody's, is `NOT_FOUND`; an accepted
+  invitation is `FAILED_PRECONDITION` (remove the member with
+  `RemoveTenantMember`); a missing id is `INVALID_ARGUMENT`. Revoking a revoked
+  invitation, or one `AcceptTenantInvitation` already marked expired, returns
+  it unchanged and records nothing.
+- **Concurrency.** The store reads and writes the invitation in one locked
+  transaction, so a revoke never overwrites an invitation accepted before it,
+  and of two concurrent revokes one alone is audited. An accept that already
+  read the invitation as pending when the revoke landed still completes: its
+  invitee becomes a member and the invitation ends accepted. A caller must not
+  take a successful revoke as proof that nobody joined; read
+  `ListTenantMembers` where that matters.
+- **Audit.** A revocation records `tenant_invitation_revoked`: actor the
+  caller, target the invitation, the caller's IP address and user agent, and
+  the project and tenant ids, the role offered and the inviter in the details.
+- **Postgres only**, like the other invitation calls; the memory and SQLite
+  drivers return `UNIMPLEMENTED`. It is served on the native gRPC bridge, and
+  has no per-IP budget of its own, as it sends no email.
+- **Go API.** `InvitationStore` gains `RevokeInvitation`; an embedder with its
+  own implementation adds it. `MembershipService.RevokeTenantInvitation` serves
+  the RPC.
+
 ## Next — ID-only account classification (PostgreSQL 0066)
 
 `ClassifyAccounts` returns coarse live standing for one or two exact account
