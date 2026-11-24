@@ -142,6 +142,8 @@ const (
 	IdentityService_ListTenantDomains_FullMethodName                      = "/identity.v1.IdentityService/ListTenantDomains"
 	IdentityService_SetDomainJoin_FullMethodName                          = "/identity.v1.IdentityService/SetDomainJoin"
 	IdentityService_CreateTenantInvitation_FullMethodName                 = "/identity.v1.IdentityService/CreateTenantInvitation"
+	IdentityService_GetTenantInvitation_FullMethodName                    = "/identity.v1.IdentityService/GetTenantInvitation"
+	IdentityService_SignUpWithTenantInvitation_FullMethodName             = "/identity.v1.IdentityService/SignUpWithTenantInvitation"
 	IdentityService_AcceptTenantInvitation_FullMethodName                 = "/identity.v1.IdentityService/AcceptTenantInvitation"
 	IdentityService_ListTenantInvitations_FullMethodName                  = "/identity.v1.IdentityService/ListTenantInvitations"
 	IdentityService_RevokeTenantInvitation_FullMethodName                 = "/identity.v1.IdentityService/RevokeTenantInvitation"
@@ -473,9 +475,10 @@ type IdentityServiceClient interface {
 	// verified. Turning it off ends no membership. A change is audited; asking
 	// for the value the domain has returns it unchanged and records nothing.
 	SetDomainJoin(ctx context.Context, in *SetDomainJoinRequest, opts ...grpc.CallOption) (*SetDomainJoinResponse, error)
-	// Tenant membership (redesign). Authenticated, project-scoped, and — except
-	// for AcceptTenantInvitation — gated on the caller being an owner/admin
-	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
+	// Tenant membership (redesign). Project-scoped, authenticated except for
+	// GetTenantInvitation and SignUpWithTenantInvitation, and — except for
+	// those two and AcceptTenantInvitation — gated on the caller being an
+	// owner/admin member of the target tenant. AcceptTenantInvitation is the redeemer's own
 	// action: any authenticated caller may redeem a token, but only for an
 	// invitation addressed to their own account email (compared in the
 	// canonical form sign-in uses, so a "+tag" spelling of it matches;
@@ -498,6 +501,68 @@ type IdentityServiceClient interface {
 	// Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	CreateTenantInvitation(ctx context.Context, in *CreateTenantInvitationRequest, opts ...grpc.CallOption) (*CreateTenantInvitationResponse, error)
+	// GetTenantInvitation describes the invitation a raw token names
+	// (GetTenantInvitationResponse) to whoever holds the token, with no
+	// session. It changes nothing: an expired invitation reads "expired" but
+	// is not marked so, and the token is not used up. A token no invitation
+	// of the resolved project has is NOT_FOUND and a blank one
+	// INVALID_ARGUMENT, so a caller without a real token learns nothing. Send
+	// it as a POST, so this call does not put the token in a URL. The emailed
+	// link does: the page it opens should send Referrer-Policy: no-referrer,
+	// take the token out of its URL once it has read it, and load no
+	// third-party resources.
+	// Calls are limited per client IP (GATEWAY_RATE_LIMIT_VERIFY_PER_IP per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, a budget of their own), one budget for
+	// the HTTP handler and the native gRPC registration: over it the call is
+	// refused before the RPC runs, over HTTP with status 429 and a Retry-After
+	// header of the window in seconds, which Connect clients surface as
+	// UNAVAILABLE, and over native gRPC with RESOURCE_EXHAUSTED and the same
+	// value in the "retry-after" response metadata. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	GetTenantInvitation(ctx context.Context, in *GetTenantInvitationRequest, opts ...grpc.CallOption) (*GetTenantInvitationResponse, error)
+	// SignUpWithTenantInvitation creates the account a pending tenant
+	// invitation names, from the raw token its email carries, with a name and
+	// a password, and signs it in. It needs no session and is gated as
+	// PasswordSignup is: by GATEWAY_AUTH_ALLOW_LOCAL and
+	// GATEWAY_PASSWORD_SIGNUP_ENABLED, and by the X-Assurance-Token header
+	// while GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP is on. The account holds
+	// the invited address, verified (the emailed link proves it), is active,
+	// and belongs to no tenant: it skips domain auto-formation and joins the
+	// inviting tenant only by accepting, so the invitation stays pending for
+	// AcceptTenantInvitation. FAILED_PRECONDITION with the stable
+	// `invitation_signup_unavailable` token when the project does not let an
+	// invitation create an account (access.mode invite with
+	// access.admit_tenant_invitations, and accounts.email_signup self), or
+	// the server has no mail provider, which hands an invitation's token to
+	// its inviter, and, whatever the server's mail settings now, for an
+	// invitation created while it had none, or before the server recorded
+	// where an invitation's token went (schema 67), as its token may have
+	// gone to the inviter; NOT_FOUND for a token no invitation of the project
+	// has;
+	// FAILED_PRECONDITION for an invitation that was accepted, was revoked or
+	// has expired; PERMISSION_DENIED for one that cannot create an account
+	// (its tenant was made through self-service CreateTenant or cannot take
+	// members, or its inviter is no longer an active owner or admin there who
+	// can sign in) and for an address the project's deny layer refuses;
+	// ALREADY_EXISTS when an account holds the address, as its email or as a
+	// recovery email; FAILED_PRECONDITION when the login policy governing the
+	// address requires single sign-on or two-factor authentication, and
+	// PERMISSION_DENIED when it does not allow passwords; INVALID_ARGUMENT for
+	// a blank token or password, a name that is blank, longer than 100
+	// characters or carries control or invisible formatting characters, or a
+	// password the password rules refuse, the address's tenant's included.
+	// Once the account exists its session is refused as any sign-in's is: for
+	// a missing required date of birth, FAILED_PRECONDITION with
+	// DOBRequiredDetails. Calls share PasswordSignup's per-IP budget
+	// (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS),
+	// one budget for the HTTP handler and the native gRPC registration: over
+	// it the call is refused before the RPC runs, over HTTP with status 429
+	// and a Retry-After header, which Connect clients surface as UNAVAILABLE,
+	// and over native gRPC with RESOURCE_EXHAUSTED and "retry-after"
+	// metadata. Available only on the postgres control-plane
+	// driver; the memory and SQLite drivers return Unimplemented.
+	SignUpWithTenantInvitation(ctx context.Context, in *SignUpWithTenantInvitationRequest, opts ...grpc.CallOption) (*SignUpWithTenantInvitationResponse, error)
 	AcceptTenantInvitation(ctx context.Context, in *AcceptTenantInvitationRequest, opts ...grpc.CallOption) (*AcceptTenantInvitationResponse, error)
 	ListTenantInvitations(ctx context.Context, in *ListTenantInvitationsRequest, opts ...grpc.CallOption) (*ListTenantInvitationsResponse, error)
 	// RevokeTenantInvitation withdraws a pending invitation: it becomes
@@ -2200,6 +2265,26 @@ func (c *identityServiceClient) CreateTenantInvitation(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *identityServiceClient) GetTenantInvitation(ctx context.Context, in *GetTenantInvitationRequest, opts ...grpc.CallOption) (*GetTenantInvitationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetTenantInvitationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetTenantInvitation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) SignUpWithTenantInvitation(ctx context.Context, in *SignUpWithTenantInvitationRequest, opts ...grpc.CallOption) (*SignUpWithTenantInvitationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SignUpWithTenantInvitationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_SignUpWithTenantInvitation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AcceptTenantInvitation(ctx context.Context, in *AcceptTenantInvitationRequest, opts ...grpc.CallOption) (*AcceptTenantInvitationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AcceptTenantInvitationResponse)
@@ -3087,9 +3172,10 @@ type IdentityServiceServer interface {
 	// verified. Turning it off ends no membership. A change is audited; asking
 	// for the value the domain has returns it unchanged and records nothing.
 	SetDomainJoin(context.Context, *SetDomainJoinRequest) (*SetDomainJoinResponse, error)
-	// Tenant membership (redesign). Authenticated, project-scoped, and — except
-	// for AcceptTenantInvitation — gated on the caller being an owner/admin
-	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
+	// Tenant membership (redesign). Project-scoped, authenticated except for
+	// GetTenantInvitation and SignUpWithTenantInvitation, and — except for
+	// those two and AcceptTenantInvitation — gated on the caller being an
+	// owner/admin member of the target tenant. AcceptTenantInvitation is the redeemer's own
 	// action: any authenticated caller may redeem a token, but only for an
 	// invitation addressed to their own account email (compared in the
 	// canonical form sign-in uses, so a "+tag" spelling of it matches;
@@ -3112,6 +3198,68 @@ type IdentityServiceServer interface {
 	// Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	CreateTenantInvitation(context.Context, *CreateTenantInvitationRequest) (*CreateTenantInvitationResponse, error)
+	// GetTenantInvitation describes the invitation a raw token names
+	// (GetTenantInvitationResponse) to whoever holds the token, with no
+	// session. It changes nothing: an expired invitation reads "expired" but
+	// is not marked so, and the token is not used up. A token no invitation
+	// of the resolved project has is NOT_FOUND and a blank one
+	// INVALID_ARGUMENT, so a caller without a real token learns nothing. Send
+	// it as a POST, so this call does not put the token in a URL. The emailed
+	// link does: the page it opens should send Referrer-Policy: no-referrer,
+	// take the token out of its URL once it has read it, and load no
+	// third-party resources.
+	// Calls are limited per client IP (GATEWAY_RATE_LIMIT_VERIFY_PER_IP per
+	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, a budget of their own), one budget for
+	// the HTTP handler and the native gRPC registration: over it the call is
+	// refused before the RPC runs, over HTTP with status 429 and a Retry-After
+	// header of the window in seconds, which Connect clients surface as
+	// UNAVAILABLE, and over native gRPC with RESOURCE_EXHAUSTED and the same
+	// value in the "retry-after" response metadata. Available only on the
+	// postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	GetTenantInvitation(context.Context, *GetTenantInvitationRequest) (*GetTenantInvitationResponse, error)
+	// SignUpWithTenantInvitation creates the account a pending tenant
+	// invitation names, from the raw token its email carries, with a name and
+	// a password, and signs it in. It needs no session and is gated as
+	// PasswordSignup is: by GATEWAY_AUTH_ALLOW_LOCAL and
+	// GATEWAY_PASSWORD_SIGNUP_ENABLED, and by the X-Assurance-Token header
+	// while GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP is on. The account holds
+	// the invited address, verified (the emailed link proves it), is active,
+	// and belongs to no tenant: it skips domain auto-formation and joins the
+	// inviting tenant only by accepting, so the invitation stays pending for
+	// AcceptTenantInvitation. FAILED_PRECONDITION with the stable
+	// `invitation_signup_unavailable` token when the project does not let an
+	// invitation create an account (access.mode invite with
+	// access.admit_tenant_invitations, and accounts.email_signup self), or
+	// the server has no mail provider, which hands an invitation's token to
+	// its inviter, and, whatever the server's mail settings now, for an
+	// invitation created while it had none, or before the server recorded
+	// where an invitation's token went (schema 67), as its token may have
+	// gone to the inviter; NOT_FOUND for a token no invitation of the project
+	// has;
+	// FAILED_PRECONDITION for an invitation that was accepted, was revoked or
+	// has expired; PERMISSION_DENIED for one that cannot create an account
+	// (its tenant was made through self-service CreateTenant or cannot take
+	// members, or its inviter is no longer an active owner or admin there who
+	// can sign in) and for an address the project's deny layer refuses;
+	// ALREADY_EXISTS when an account holds the address, as its email or as a
+	// recovery email; FAILED_PRECONDITION when the login policy governing the
+	// address requires single sign-on or two-factor authentication, and
+	// PERMISSION_DENIED when it does not allow passwords; INVALID_ARGUMENT for
+	// a blank token or password, a name that is blank, longer than 100
+	// characters or carries control or invisible formatting characters, or a
+	// password the password rules refuse, the address's tenant's included.
+	// Once the account exists its session is refused as any sign-in's is: for
+	// a missing required date of birth, FAILED_PRECONDITION with
+	// DOBRequiredDetails. Calls share PasswordSignup's per-IP budget
+	// (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS),
+	// one budget for the HTTP handler and the native gRPC registration: over
+	// it the call is refused before the RPC runs, over HTTP with status 429
+	// and a Retry-After header, which Connect clients surface as UNAVAILABLE,
+	// and over native gRPC with RESOURCE_EXHAUSTED and "retry-after"
+	// metadata. Available only on the postgres control-plane
+	// driver; the memory and SQLite drivers return Unimplemented.
+	SignUpWithTenantInvitation(context.Context, *SignUpWithTenantInvitationRequest) (*SignUpWithTenantInvitationResponse, error)
 	AcceptTenantInvitation(context.Context, *AcceptTenantInvitationRequest) (*AcceptTenantInvitationResponse, error)
 	ListTenantInvitations(context.Context, *ListTenantInvitationsRequest) (*ListTenantInvitationsResponse, error)
 	// RevokeTenantInvitation withdraws a pending invitation: it becomes
@@ -3952,6 +4100,12 @@ func (UnimplementedIdentityServiceServer) SetDomainJoin(context.Context, *SetDom
 }
 func (UnimplementedIdentityServiceServer) CreateTenantInvitation(context.Context, *CreateTenantInvitationRequest) (*CreateTenantInvitationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTenantInvitation not implemented")
+}
+func (UnimplementedIdentityServiceServer) GetTenantInvitation(context.Context, *GetTenantInvitationRequest) (*GetTenantInvitationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTenantInvitation not implemented")
+}
+func (UnimplementedIdentityServiceServer) SignUpWithTenantInvitation(context.Context, *SignUpWithTenantInvitationRequest) (*SignUpWithTenantInvitationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SignUpWithTenantInvitation not implemented")
 }
 func (UnimplementedIdentityServiceServer) AcceptTenantInvitation(context.Context, *AcceptTenantInvitationRequest) (*AcceptTenantInvitationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AcceptTenantInvitation not implemented")
@@ -6374,6 +6528,42 @@ func _IdentityService_CreateTenantInvitation_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_GetTenantInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTenantInvitationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetTenantInvitation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetTenantInvitation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetTenantInvitation(ctx, req.(*GetTenantInvitationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_SignUpWithTenantInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SignUpWithTenantInvitationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).SignUpWithTenantInvitation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_SignUpWithTenantInvitation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).SignUpWithTenantInvitation(ctx, req.(*SignUpWithTenantInvitationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AcceptTenantInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AcceptTenantInvitationRequest)
 	if err := dec(in); err != nil {
@@ -7988,6 +8178,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateTenantInvitation",
 			Handler:    _IdentityService_CreateTenantInvitation_Handler,
+		},
+		{
+			MethodName: "GetTenantInvitation",
+			Handler:    _IdentityService_GetTenantInvitation_Handler,
+		},
+		{
+			MethodName: "SignUpWithTenantInvitation",
+			Handler:    _IdentityService_SignUpWithTenantInvitation_Handler,
 		},
 		{
 			MethodName: "AcceptTenantInvitation",

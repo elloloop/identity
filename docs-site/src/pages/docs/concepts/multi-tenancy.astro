@@ -450,6 +450,43 @@ RestoreTenantMember(tenant_id, user_id)
     invitation links</a>). That page, which your app serves, signs the invitee
     in and calls <code>AcceptTenantInvitation</code> with the token.
   </p>
+  <p id="reading-an-invitation">
+    Before anyone signs in, the page can read the invitation with
+    <code>GetTenantInvitation(token)</code>, which needs no session and changes
+    nothing: an expired invitation reads <code>expired</code> without being
+    marked so, and the token is not used up. It answers the tenant's id and
+    name (the name the email shows, so empty for a self-service tenant), the
+    inviter's name and email, the invited address, the role, the expiry
+    (<code>expires_at_ms</code>), the status (<code>pending</code>,
+    <code>expired</code>, <code>accepted</code> or <code>revoked</code>) and
+    <code>account_exists</code>: whether an account of the project holds the
+    address, as its email or as a recovery email. A server with no mail
+    settings hands the token to the inviter, so it never answers
+    <code>account_exists</code> (always false), and the invitation records
+    that its token was handed out, so it is never answered for that
+    invitation, or one stored before the server recorded this (schema 67),
+    even once the server has mail settings: the answer would tell an inviter
+    whether any address they invite has an account. A token no
+    invitation of the project has is <code>NOT_FOUND</code>, and a blank one
+    <code>INVALID_ARGUMENT</code>. Calls are limited per client IP
+    (<code>GATEWAY_RATE_LIMIT_VERIFY_PER_IP</code>, default 20 per window, a
+    budget of their own, shared by HTTP and native gRPC). Send it as a POST,
+    so this call puts the token in no URL; the response is
+    <code>Cache-Control: no-store</code>. The emailed link does carry the
+    token in its URL, and the token can create the account, so the page it
+    opens should send <code>Referrer-Policy: no-referrer</code>, take the
+    token out of its URL once it has read it
+    (<code>history.replaceState</code>), and load no third-party resources.
+  </p>
+  <Code
+    code={`GetTenantInvitation(token)
+  -> { tenant_id, tenant_name, inviter_name, inviter_email, email, role,
+       expires_at_ms, status, account_exists }
+  -> INVALID_ARGUMENT              # a blank token
+  -> NOT_FOUND                     # no invitation of the project has the token
+  -> UNIMPLEMENTED                 # the memory or SQLite driver`}
+    lang="bash"
+  />
   <p id="invited-sign-up">
     An invitee with no account yet signs up on that page. A project whose
     <code>access.mode</code> is <code>invite</code> refuses self-signup, so it
@@ -472,8 +509,10 @@ RestoreTenantMember(tenant_id, user_id)
       admin of the tenant, with an account that can sign in and is a person.
     </li>
     <li>
-      A password sign-up, a passkey sign-up and the anonymous-account upgrade
-      are still refused, as is every address the deny layer turns away. <code>accounts.email_signup</code> set to <code>admin</code>
+      <code>PasswordSignup</code>, a passkey sign-up and the anonymous-account
+      upgrade, none of which proves the address, are still refused (a password
+      account comes only from the invitation's own link, below), as is every
+      address the deny layer turns away. <code>accounts.email_signup</code> set to <code>admin</code>
       or <code>off</code>, and <code>GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false</code>
       for codes and links, still close it, and no code is sent then.
     </li>
@@ -491,6 +530,77 @@ RestoreTenantMember(tenant_id, user_id)
       Postgres only: the memory and SQLite drivers keep no tenant invitations.
     </li>
   </ul>
+  <p id="invitation-link-sign-up">
+    The invitation's own link proves the address too, where it was emailed.
+    With the same opt-in, <code>SignUpWithTenantInvitation(token, name,
+    password)</code> creates the account the invitation names, verified and
+    active, with that name and password, and returns its session as
+    <code>PasswordSignup</code> does. It needs no session and is gated as
+    <code>PasswordSignup</code> is: <code>GATEWAY_AUTH_ALLOW_LOCAL</code>,
+    <code>GATEWAY_PASSWORD_SIGNUP_ENABLED</code>, the
+    <code>X-Assurance-Token</code> header while
+    <code>GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP</code> is on, and the
+    sign-up budget per client IP (<code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code>,
+    shared with <code>PasswordSignup</code> and <code>UsernameSignup</code>,
+    and spent over HTTP and native gRPC alike).
+    It does not accept the invitation: the account joins no tenant, not even
+    its email domain's, and the invitation stays pending until the account
+    calls <code>AcceptTenantInvitation</code>, which its new session can do at
+    once.
+  </p>
+  <ul>
+    <li>
+      The token's own invitation must count as above: pending and unexpired,
+      from a tenant not made through self-service, whose inviter is still an
+      active owner or admin who can sign in. Another invitation to the same
+      address does not stand in for it.
+    </li>
+    <li>
+      A server with no mail settings hands the token to the inviter, so there
+      the call is always refused, and so is a project that has not opted in:
+      both <code>FAILED_PRECONDITION</code> with the stable
+      <code>invitation_signup_unavailable</code> token, before the token is
+      looked up. Each invitation records whether its token went only into its
+      email, so the token of one created while the server had no mail
+      settings, or stored before the server recorded this (schema 67),
+      creates no account even once the server has them: the same refusal.
+      Its invitee still accepts it after a sign-in that proves the address,
+      which creates the account here; invite the address again once mail is
+      configured to send them a link that creates it.
+    </li>
+    <li>
+      An invitation that was accepted, revoked or has expired is
+      <code>FAILED_PRECONDITION</code>; one that does not count, or an address
+      the deny layer refuses, <code>PERMISSION_DENIED</code>; an address an
+      account holds, as its email or a recovery email,
+      <code>ALREADY_EXISTS</code> (the person signs in instead); a token no
+      invitation has <code>NOT_FOUND</code>.
+    </li>
+    <li>
+      The password meets the deployment's rules and the address's tenant's
+      password policy (<code>INVALID_ARGUMENT</code> otherwise), and a login
+      policy for the address that requires single sign-on or two-factor
+      authentication refuses the sign-up (<code>FAILED_PRECONDITION</code>),
+      as one that does not allow passwords does
+      (<code>PERMISSION_DENIED</code>). The name is required, at most 100
+      characters, with no control or invisible formatting characters.
+    </li>
+    <li>
+      The admission is audited as <code>signup_admitted_by_invitation</code>
+      naming the token's invitation, and the sign-in as
+      <code>login_success</code> with method
+      <code>tenant_invitation_signup</code>.
+    </li>
+  </ul>
+  <Code
+    code={`curl -sX POST https://auth.example.com/identity.v1.IdentityService/SignUpWithTenantInvitation \\
+  -H 'Content-Type: application/json' \\
+  -H "X-Assurance-Token: $ASSURANCE_TOKEN" \\
+  -d '{ "token": "<the token on the link>", "name": "Ravi Kumar", "password": "Corr3ct!Horse" }'
+# -> { "user": { "id": "...", "email": "ravi@acme.example", "emailVerified": true, ... },
+#      "accessToken": "eyJ...", "refreshToken": "...", "expiresIn": 900 }`}
+    lang="bash"
+  />
 
   <h2 id="operating-tenants">Operating tenants</h2>
   <p>

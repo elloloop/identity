@@ -2198,9 +2198,10 @@ paths:
         - identity.v1.IdentityService
       summary: CreateTenantInvitation
       description: |-
-        Tenant membership (redesign). Authenticated, project-scoped, and — except
-         for AcceptTenantInvitation — gated on the caller being an owner/admin
-         member of the target tenant. AcceptTenantInvitation is the redeemer's own
+        Tenant membership (redesign). Project-scoped, authenticated except for
+         GetTenantInvitation and SignUpWithTenantInvitation, and — except for
+         those two and AcceptTenantInvitation — gated on the caller being an
+         owner/admin member of the target tenant. AcceptTenantInvitation is the redeemer's own
          action: any authenticated caller may redeem a token, but only for an
          invitation addressed to their own account email (compared in the
          canonical form sign-in uses, so a "+tag" spelling of it matches;
@@ -3232,6 +3233,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.GetQrLoginSessionResponse'
+  /identity.v1.IdentityService/GetTenantInvitation:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetTenantInvitation
+      description: |-
+        GetTenantInvitation describes the invitation a raw token names
+         (GetTenantInvitationResponse) to whoever holds the token, with no
+         session. It changes nothing: an expired invitation reads "expired" but
+         is not marked so, and the token is not used up. A token no invitation
+         of the resolved project has is NOT_FOUND and a blank one
+         INVALID_ARGUMENT, so a caller without a real token learns nothing. Send
+         it as a POST, so this call does not put the token in a URL. The emailed
+         link does: the page it opens should send Referrer-Policy: no-referrer,
+         take the token out of its URL once it has read it, and load no
+         third-party resources.
+         Calls are limited per client IP (GATEWAY_RATE_LIMIT_VERIFY_PER_IP per
+         GATEWAY_RATE_LIMIT_WINDOW_SECONDS, a budget of their own), one budget for
+         the HTTP handler and the native gRPC registration: over it the call is
+         refused before the RPC runs, over HTTP with status 429 and a Retry-After
+         header of the window in seconds, which Connect clients surface as
+         UNAVAILABLE, and over native gRPC with RESOURCE_EXHAUSTED and the same
+         value in the "retry-after" response metadata. Available only on the
+         postgres control-plane driver; the memory and SQLite drivers return
+         Unimplemented.
+      operationId: identity.v1.IdentityService.GetTenantInvitation
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetTenantInvitationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetTenantInvitationResponse'
   /identity.v1.IdentityService/GetUser:
     post:
       tags:
@@ -6273,6 +6329,83 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.SignOutEverywhereResponse'
+  /identity.v1.IdentityService/SignUpWithTenantInvitation:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: SignUpWithTenantInvitation
+      description: |-
+        SignUpWithTenantInvitation creates the account a pending tenant
+         invitation names, from the raw token its email carries, with a name and
+         a password, and signs it in. It needs no session and is gated as
+         PasswordSignup is: by GATEWAY_AUTH_ALLOW_LOCAL and
+         GATEWAY_PASSWORD_SIGNUP_ENABLED, and by the X-Assurance-Token header
+         while GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP is on. The account holds
+         the invited address, verified (the emailed link proves it), is active,
+         and belongs to no tenant: it skips domain auto-formation and joins the
+         inviting tenant only by accepting, so the invitation stays pending for
+         AcceptTenantInvitation. FAILED_PRECONDITION with the stable
+         `invitation_signup_unavailable` token when the project does not let an
+         invitation create an account (access.mode invite with
+         access.admit_tenant_invitations, and accounts.email_signup self), or
+         the server has no mail provider, which hands an invitation's token to
+         its inviter, and, whatever the server's mail settings now, for an
+         invitation created while it had none, or before the server recorded
+         where an invitation's token went (schema 67), as its token may have
+         gone to the inviter; NOT_FOUND for a token no invitation of the project
+         has;
+         FAILED_PRECONDITION for an invitation that was accepted, was revoked or
+         has expired; PERMISSION_DENIED for one that cannot create an account
+         (its tenant was made through self-service CreateTenant or cannot take
+         members, or its inviter is no longer an active owner or admin there who
+         can sign in) and for an address the project's deny layer refuses;
+         ALREADY_EXISTS when an account holds the address, as its email or as a
+         recovery email; FAILED_PRECONDITION when the login policy governing the
+         address requires single sign-on or two-factor authentication, and
+         PERMISSION_DENIED when it does not allow passwords; INVALID_ARGUMENT for
+         a blank token or password, a name that is blank, longer than 100
+         characters or carries control or invisible formatting characters, or a
+         password the password rules refuse, the address's tenant's included.
+         Once the account exists its session is refused as any sign-in's is: for
+         a missing required date of birth, FAILED_PRECONDITION with
+         DOBRequiredDetails. Calls share PasswordSignup's per-IP budget
+         (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS),
+         one budget for the HTTP handler and the native gRPC registration: over
+         it the call is refused before the RPC runs, over HTTP with status 429
+         and a Retry-After header, which Connect clients surface as UNAVAILABLE,
+         and over native gRPC with RESOURCE_EXHAUSTED and "retry-after"
+         metadata. Available only on the postgres control-plane
+         driver; the memory and SQLite drivers return Unimplemented.
+      operationId: identity.v1.IdentityService.SignUpWithTenantInvitation
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.SignUpWithTenantInvitationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.SignUpWithTenantInvitationResponse'
   /identity.v1.IdentityService/SubmitDateOfBirth:
     post:
       tags:
@@ -9316,7 +9449,10 @@ components:
              no mailer is configured (email_send_status NOT_CONFIGURED, so a
              headless/dev deployment can still drive the flow); otherwise it is
              empty, because the token belongs in the recipient's inbox, not the API
-             response.
+             response. The invitation records that its token was handed out, so it
+             never creates an account (SignUpWithTenantInvitation), even once the
+             server has mail settings; the invitee still accepts it after a sign-in
+             that proves the address.
         emailSendStatus:
           title: email_send_status
           description: |-
@@ -10160,6 +10296,77 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: GetQrLoginSessionResponse
       additionalProperties: false
+    identity.v1.GetTenantInvitationRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          title: token
+      title: GetTenantInvitationRequest
+      additionalProperties: false
+      description: |-
+        GetTenantInvitationRequest names an invitation by the raw token its email
+         carries.
+    identity.v1.GetTenantInvitationResponse:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          title: tenant_id
+        tenantName:
+          type: string
+          title: tenant_name
+          description: |-
+            tenant_name is the name the invitation email shows: an operator's or a
+             domain tenant's name, else its primary domain. It is empty for a tenant
+             made through self-service CreateTenant, whose name its creator typed.
+        inviterName:
+          type: string
+          title: inviter_name
+          description: |-
+            inviter_name and inviter_email are the inviting account's, empty once
+             that account no longer exists.
+        inviterEmail:
+          type: string
+          title: inviter_email
+        email:
+          type: string
+          title: email
+          description: email is the invited address.
+        role:
+          type: string
+          title: role
+          description: '"member" | "admin" | "owner"'
+        expiresAtMs:
+          type:
+            - integer
+            - string
+          title: expires_at_ms
+          format: int64
+          description: |-
+            expires_at_ms is when the invitation expires, in epoch milliseconds; 0
+             for one that does not.
+        status:
+          type: string
+          title: status
+          description: |-
+            status is "pending", "expired", "accepted" or "revoked". A pending
+             invitation past expires_at_ms reads "expired".
+        accountExists:
+          type: boolean
+          title: account_exists
+          description: |-
+            account_exists reports whether an account of the project holds email,
+             as its email or as a recovery email. It is always false on a server with
+             no mail provider, and for an invitation created on one, or before the
+             server recorded where an invitation's token went: CreateTenantInvitation
+             then handed the token to the inviter, or may have, so holding it does
+             not show that the caller owns the address.
+      title: GetTenantInvitationResponse
+      additionalProperties: false
+      description: |-
+        GetTenantInvitationResponse describes the invitation a token names, for the
+         page the invitation email links to.
     identity.v1.GetUserRequest:
       type: object
       properties:
@@ -13363,6 +13570,46 @@ components:
           title: revoked_count
           format: int32
       title: SignOutEverywhereResponse
+      additionalProperties: false
+    identity.v1.SignUpWithTenantInvitationRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          title: token
+          description: token is the raw token the invitation email carries.
+        name:
+          type: string
+          title: name
+          description: |-
+            name is the account's display name: required, at most 100 characters,
+             with no control or invisible formatting characters.
+        password:
+          type: string
+          title: password
+      title: SignUpWithTenantInvitationRequest
+      additionalProperties: false
+      description: |-
+        SignUpWithTenantInvitationRequest creates the account a tenant invitation
+         names.
+    identity.v1.SignUpWithTenantInvitationResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+        refreshToken:
+          type: string
+          title: refresh_token
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+          description: Access token lifetime in seconds
+      title: SignUpWithTenantInvitationResponse
       additionalProperties: false
     identity.v1.SubmitDateOfBirthRequest:
       type: object

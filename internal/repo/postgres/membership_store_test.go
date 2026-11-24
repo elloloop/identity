@@ -1046,6 +1046,8 @@ func TestMembershipStore_AddMember(t *testing.T) {
 // address under FoldEmail, in the project asked about, in a tenant that can
 // still take members and was not made through self-service, from an inviter
 // still an active owner or admin there, and the newest when several qualify.
+// The lookup by token counts the same invitations open, an older one
+// included while a newer one for the address is open too.
 func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -1096,29 +1098,42 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 		require.NoError(t, err)
 		return inv
 	}
+	openToken := func(project, tokenHash string) *service.TenantInvitation {
+		t.Helper()
+		inv, err := is.OpenInvitationForToken(ctx, project, tokenHash, now)
+		require.NoError(t, err)
+		return inv
+	}
 
 	require.Nil(t, open(projectID, "new@acme.com"), "no invitation")
+	require.Nil(t, openToken(projectID, "open-unknown"), "no invitation has the token")
 
 	expired := invite(tenantID, "late@acme.com", "open-expired", now-1)
 	require.Nil(t, open(projectID, "late@acme.com"), "expired before the instant asked about")
+	require.Nil(t, openToken(projectID, "open-expired"))
 	require.NotEmpty(t, expired)
 	edge := invite(tenantID, "edge@acme.com", "open-edge", now)
 	require.Equal(t, edge, open(projectID, "edge@acme.com").ID, "expiring at the instant still open, as acceptance reads it")
+	require.Equal(t, edge, openToken(projectID, "open-edge").ID)
 
 	revoked := invite(tenantID, "gone@acme.com", "open-revoked", now+86_400_000)
 	require.NoError(t, is.SetInvitationStatus(ctx, projectID, revoked, service.InvitationStatusRevoked, 0))
 	require.Nil(t, open(projectID, "gone@acme.com"), "revoked")
+	require.Nil(t, openToken(projectID, "open-revoked"))
 
 	accepted := invite(tenantID, "done@acme.com", "open-accepted", now+86_400_000)
 	require.NoError(t, is.SetInvitationStatus(ctx, projectID, accepted, service.InvitationStatusAccepted, 0))
 	require.Nil(t, open(projectID, "done@acme.com"), "accepted")
+	require.Nil(t, openToken(projectID, "open-accepted"))
 
 	pending := invite(tenantID, "new@acme.com", "open-pending", now+86_400_000)
 	got := open(projectID, "NEW@acme.com")
 	require.NotNil(t, got, "ASCII case names the same address")
 	require.Equal(t, pending, got.ID)
+	require.Equal(t, pending, openToken(projectID, "open-pending").ID)
 	require.Nil(t, open(projectID, "other@acme.com"), "another address")
 	require.Nil(t, open("another-project", "new@acme.com"), "another project")
+	require.Nil(t, openToken("another-project", "open-pending"), "another project")
 
 	raw, err := pgx.Connect(ctx, dsn)
 	require.NoError(t, err)
@@ -1131,12 +1146,16 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	_, err = raw.Exec(ctx, `UPDATE tenant_invitations SET expires_at_ms = 0 WHERE id = $1`, never)
 	require.NoError(t, err)
 	require.Equal(t, never, open(projectID, "forever@acme.com").ID, "0 never expires, as acceptance reads it")
+	require.Equal(t, never, openToken(projectID, "open-forever").ID)
 	newer := invite(second, "new@acme.com", "open-newer", now+86_400_000)
 	require.Equal(t, newer, open(projectID, "new@acme.com").ID, "the newest of two open invitations")
+	require.Equal(t, newer, openToken(projectID, "open-newer").ID)
+	require.Equal(t, pending, openToken(projectID, "open-pending").ID, "an older open invitation's token still counts")
 
 	_, err = raw.Exec(ctx, `UPDATE tenants SET status = 'suspended' WHERE project_id = $1 AND id = $2`, projectID, second)
 	require.NoError(t, err)
 	require.Equal(t, pending, open(projectID, "new@acme.com").ID, "a suspended tenant's invitation admits nobody")
+	require.Nil(t, openToken(projectID, "open-newer"))
 
 	const selfService = "tenant-self-service"
 	_, err = raw.Exec(ctx, `INSERT INTO tenants (id, project_id, status, created_by, created_at_ms, updated_at_ms) VALUES ($1, $2, 'claimed', 'user-who-made-it', 1, 1)`, selfService, projectID)
@@ -1144,18 +1163,24 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 	member(selfService, owner, service.RoleOwner, service.MembershipStatusActive)
 	invite(selfService, "made@acme.com", "open-self-service", now+86_400_000)
 	require.Nil(t, open(projectID, "made@acme.com"), "a self-service tenant's invitation admits nobody")
+	require.Nil(t, openToken(projectID, "open-self-service"))
 	invite(selfService, "new@acme.com", "open-self-service-newer", now+86_400_000)
 	require.Equal(t, pending, open(projectID, "new@acme.com").ID, "nor outranks an operator tenant's")
+	require.Nil(t, openToken(projectID, "open-self-service-newer"))
 
 	member(tenantID, other, service.RoleMember, service.MembershipStatusActive)
 	inviteAs(other, tenantID, "byother@acme.com", "open-by-other", now+86_400_000)
 	require.Nil(t, open(projectID, "byother@acme.com"), "an inviter who is a plain member admits nobody")
+	require.Nil(t, openToken(projectID, "open-by-other"))
 	member(tenantID, other, service.RoleAdmin, service.MembershipStatusActive)
 	require.NotNil(t, open(projectID, "byother@acme.com"), "an active admin's invitation admits")
+	require.NotNil(t, openToken(projectID, "open-by-other"))
 	member(tenantID, other, service.RoleAdmin, service.MembershipStatusInactive)
 	require.Nil(t, open(projectID, "byother@acme.com"), "nor once the inviter is no longer active there")
+	require.Nil(t, openToken(projectID, "open-by-other"))
 	inviteAs("", tenantID, "nobody@acme.com", "open-no-inviter", now+86_400_000)
 	require.Nil(t, open(projectID, "nobody@acme.com"), "an invitation with no inviter admits nobody")
+	require.Nil(t, openToken(projectID, "open-no-inviter"))
 
 	for name, change := range map[string]string{
 		"deactivated":   `UPDATE users SET status = 'deactivated' WHERE id = $1`,
@@ -1169,13 +1194,16 @@ func TestInvitationStore_OpenInvitationForEmail(t *testing.T) {
 		addr := fmt.Sprintf("invitee-%d@acme.com", time.Now().UnixNano())
 		inviteAs(admin, tenantID, addr, "open-"+addr, now+86_400_000)
 		require.NotNil(t, open(projectID, addr), "%s: admitted before the change", name)
+		require.NotNil(t, openToken(projectID, "open-"+addr), "%s: admitted before the change", name)
 		_, err := raw.Exec(ctx, change, admin)
 		require.NoError(t, err, name)
 		if name == "pending purge" {
 			require.NotNil(t, open(projectID, addr), "an inviter pending deletion still signs in, so still admits")
+			require.NotNil(t, openToken(projectID, "open-"+addr))
 			continue
 		}
 		require.Nil(t, open(projectID, addr), "an inviter who is %s admits nobody, though the membership stays active", name)
+		require.Nil(t, openToken(projectID, "open-"+addr), "%s", name)
 	}
 }
 
@@ -1255,4 +1283,8 @@ func TestInvitationStore_OpenInvitationForEmailUnderRLS(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got, "the lookup reads the inviter's row in the project it was asked about")
 	require.Equal(t, id, got.ID)
+	byToken, err := NewInvitationStore(bound).OpenInvitationForToken(ctx, projectID, "rls-open", now.UnixMilli())
+	require.NoError(t, err)
+	require.NotNil(t, byToken, "the lookup by token binds the same way")
+	require.Equal(t, id, byToken.ID)
 }

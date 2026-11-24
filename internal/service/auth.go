@@ -1532,6 +1532,11 @@ type AuthService struct {
 	// tenant a refresh selects (WithTenantSelection). nil refuses every
 	// selection.
 	tenantSelection UserTenantReader
+	// mailDelivers reports whether the mailer hands email to a mail provider
+	// (WithMailDelivery). When it does not, CreateTenantInvitation gives the
+	// inviter the invitation's token, so the token proves no address and
+	// SignUpWithTenantInvitation is refused.
+	mailDelivers bool
 	// openInvitations finds the tenant invitation that lets an invite project
 	// with access.admit_tenant_invitations create an account for a proven
 	// address. nil admits no such account.

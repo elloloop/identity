@@ -941,13 +941,14 @@ func NewInvitationStore(r *pgRepository) *InvitationStore {
 
 const invitationColumns = `
 	id, project_id, tenant_id, token_hash, email, invited_by, role, status,
-	expires_at_ms, accepted_at_ms, created_at_ms`
+	expires_at_ms, accepted_at_ms, created_at_ms, token_only_in_email`
 
 func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 	var v service.TenantInvitation
 	if err := row.Scan(
 		&v.ID, &v.ProjectID, &v.TenantID, &v.TokenHash, &v.Email, &v.InvitedBy,
 		&v.Role, &v.Status, &v.ExpiresAtMs, &v.AcceptedAtMs, &v.CreatedAtMs,
+		&v.TokenOnlyInEmail,
 	); err != nil {
 		return nil, err
 	}
@@ -1103,10 +1104,10 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 		ctx, `
 		INSERT INTO tenant_invitations (
 			id, project_id, tenant_id, token_hash, email, invited_by, role,
-			status, expires_at_ms, accepted_at_ms, created_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, 0, $9)`,
+			status, expires_at_ms, accepted_at_ms, created_at_ms, token_only_in_email
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, 0, $9, $10)`,
 		id, inv.ProjectID, inv.TenantID, inv.TokenHash, inv.Email, inv.InvitedBy,
-		role, inv.ExpiresAtMs, inv.CreatedAtMs,
+		role, inv.ExpiresAtMs, inv.CreatedAtMs, inv.TokenOnlyInEmail,
 	); err != nil {
 		return "", wrapPgErr("CreateInvitation(insert)", err)
 	}
@@ -1120,16 +1121,10 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	return id, nil
 }
 
-// OpenInvitationForEmail implements service.OpenInvitationReader. The inviter's
-// users row is under row-level security (migration 0016), so the query runs on
-// a connection bound to projectID rather than to this store's own project.
-// Uses tenant_invitations_pending_email_idx.
-func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*service.TenantInvitation, error) {
-	if projectID == "" || email == "" {
-		return nil, nil
-	}
-	const q = `SELECT i.id, i.project_id, i.tenant_id, i.token_hash, i.email, i.invited_by, i.role, i.status,
-		i.expires_at_ms, i.accepted_at_ms, i.created_at_ms
+// openInvitationQuery selects the open invitations of project $1 at $3, as
+// service.OpenInvitationReader counts one open; the caller appends which ($2).
+const openInvitationQuery = `SELECT i.id, i.project_id, i.tenant_id, i.token_hash, i.email, i.invited_by, i.role, i.status,
+		i.expires_at_ms, i.accepted_at_ms, i.created_at_ms, i.token_only_in_email
 		FROM tenant_invitations i
 		JOIN tenants t ON t.project_id = i.project_id AND t.id = i.tenant_id
 		JOIN tenant_memberships m ON m.project_id = i.project_id AND m.tenant_id = i.tenant_id
@@ -1137,17 +1132,45 @@ func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID,
 		JOIN users u ON u.project_id = i.project_id AND u.id = i.invited_by
 		  AND lower(u.status) IN ('', 'active', 'pending_deletion')
 		  AND u.kind <> 'agent' AND NOT u.is_anonymous AND u.merged_into_user_id = ''
-		WHERE i.project_id = $1 AND lower(i.email COLLATE "C") = $2
+		WHERE i.project_id = $1
 		  AND i.status = 'pending' AND (i.expires_at_ms = 0 OR i.expires_at_ms >= $3)
-		  AND t.status IN ('claimed', 'latent') AND t.created_by = ''
+		  AND t.status IN ('claimed', 'latent') AND t.created_by = ''`
+
+// OpenInvitationForEmail implements service.OpenInvitationReader. Uses
+// tenant_invitations_pending_email_idx.
+func (s *InvitationStore) OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*service.TenantInvitation, error) {
+	if projectID == "" || email == "" {
+		return nil, nil
+	}
+	const q = openInvitationQuery + `
+		  AND lower(i.email COLLATE "C") = $2
 		ORDER BY i.created_at_ms DESC, i.id DESC
 		LIMIT 1`
-	v, err := scanInvitation(s.pool.forProject(projectID).QueryRow(ctx, q, projectID, service.FoldEmail(email), nowMs))
+	return s.openInvitation(ctx, "OpenInvitationForEmail", q, projectID, service.FoldEmail(email), nowMs)
+}
+
+// OpenInvitationForToken implements service.OpenInvitationReader. Uses
+// tenant_invitations_project_token_uidx.
+func (s *InvitationStore) OpenInvitationForToken(ctx context.Context, projectID, tokenHash string, nowMs int64) (*service.TenantInvitation, error) {
+	if projectID == "" || tokenHash == "" {
+		return nil, nil
+	}
+	const q = openInvitationQuery + `
+		  AND i.token_hash = $2`
+	return s.openInvitation(ctx, "OpenInvitationForToken", q, projectID, tokenHash, nowMs)
+}
+
+// openInvitation runs an openInvitationQuery for one invitation, or none. The
+// inviter's users row is under row-level security (migration 0016), so the
+// query runs on a connection bound to projectID rather than to this store's
+// own project.
+func (s *InvitationStore) openInvitation(ctx context.Context, op, q, projectID, which string, nowMs int64) (*service.TenantInvitation, error) {
+	v, err := scanInvitation(s.pool.forProject(projectID).QueryRow(ctx, q, projectID, which, nowMs))
 	if noRows(err) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, wrapPgErr("OpenInvitationForEmail", err)
+		return nil, wrapPgErr(op, err)
 	}
 	return v, nil
 }

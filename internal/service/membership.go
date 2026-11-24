@@ -75,6 +75,14 @@ type TenantInvitation struct {
 	ExpiresAtMs  int64
 	AcceptedAtMs int64
 	CreatedAtMs  int64
+	// TokenOnlyInEmail records that the raw token went into the invitation
+	// email and nowhere else: CreateTenantInvitation sets it only where the
+	// mailer delivers, as it then hands no token to the inviter. Only such a
+	// token proves the invited address, so only it creates an account
+	// (SignUpWithTenantInvitation) or learns whether the address has one
+	// (GetTenantInvitation). It is false for an invitation stored before it
+	// was recorded, whose token may have gone anywhere.
+	TokenOnlyInEmail bool
 }
 
 // UserTenant is a tenant a user may act in: an active membership in a
@@ -262,17 +270,15 @@ type MembershipStore interface {
 type InvitationStore interface {
 	// CreateInvitation atomically enforces one-open-invite: in a single
 	// transaction it revokes any existing pending invitation for the same
-	// (project, tenant, lower(email)) and inserts the new one. A blank id
-	// is generated and written back. Returns the new invitation id.
+	// (project, tenant, lower(email)) and inserts the new one, with
+	// inv.TokenOnlyInEmail as given. A blank id is generated and written
+	// back. Returns the new invitation id.
 	//
 	// limits bounds how many invitations the tenant, the inviter and the
 	// recipient account for; the checks and the insert run serialised per
 	// tenant, inviter and recipient, so concurrent creates cannot both pass
 	// a limit only one of them fits under.
 	CreateInvitation(ctx context.Context, inv *TenantInvitation, limits InvitationLimits) (string, error)
-	// GetInvitationByTokenHash resolves an invitation by its hashed token
-	// within a project, or (nil, nil).
-	GetInvitationByTokenHash(ctx context.Context, projectID, tokenHash string) (*TenantInvitation, error)
 	// SetInvitationStatus transitions an invitation's status and, when
 	// accepting, stamps accepted_at_ms (0 defaults to now on accept).
 	// Unknown ids are a no-op.
@@ -291,9 +297,13 @@ type InvitationStore interface {
 	OpenInvitationReader
 }
 
-// OpenInvitationReader finds the invitation that lets an invite-only project
+// OpenInvitationReader reads the invitations sign-up consults: the one a
+// token names, and the open invitation that lets an invite-only project
 // create an account for an address.
 type OpenInvitationReader interface {
+	// GetInvitationByTokenHash resolves an invitation by its hashed token
+	// within a project, or (nil, nil).
+	GetInvitationByTokenHash(ctx context.Context, projectID, tokenHash string) (*TenantInvitation, error)
 	// OpenInvitationForEmail returns the newest invitation in the project
 	// still pending at nowMs (unexpired as AcceptTenantInvitation reads it),
 	// addressed to email (canonical form), in a tenant that can still take
@@ -301,6 +311,10 @@ type OpenInvitationReader interface {
 	// CreateTenant (its CreatedBy is empty), from an inviter who is still an
 	// active owner or admin of that tenant, or (nil, nil).
 	OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error)
+	// OpenInvitationForToken returns the invitation in the project whose
+	// hashed token is tokenHash when it is open as OpenInvitationForEmail
+	// counts one open, or (nil, nil).
+	OpenInvitationForToken(ctx context.Context, projectID, tokenHash string, nowMs int64) (*TenantInvitation, error)
 }
 
 // InvitationLimits bounds how many invitations InvitationStore.CreateInvitation

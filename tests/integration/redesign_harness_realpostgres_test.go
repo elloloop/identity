@@ -145,6 +145,42 @@ func startRedesignHarness(t *testing.T) *RedesignHarness {
 // session revocation mode).
 func startRedesignHarnessWith(t *testing.T, mutate func(*config.Config)) *RedesignHarness {
 	t.Helper()
+	return bootRedesignHarness(t, mutate, NewRecordingMailer())
+}
+
+// startRedesignHarnessWithoutMail is startRedesignHarness with no mail
+// transport and no SMTP settings, so the server mails through its log-only
+// fallback, which delivers nothing. Its Mailer is nil.
+func startRedesignHarnessWithoutMail(t *testing.T) *RedesignHarness {
+	t.Helper()
+	return bootRedesignHarness(t, func(*config.Config) {}, nil)
+}
+
+// bootRedesignHarness boots the harness, mailing through mailer, or through
+// the server's own transport when mailer is nil.
+func bootRedesignHarness(t *testing.T, mutate func(*config.Config), mailer *RecordingMailer) *RedesignHarness {
+	t.Helper()
+	// Post-inversion (ADR-0002) the Project is the data-plane shard, so a
+	// unique project (and its storage scope) per test run keeps users/sessions
+	// isolated even though every run shares one control-plane database.
+	uniq := fmt.Sprintf("it-redesign-%d", time.Now().UnixNano())
+	return bootRedesignHarnessOn(t, uniq, uniq, uniq+brandedAuthDomainSuffix, mutate, mailer)
+}
+
+// startRedesignHarnessBeside boots a second server on h's project, default
+// tenant and branded host, mailing through a recording mailer, so a test can
+// change what a server is booted with between two requests about the same
+// data. Its boot opens the project's access again, as every boot does, and
+// its access tokens are signed with a key of its own.
+func startRedesignHarnessBeside(t *testing.T, h *RedesignHarness) *RedesignHarness {
+	t.Helper()
+	return bootRedesignHarnessOn(t, h.ProjectID, h.TenantID, h.BrandedAuthDomain, func(*config.Config) {}, NewRecordingMailer())
+}
+
+// bootRedesignHarnessOn boots the harness for projectID, its default tenant
+// tenantID and its branded host brandedAuthDomain.
+func bootRedesignHarnessOn(t *testing.T, projectID, tenantID, brandedAuthDomain string, mutate func(*config.Config), mailer *RecordingMailer) *RedesignHarness {
+	t.Helper()
 
 	dsn := os.Getenv("GATEWAY_POSTGRES_DSN")
 	if dsn == "" {
@@ -152,30 +188,24 @@ func startRedesignHarnessWith(t *testing.T, mutate func(*config.Config)) *Redesi
 	}
 
 	logger := zaptest.NewLogger(t)
-	// Post-inversion (ADR-0002) the Project is the data-plane shard, so a
-	// unique project (and its storage scope) per test run keeps users/sessions
-	// isolated even though every run shares one control-plane database.
-	uniq := fmt.Sprintf("it-redesign-%d", time.Now().UnixNano())
-	tenantID := uniq
-	projectID := uniq
-	brandedAuthDomain := uniq + brandedAuthDomainSuffix
-
 	cfg := newRedesignTestConfig(dsn, projectID, tenantID, brandedAuthDomain)
 	mutate(&cfg)
 
 	dns := newFakeDNSResolver()
-	mailer := NewRecordingMailer()
-
-	srv, err := identityserver.New(context.Background(), identityserver.Options{
+	opts := identityserver.Options{
 		Config:          cfg,
 		Logger:          logger,
 		MetricsRegistry: prometheus.NewRegistry(), // isolated: avoid cross-harness collisions
-		EmailTransport:  mailer,
 		DNSResolver:     dns,
 		// Send synchronously so the recording mailer is readable right after a
 		// request in these full-stack governance tests.
 		SynchronousEmailSend: true,
-	})
+	}
+	if mailer != nil {
+		opts.EmailTransport = mailer
+	}
+
+	srv, err := identityserver.New(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("identityserver.New: %v", err)
 	}

@@ -328,7 +328,7 @@
     "type": "boolean",
     "default": "true",
     "required": false,
-    "description": "requires an assurance token on every RPC that creates a password account: PasswordSignup, UsernameSignup and UpgradeAnonymousAccount.",
+    "description": "requires an assurance token on every RPC that creates a password account: PasswordSignup, UsernameSignup, SignUpWithTenantInvitation and UpgradeAnonymousAccount.",
     "category": "Client assurance",
     "anchor": "client-assurance"
   },
@@ -1435,7 +1435,7 @@
     "type": "boolean",
     "default": "true",
     "required": false,
-    "description": "gates every self-serve way to a password account: PasswordSignup, UsernameSignup and UpgradeAnonymousAccount with a password, and the hosted page's sign-up form.",
+    "description": "gates every self-serve way to a password account: PasswordSignup, UsernameSignup, SignUpWithTenantInvitation and UpgradeAnonymousAccount with a password, and the hosted page's sign-up form.",
     "category": "Password \u0026 lockout",
     "anchor": "password-and-lockout"
   },
@@ -1714,7 +1714,7 @@
     "type": "integer",
     "default": "20",
     "required": false,
-    "description": "is the per-IP request cap per window on the verification endpoints.",
+    "description": "is the per-IP request cap per window on the verification endpoints, and the size of two more budgets, each its own: GetProjectEmailDelivery's and GetTenantInvitation's.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },

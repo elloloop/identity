@@ -165,7 +165,9 @@ func toConnectError(err error) *connect.Error {
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrInvitationUsed),
-		errors.Is(err, service.ErrInvitationExpired):
+		errors.Is(err, service.ErrInvitationExpired),
+		errors.Is(err, service.ErrInvitationRevoked),
+		errors.Is(err, service.ErrInvitationSignupUnavailable):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrLastOwner),

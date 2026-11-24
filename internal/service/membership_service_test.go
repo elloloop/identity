@@ -39,6 +39,10 @@ type fakeInvitationStore struct {
 	listErr    error
 	openErr    error
 	nextID     int
+	// unqualified holds the tenants whose invitations the open-invitation
+	// lookups pass over, as the postgres store passes over a self-service
+	// tenant's or one whose inviter is no longer an owner or admin.
+	unqualified map[string]bool
 }
 
 func newFakeInvitationStore() *fakeInvitationStore {
@@ -99,16 +103,15 @@ func (f *fakeInvitationStore) CreateInvitation(_ context.Context, inv *TenantInv
 }
 
 // OpenInvitationForEmail mirrors the postgres lookup except its tenant and
-// inviter filters: the fake keeps no tenants or memberships, so those are the
-// postgres store's, tested there.
+// inviter filters, which unqualified stands in for: the fake keeps no tenants
+// or memberships, so those are the postgres store's, tested there.
 func (f *fakeInvitationStore) OpenInvitationForEmail(_ context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error) {
 	if f.openErr != nil {
 		return nil, f.openErr
 	}
 	var newest *TenantInvitation
 	for _, inv := range f.byID {
-		if inv.ProjectID != projectID || FoldEmail(inv.Email) != FoldEmail(email) ||
-			inv.Status != InvitationStatusPending || (inv.ExpiresAtMs != 0 && inv.ExpiresAtMs < nowMs) {
+		if inv.ProjectID != projectID || FoldEmail(inv.Email) != FoldEmail(email) || !f.open(inv, nowMs) {
 			continue
 		}
 		if newest == nil || inv.CreatedAtMs > newest.CreatedAtMs ||
@@ -121,6 +124,26 @@ func (f *fakeInvitationStore) OpenInvitationForEmail(_ context.Context, projectI
 	}
 	out := *newest
 	return &out, nil
+}
+
+// OpenInvitationForToken is OpenInvitationForEmail's rule for the invitation
+// with tokenHash.
+func (f *fakeInvitationStore) OpenInvitationForToken(_ context.Context, projectID, tokenHash string, nowMs int64) (*TenantInvitation, error) {
+	if f.openErr != nil {
+		return nil, f.openErr
+	}
+	for _, inv := range f.byID {
+		if inv.ProjectID == projectID && inv.TokenHash == tokenHash && f.open(inv, nowMs) {
+			out := *inv
+			return &out, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeInvitationStore) open(inv *TenantInvitation, nowMs int64) bool {
+	return inv.Status == InvitationStatusPending && (inv.ExpiresAtMs == 0 || inv.ExpiresAtMs >= nowMs) &&
+		!f.unqualified[inv.TenantID]
 }
 
 func (f *fakeInvitationStore) GetInvitationByTokenHash(_ context.Context, projectID, tokenHash string) (*TenantInvitation, error) {
@@ -340,6 +363,8 @@ func TestCreateTenantInvitation_AdminInvitesAndEmails(t *testing.T) {
 
 	// The stored token hash must not equal any raw token in the response.
 	require.NotEmpty(t, out.Invitation.TokenHash)
+	require.True(t, f.invitations.byID[f.invitations.key(mTestProject, out.Invitation.ID)].TokenOnlyInEmail,
+		"the invitation records that its token went only into its email")
 }
 
 // The invitation email links to GATEWAY_TENANT_INVITATION_PAGE_URL when one is
@@ -410,6 +435,8 @@ func TestCreateTenantInvitation_NoMailerReturnsRawToken(t *testing.T) {
 
 	// The returned raw token must hash to the stored token hash.
 	require.Equal(t, out.Invitation.TokenHash, sha256Hex(out.RawToken))
+	require.False(t, f.invitations.byID[f.invitations.key(mTestProject, out.Invitation.ID)].TokenOnlyInEmail,
+		"the invitation records that its token was handed out")
 }
 
 // A mailer that accepts nothing fails the email, not the call: the invitation
@@ -427,6 +454,7 @@ func TestCreateTenantInvitation_SendFailureReportsFailed(t *testing.T) {
 	stored := f.invitations.byID[f.invitations.key(mTestProject, out.Invitation.ID)]
 	require.NotNil(t, stored, "the invitation is stored before the email is sent")
 	require.Equal(t, InvitationStatusPending, stored.Status)
+	require.True(t, stored.TokenOnlyInEmail, "a failed send hands the token to nobody")
 }
 
 // An email that cannot be built (here, an invalid sender address the mailer

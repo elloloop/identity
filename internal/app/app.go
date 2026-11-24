@@ -318,9 +318,9 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 	// budget is the surface's, not each RPC's. The login budget is the right
 	// analogue: the cost driver is the same password verification.
 	guardianLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0)
-	// Password and username sign-up share one limiter and tag (the limiter
-	// keys on tag and IP): both create an account and hash a password, so an
-	// IP's sign-up budget is the surface's, not each RPC's.
+	// Password, username and invitation sign-up share one limiter and tag
+	// (the limiter keys on tag and IP): each creates an account and hashes a
+	// password, so an IP's sign-up budget is the surface's, not each RPC's.
 	signupLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0)
 	loginLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitLoginPerIP, 0)
 	domainLimiter := middleware.NewFixedWindowLimiter(window, cfg.RateLimitDomainPerIP, 0)
@@ -341,6 +341,10 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 		},
 		{
 			PathPrefix: "/identity.v1.IdentityService/UsernameSignup", Tag: "signup",
+			Limiter: signupLimiter,
+		},
+		{
+			PathPrefix: identityconnectgen.IdentityServiceSignUpWithTenantInvitationProcedure, Tag: "signup",
 			Limiter: signupLimiter,
 		},
 		{
@@ -501,6 +505,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			// address spreading invitations across tenants and accounts.
 			PathPrefix: "/identity.v1.IdentityService/CreateTenantInvitation", Tag: "tenant_invitation",
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitInvitationPerIP, 0),
+		},
+		{
+			// Reading an invitation by its token is unauthenticated: the
+			// token is long enough not to be guessed, and this bounds how
+			// fast one source can try.
+			PathPrefix: identityconnectgen.IdentityServiceGetTenantInvitationProcedure, Tag: "tenant_invitation_read",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitVerifyPerIP, 0),
 		},
 		{
 			// The completion half of a login: unauthenticated (it carries a
@@ -856,6 +867,7 @@ func New(deps Deps) (*Built, error) {
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
 		WithDomainJoin(deps.DomainStore, deps.TenantStore).
+		WithMailDelivery(senders.mailDelivers).
 		WithTemplateMessages(senders.templates).
 		WithEventPublisher(eventPublisher).
 		WithActiveProjects(deps.ActiveProjects).

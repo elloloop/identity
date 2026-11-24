@@ -233,14 +233,15 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	expiresAtMs := now.Add(s.invitationTTL()).UnixMilli()
 
 	inv := &TenantInvitation{
-		ProjectID:   projectID,
-		TenantID:    tenantID,
-		TokenHash:   sha256Hex(rawToken),
-		Email:       normEmail,
-		InvitedBy:   callerID,
-		Role:        role,
-		ExpiresAtMs: expiresAtMs,
-		CreatedAtMs: now.UnixMilli(),
+		ProjectID:        projectID,
+		TenantID:         tenantID,
+		TokenHash:        sha256Hex(rawToken),
+		Email:            normEmail,
+		InvitedBy:        callerID,
+		Role:             role,
+		ExpiresAtMs:      expiresAtMs,
+		CreatedAtMs:      now.UnixMilli(),
+		TokenOnlyInEmail: s.mailerDelivers,
 	}
 	id, err := s.invitations.CreateInvitation(ctx, inv, s.invitationLimits(now))
 	if err != nil {
@@ -259,10 +260,12 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	sendErr := s.sendInvitationEmail(ctx, inv, rawToken)
 	out := &CreatedInvitation{Invitation: inv}
 	switch {
-	case !s.mailerDelivers:
+	case !inv.TokenOnlyInEmail:
 		// No delivery channel: surface the token so the caller can hand it
-		// over out-of-band. The token never accompanies a configured mailer,
-		// even one that failed, as it belongs in the recipient's inbox.
+		// over out-of-band; the stored invitation says so, and its token
+		// never proves the address. The token never accompanies a configured
+		// mailer, even one that failed, as it belongs in the recipient's
+		// inbox.
 		out.RawToken = rawToken
 		out.EmailStatus = EmailNotConfigured
 	case sendErr != nil:
@@ -311,12 +314,14 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	// Unknown token is NotFound — but we don't distinguish it from a wrong
 	// project, so the redeemer learns nothing about other projects' tokens.
 	if inv == nil {
+		s.logAcceptRefused(ctx, projectID, callerID, nil, "not_found")
 		return nil, fmt.Errorf("%w: invitation", ErrNotFound)
 	}
 
 	if inv.Status != InvitationStatusPending {
 		// Already accepted / revoked / expired: not redeemable. Don't leak
 		// which — PermissionDenied for any non-pending state.
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "invitation_closed", zap.String("status", inv.Status))
 		return nil, fmt.Errorf("%w: invitation is not pending", ErrPermissionDenied)
 	}
 	if inv.ExpiresAtMs > 0 && inv.ExpiresAtMs < s.nowFunc().UnixMilli() {
@@ -324,6 +329,7 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 		if setErr := s.invitations.SetInvitationStatus(ctx, projectID, inv.ID, InvitationStatusExpired, 0); setErr != nil {
 			s.logger.Warn("invitation_mark_expired_failed", zap.String("invitation_id", inv.ID), zap.Error(setErr))
 		}
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "invitation_closed", zap.String("status", InvitationStatusExpired))
 		return nil, fmt.Errorf("%w: invitation expired", ErrPermissionDenied)
 	}
 
@@ -334,21 +340,27 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 		return nil, err
 	}
 	if caller == nil {
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "caller_not_found")
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
 	if !emailaddr.SameMailbox(caller.Email, inv.Email) {
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "email_mismatch")
 		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
 	}
 	// Holding the token proves nothing about the address: without a mailer
 	// the inviter is handed it. The invitation stays pending meanwhile.
 	if !caller.EmailVerified {
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "email_unverified")
 		return nil, fmt.Errorf("%w: verify your email before accepting an invitation", ErrEmailVerificationRequired)
 	}
 	if err := requireGovernableTenant(ctx, s.tenants, projectID, inv.TenantID); err != nil {
+		if errors.Is(err, ErrPermissionDenied) {
+			s.logAcceptRefused(ctx, projectID, callerID, inv, "tenant_not_governable")
+		}
 		return nil, err
 	}
 
-	m, _, err := s.memberships.GrantMembership(ctx, &TenantMembership{
+	m, changed, err := s.memberships.GrantMembership(ctx, &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  inv.TenantID,
 		UserID:    callerID,
@@ -357,12 +369,25 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 		Status:    MembershipStatusActive,
 	})
 	if err != nil {
+		if errors.Is(err, ErrMemberSuspended) {
+			s.logAcceptRefused(ctx, projectID, callerID, inv, "member_suspended")
+		}
 		return nil, err
 	}
 	if err := s.invitations.SetInvitationStatus(ctx, projectID, inv.ID, InvitationStatusAccepted, s.nowFunc().UnixMilli()); err != nil {
 		return nil, err
 	}
+	s.logger.Info("tenant_invitation_accepted", append(invitationDecisionLogFields(ctx, projectID, inv),
+		zap.String("user_id", callerID), zap.String("role", m.Role), zap.String("source", m.Source),
+		zap.Bool("changed", changed))...)
 	return m, nil
+}
+
+// logAcceptRefused records which rule refused callerID's acceptance of inv,
+// or of a token that named none (inv nil).
+func (s *MembershipService) logAcceptRefused(ctx context.Context, projectID, callerID string, inv *TenantInvitation, reason string, fields ...zap.Field) {
+	line := append(invitationDecisionLogFields(ctx, projectID, inv), zap.String("user_id", callerID), zap.String("reason", reason))
+	s.logger.Info("tenant_invitation_accept_refused", append(line, fields...)...)
 }
 
 // ListTenantInvitations returns every invitation in a tenant, newest first.
@@ -647,10 +672,16 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	if s.cfg != nil {
 		brand = resolveBranding(ctx, s.cfg, "")
 	}
+	// The invitation is already stored, so a tenant that cannot be read
+	// sends the email inviting to "a team" rather than none at all.
+	tenantName, err := s.tenantDisplayName(ctx, inv.ProjectID, inv.TenantID)
+	if err != nil {
+		logger.Warn("tenant_invitation_tenant_lookup_failed", zap.Error(err))
+	}
 	html, text, err := email.Render(email.TemplateTenantInvitation, brand.templateData(map[string]any{
 		"UserName":    invitationGreeting(inv.Email),
 		"InviterName": "A tenant administrator",
-		"TenantName":  s.tenantDisplayName(ctx, inv.ProjectID, inv.TenantID),
+		"TenantName":  tenantName,
 		"Role":        inv.Role,
 		"ExpiresIn":   formatExpiresIn(s.invitationTTL()),
 		"Link":        link,
@@ -688,21 +719,21 @@ func invitationLogFields(ctx context.Context, invitationID string) []zap.Field {
 	return fields
 }
 
-// tenantDisplayName is the tenant name an invitation email shows: the name
-// of an operator-made or auto-formed tenant, else its primary domain, or ""
-// (the email then invites to "a team"). A self-service tenant's name is
-// whatever its creator typed, unvetted, so it never appears: otherwise
-// anyone could create a tenant named after a company and have the service
-// send its invitations. Lookup failures are non-fatal and yield "".
-func (s *MembershipService) tenantDisplayName(ctx context.Context, projectID, tenantID string) string {
+// tenantDisplayName is the tenant name an invitation shows: the name of an
+// operator-made or auto-formed tenant, else its primary domain, or "" (the
+// email then invites to "a team"). A self-service tenant's name is whatever
+// its creator typed, unvetted, so it never appears: otherwise anyone could
+// create a tenant named after a company and have the service send its
+// invitations.
+func (s *MembershipService) tenantDisplayName(ctx context.Context, projectID, tenantID string) (string, error) {
 	t, err := s.tenants.GetTenant(ctx, projectID, tenantID)
 	if err != nil || t == nil || t.CreatedBy != "" {
-		return ""
+		return "", err
 	}
 	if n := strings.TrimSpace(t.Name); n != "" {
-		return n
+		return n, nil
 	}
-	return strings.TrimSpace(t.PrimaryDomain)
+	return strings.TrimSpace(t.PrimaryDomain), nil
 }
 
 // invitationTTL returns the configured invitation validity window, defaulting
