@@ -2198,8 +2198,9 @@ paths:
         - identity.v1.IdentityService
       summary: CreateTenantInvitation
       description: |-
-        Tenant membership (redesign). Authenticated, project-scoped, and — except
-         for AcceptTenantInvitation — gated on the caller being an owner/admin
+        Tenant membership (redesign). Project-scoped, authenticated except for
+         GetTenantInvitation, and — except for AcceptTenantInvitation and
+         GetTenantInvitation — gated on the caller being an owner/admin
          member of the target tenant. AcceptTenantInvitation is the redeemer's own
          action: any authenticated caller may redeem a token, but only for an
          invitation addressed to their own account email (compared in the
@@ -3232,6 +3233,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.GetQrLoginSessionResponse'
+  /identity.v1.IdentityService/GetTenantInvitation:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: GetTenantInvitation
+      description: |-
+        GetTenantInvitation describes the invitation a raw token names
+         (GetTenantInvitationResponse) to whoever holds the token, with no
+         session. It changes nothing: an expired invitation reads "expired" but
+         is not marked so, and the token is not used up. A token no invitation
+         of the resolved project has is NOT_FOUND and a blank one
+         INVALID_ARGUMENT, so a caller without a real token learns nothing. Send
+         it as a POST, so the token travels in the body rather than in a URL.
+         Calls are limited per client IP (GATEWAY_RATE_LIMIT_VERIFY_PER_IP per
+         GATEWAY_RATE_LIMIT_WINDOW_SECONDS, a budget of their own), one budget for
+         the HTTP handler and the native gRPC registration: over it the call is
+         refused before the RPC runs, over HTTP with status 429 and a Retry-After
+         header of the window in seconds, which Connect clients surface as
+         UNAVAILABLE, and over native gRPC with RESOURCE_EXHAUSTED and the same
+         value in the "retry-after" response metadata. Available only on the
+         postgres control-plane driver; the memory and SQLite drivers return
+         Unimplemented.
+      operationId: identity.v1.IdentityService.GetTenantInvitation
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.GetTenantInvitationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.GetTenantInvitationResponse'
   /identity.v1.IdentityService/GetUser:
     post:
       tags:
@@ -10160,6 +10213,75 @@ components:
           $ref: '#/components/schemas/google.protobuf.Timestamp'
       title: GetQrLoginSessionResponse
       additionalProperties: false
+    identity.v1.GetTenantInvitationRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          title: token
+      title: GetTenantInvitationRequest
+      additionalProperties: false
+      description: |-
+        GetTenantInvitationRequest names an invitation by the raw token its email
+         carries.
+    identity.v1.GetTenantInvitationResponse:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          title: tenant_id
+        tenantName:
+          type: string
+          title: tenant_name
+          description: |-
+            tenant_name is the name the invitation email shows: an operator's or a
+             domain tenant's name, else its primary domain. It is empty for a tenant
+             made through self-service CreateTenant, whose name its creator typed.
+        inviterName:
+          type: string
+          title: inviter_name
+          description: |-
+            inviter_name and inviter_email are the inviting account's, empty once
+             that account no longer exists.
+        inviterEmail:
+          type: string
+          title: inviter_email
+        email:
+          type: string
+          title: email
+          description: email is the invited address.
+        role:
+          type: string
+          title: role
+          description: '"member" | "admin" | "owner"'
+        expiresAtMs:
+          type:
+            - integer
+            - string
+          title: expires_at_ms
+          format: int64
+          description: |-
+            expires_at_ms is when the invitation expires, in epoch milliseconds; 0
+             for one that does not.
+        status:
+          type: string
+          title: status
+          description: |-
+            status is "pending", "expired", "accepted" or "revoked". A pending
+             invitation past expires_at_ms reads "expired".
+        accountExists:
+          type: boolean
+          title: account_exists
+          description: |-
+            account_exists reports whether an account of the project holds email,
+             as its email or as a recovery email. It is always false on a server with
+             no mail provider: CreateTenantInvitation then hands the token to the
+             inviter, so holding it does not show that the caller owns the address.
+      title: GetTenantInvitationResponse
+      additionalProperties: false
+      description: |-
+        GetTenantInvitationResponse describes the invitation a token names, for the
+         page the invitation email links to.
     identity.v1.GetUserRequest:
       type: object
       properties:

@@ -1,5 +1,42 @@
 # Upgrade guide
 
+## Next — read a tenant invitation by its token: `GetTenantInvitation` (additive RPC; no migration; new per-IP budget sized by `GATEWAY_RATE_LIMIT_VERIFY_PER_IP`; `MembershipService.GetTenantInvitation` (Go API))
+
+The page a tenant invitation's email links to had no way to say who invites
+the person where, or whether to ask them to sign up or sign in, until they had
+a session. It can now read the invitation by the token on its link.
+
+- **`GetTenantInvitation(token)`** needs no session and changes nothing. It
+  answers `tenant_id`; `tenant_name`, the name the invitation email shows (an
+  operator's or domain tenant's name, else its primary domain, and empty for a
+  self-service tenant); the inviter's `inviter_name` and `inviter_email`
+  (empty once that account is gone); the invited `email`; `role`;
+  `expires_at_ms`; `status` (`pending`, `expired`, `accepted` or `revoked`);
+  and `account_exists`. A pending invitation past its expiry reads `expired`
+  but is not marked so, and the token is not used up: the invitee still
+  accepts it with `AcceptTenantInvitation` afterwards.
+- **`account_exists`** is true when an account of the project holds the
+  address, as its email or as a recovery email. A server with no mail settings
+  hands an invitation's token to the inviter (`raw_token`), so there it is
+  always false: answering would tell a tenant admin whether any address they
+  invite has an account.
+- **Refusals.** A token no invitation of the resolved project has is
+  `NOT_FOUND`, whatever project it belongs to, and a blank one
+  `INVALID_ARGUMENT`. The memory and SQLite drivers return `UNIMPLEMENTED`.
+- **Rate limit.** Calls are limited per client IP to
+  `GATEWAY_RATE_LIMIT_VERIFY_PER_IP` per `GATEWAY_RATE_LIMIT_WINDOW_SECONDS`,
+  a budget of their own shared by the HTTP handler and the native gRPC
+  registration: HTTP 429 with `Retry-After` (Connect clients surface
+  `UNAVAILABLE`), and native gRPC `RESOURCE_EXHAUSTED` with `retry-after`
+  metadata. The RPC is POST only, so the token stays out of URLs and access
+  logs, and the response carries `Cache-Control: no-store`.
+- **Go API.** `MembershipService.GetTenantInvitation` returns a
+  `TenantInvitationView`; it reads the account store `WithAccounts` sets, and
+  refuses with `ErrUnavailable` without one where mail is delivered. A tenant
+  that cannot be read for an invitation email is now logged as
+  `tenant_invitation_tenant_lookup_failed`; the email still goes, inviting to
+  "a team".
+
 ## Next — an invite project can let a domain open to joining create the account: `access.admit_domain_join` and `GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN` (off by default; no migration; additive audit event `signup_admitted_by_domain_join`; `AuthService.WithDomainJoin` (Go API))
 
 A tenant admin can let the people on a verified domain join it themselves

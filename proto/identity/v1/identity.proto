@@ -2305,6 +2305,40 @@ enum EmailSendStatus {
   EMAIL_SEND_STATUS_NOT_CONFIGURED = 3;
 }
 
+// GetTenantInvitationRequest names an invitation by the raw token its email
+// carries.
+message GetTenantInvitationRequest {
+  string token = 1;
+}
+
+// GetTenantInvitationResponse describes the invitation a token names, for the
+// page the invitation email links to.
+message GetTenantInvitationResponse {
+  string tenant_id = 1;
+  // tenant_name is the name the invitation email shows: an operator's or a
+  // domain tenant's name, else its primary domain. It is empty for a tenant
+  // made through self-service CreateTenant, whose name its creator typed.
+  string tenant_name = 2;
+  // inviter_name and inviter_email are the inviting account's, empty once
+  // that account no longer exists.
+  string inviter_name = 3;
+  string inviter_email = 4;
+  // email is the invited address.
+  string email = 5;
+  string role = 6; // "member" | "admin" | "owner"
+  // expires_at_ms is when the invitation expires, in epoch milliseconds; 0
+  // for one that does not.
+  int64 expires_at_ms = 7;
+  // status is "pending", "expired", "accepted" or "revoked". A pending
+  // invitation past expires_at_ms reads "expired".
+  string status = 8;
+  // account_exists reports whether an account of the project holds email,
+  // as its email or as a recovery email. It is always false on a server with
+  // no mail provider: CreateTenantInvitation then hands the token to the
+  // inviter, so holding it does not show that the caller owns the address.
+  bool account_exists = 9;
+}
+
 message AcceptTenantInvitationRequest {
   string token = 1;
 }
@@ -4034,8 +4068,9 @@ service IdentityService {
   // for the value the domain has returns it unchanged and records nothing.
   rpc SetDomainJoin(SetDomainJoinRequest) returns (SetDomainJoinResponse);
 
-  // Tenant membership (redesign). Authenticated, project-scoped, and — except
-  // for AcceptTenantInvitation — gated on the caller being an owner/admin
+  // Tenant membership (redesign). Project-scoped, authenticated except for
+  // GetTenantInvitation, and — except for AcceptTenantInvitation and
+  // GetTenantInvitation — gated on the caller being an owner/admin
   // member of the target tenant. AcceptTenantInvitation is the redeemer's own
   // action: any authenticated caller may redeem a token, but only for an
   // invitation addressed to their own account email (compared in the
@@ -4059,6 +4094,23 @@ service IdentityService {
   // Available only on the postgres control-plane driver; the memory and
   // SQLite drivers return Unimplemented.
   rpc CreateTenantInvitation(CreateTenantInvitationRequest) returns (CreateTenantInvitationResponse);
+  // GetTenantInvitation describes the invitation a raw token names
+  // (GetTenantInvitationResponse) to whoever holds the token, with no
+  // session. It changes nothing: an expired invitation reads "expired" but
+  // is not marked so, and the token is not used up. A token no invitation
+  // of the resolved project has is NOT_FOUND and a blank one
+  // INVALID_ARGUMENT, so a caller without a real token learns nothing. Send
+  // it as a POST, so the token travels in the body rather than in a URL.
+  // Calls are limited per client IP (GATEWAY_RATE_LIMIT_VERIFY_PER_IP per
+  // GATEWAY_RATE_LIMIT_WINDOW_SECONDS, a budget of their own), one budget for
+  // the HTTP handler and the native gRPC registration: over it the call is
+  // refused before the RPC runs, over HTTP with status 429 and a Retry-After
+  // header of the window in seconds, which Connect clients surface as
+  // UNAVAILABLE, and over native gRPC with RESOURCE_EXHAUSTED and the same
+  // value in the "retry-after" response metadata. Available only on the
+  // postgres control-plane driver; the memory and SQLite drivers return
+  // Unimplemented.
+  rpc GetTenantInvitation(GetTenantInvitationRequest) returns (GetTenantInvitationResponse);
   rpc AcceptTenantInvitation(AcceptTenantInvitationRequest) returns (AcceptTenantInvitationResponse);
   rpc ListTenantInvitations(ListTenantInvitationsRequest) returns (ListTenantInvitationsResponse);
   // RevokeTenantInvitation withdraws a pending invitation: it becomes

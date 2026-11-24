@@ -503,6 +503,13 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitInvitationPerIP, 0),
 		},
 		{
+			// Reading an invitation by its token is unauthenticated: the
+			// token is long enough not to be guessed, and this bounds how
+			// fast one source can try.
+			PathPrefix: identityconnectgen.IdentityServiceGetTenantInvitationProcedure, Tag: "tenant_invitation_read",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitVerifyPerIP, 0),
+		},
+		{
 			// The completion half of a login: unauthenticated (it carries a
 			// purpose ticket, not a session) and it mints a token pair, so it
 			// is bound by the same per-IP budget as the login paths.

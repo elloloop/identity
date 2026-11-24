@@ -981,6 +981,10 @@ Explicit membership is added by **invitation** (`InviteUser` /
 operator's `AdminAddTenantAdmin` grant, or by an operator's
 `AdminRecoverTenantOwnership` — each writes a `tenant_memberships` row
 whose materialised `status` is authoritative over derived membership.
+The page a tenant invitation's email links to reads the invitation by its
+token with `GetTenantInvitation`, which needs no session and changes
+nothing, to say who invites the person where and whether their address
+already has an account.
 Where a tenant admin has turned joining on for a verified domain
 (`SetDomainJoin`), a person on that domain who is in no tenant of it (left
 in the domain's latent tenant when a different tenant verified the domain,

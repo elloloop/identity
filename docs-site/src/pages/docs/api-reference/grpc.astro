@@ -148,6 +148,15 @@ import { Code } from "astro-expressive-code/components";
     <tr><td><code>SetUserQuota</code></td><td>admin</td><td>Set <code>quota_bytes</code></td></tr>
   </table>
 
+  <h2>Tenant invitations</h2>
+  <table>
+    <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
+    <tr><td><code>CreateTenantInvitation</code></td><td>bearer (tenant owner or admin)</td><td>Invite an address to a tenant; the token travels in the email</td></tr>
+    <tr><td><code>GetTenantInvitation</code></td><td>none (the token)</td><td>Describe the invitation a token names, for its link's page; changes nothing</td></tr>
+    <tr><td><code>AcceptTenantInvitation</code></td><td>bearer (the invited address, verified)</td><td>Redeem the token and join the tenant</td></tr>
+    <tr><td><code>ListTenantInvitations</code></td><td>bearer (tenant owner or admin)</td><td>List a tenant's invitations</td></tr>
+  </table>
+
   <h2>Calling Connect-RPC over JSON</h2>
   <Code code={`# Generic shape — every RPC is a POST to /identity.v1.IdentityService/<Method>
 curl -sX POST http://localhost/identity.v1.IdentityService/PasswordLogin \\

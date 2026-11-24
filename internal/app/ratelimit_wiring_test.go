@@ -629,6 +629,30 @@ func TestBuildRateLimits_TenantInvitationLimited(t *testing.T) {
 	}
 }
 
+// GetTenantInvitation is unauthenticated, so it carries a per-IP budget of
+// its own, the verification budget's size: reading invitations spends no
+// other RPC's budget, and no other RPC spends its.
+func TestBuildRateLimits_TenantInvitationReadLimited(t *testing.T) {
+	const (
+		read   = "/identity.v1.IdentityService/GetTenantInvitation"
+		invite = "/identity.v1.IdentityService/CreateTenantInvitation"
+		policy = "/identity.v1.IdentityService/GetProjectEmailDelivery"
+	)
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitVerifyPerIP: 2, RateLimitInvitationPerIP: 2}
+	limits := buildRateLimits(cfg)
+	pl, ok := middleware.MatchPathLimit(limits, read)
+	require.True(t, ok, "GetTenantInvitation must carry a rate limit")
+	require.Equal(t, "tenant_invitation_read", pl.Tag)
+	require.Empty(t, pl.Header, "every call is counted")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, read, "198.51.100.11", 2)
+	assertQuotaExhausts(t, handler, invite, "198.51.100.11", 2)
+	assertQuotaExhausts(t, handler, policy, "198.51.100.11", 2)
+}
+
 // TestBuildRateLimits_TenantDomainLimited asserts CreateDomain and
 // VerifyDomain spend one per-IP budget, apart from every other RPC's, and
 // that a zero quota switches it off.

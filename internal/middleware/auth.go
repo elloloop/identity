@@ -83,6 +83,9 @@ var AuthExemptPaths = map[string]bool{
 	"/identity.v1.IdentityService/AcceptInvitation":      true,
 	"/identity.v1.IdentityService/RequestAdminHelp":      true,
 	"/identity.v1.IdentityService/VerifyTotp":            true,
+	// The holder of a tenant invitation's token reads it before they have
+	// an account; the token is the credential.
+	"/identity.v1.IdentityService/GetTenantInvitation": true,
 	// Email + reset flows are unauthenticated by design — the user is
 	// either anonymous (forgot password) or proving control of an
 	// inbox via a token rather than via a JWT.

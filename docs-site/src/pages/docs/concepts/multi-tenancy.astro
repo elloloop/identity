@@ -450,6 +450,36 @@ RestoreTenantMember(tenant_id, user_id)
     invitation links</a>). That page, which your app serves, signs the invitee
     in and calls <code>AcceptTenantInvitation</code> with the token.
   </p>
+  <p id="reading-an-invitation">
+    Before anyone signs in, the page can read the invitation with
+    <code>GetTenantInvitation(token)</code>, which needs no session and changes
+    nothing: an expired invitation reads <code>expired</code> without being
+    marked so, and the token is not used up. It answers the tenant's id and
+    name (the name the email shows, so empty for a self-service tenant), the
+    inviter's name and email, the invited address, the role, the expiry
+    (<code>expires_at_ms</code>), the status (<code>pending</code>,
+    <code>expired</code>, <code>accepted</code> or <code>revoked</code>) and
+    <code>account_exists</code>: whether an account of the project holds the
+    address, as its email or as a recovery email. A server with no mail
+    settings hands the token to the inviter, so it never answers
+    <code>account_exists</code> (always false): the answer would tell an
+    inviter whether any address they invite has an account. A token no
+    invitation of the project has is <code>NOT_FOUND</code>, and a blank one
+    <code>INVALID_ARGUMENT</code>. Calls are limited per client IP
+    (<code>GATEWAY_RATE_LIMIT_VERIFY_PER_IP</code>, default 20 per window, a
+    budget of their own, shared by HTTP and native gRPC). Send it as a POST,
+    so the token stays out of URLs; the response is
+    <code>Cache-Control: no-store</code>.
+  </p>
+  <Code
+    code={`GetTenantInvitation(token)
+  -> { tenant_id, tenant_name, inviter_name, inviter_email, email, role,
+       expires_at_ms, status, account_exists }
+  -> INVALID_ARGUMENT              # a blank token
+  -> NOT_FOUND                     # no invitation of the project has the token
+  -> UNIMPLEMENTED                 # the memory or SQLite driver`}
+    lang="bash"
+  />
   <p id="invited-sign-up">
     An invitee with no account yet signs up on that page. A project whose
     <code>access.mode</code> is <code>invite</code> refuses self-signup, so it

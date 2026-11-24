@@ -50,6 +50,7 @@ type grpcBridge struct {
 	machineLimits          map[string]middleware.PathLimit
 	operatorLimits         map[string]middleware.PathLimit
 	emailPolicyLimit       middleware.PathLimit
+	invitationReadLimit    middleware.PathLimit
 	reauthenticationLimits map[string]middleware.PathLimit
 	trustedProxies         []*net.IPNet
 	projectResolver        service.ProjectResolver
@@ -97,6 +98,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 		operatorLimits[procedure] = limit
 	}
 	emailPolicyLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceGetProjectEmailDeliveryProcedure)
+	invitationReadLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceGetTenantInvitationProcedure)
 	reauthenticationLimits := make(map[string]middleware.PathLimit, 4)
 	for _, procedure := range []string{identityv1connect.IdentityServiceBeginReauthenticationProcedure, identityv1connect.IdentityServiceVerifyReauthenticationProcedure, identityv1connect.IdentityServiceBeginPasskeyEligibilityVerificationProcedure, identityv1connect.IdentityServiceCompletePasskeyEligibilityVerificationProcedure} {
 		if limit, ok := middleware.MatchPathLimit(built.RateLimits, procedure); ok {
@@ -107,6 +109,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 		machineLimits:          machineLimits,
 		operatorLimits:         operatorLimits,
 		emailPolicyLimit:       emailPolicyLimit,
+		invitationReadLimit:    invitationReadLimit,
 		reauthenticationLimits: reauthenticationLimits,
 		h:                      built.ConnectHandler,
 		directoryLimits:        directoryLimits,
@@ -909,6 +912,16 @@ func (b *grpcBridge) GetLoginPolicy(ctx context.Context, in *identitypb.GetLogin
 
 func (b *grpcBridge) GetProjectConfig(ctx context.Context, in *identitypb.GetProjectConfigRequest) (*identitypb.GetProjectConfigResponse, error) {
 	return invoke(ctx, b, in, b.h.GetProjectConfig)
+}
+
+func (b *grpcBridge) GetTenantInvitation(ctx context.Context, in *identitypb.GetTenantInvitationRequest) (*identitypb.GetTenantInvitationResponse, error) {
+	if b.invitationReadLimit.Limiter == nil {
+		return nil, status.Error(codes.Unavailable, "tenant invitation reads unavailable")
+	}
+	if err := b.throttle(ctx, b.invitationReadLimit); err != nil {
+		return nil, err
+	}
+	return invoke(ctx, b, in, b.h.GetTenantInvitation)
 }
 
 func (b *grpcBridge) LinkIdentity(ctx context.Context, in *identitypb.LinkIdentityRequest) (*identitypb.LinkIdentityResponse, error) {

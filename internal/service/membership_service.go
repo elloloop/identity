@@ -647,10 +647,16 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 	if s.cfg != nil {
 		brand = resolveBranding(ctx, s.cfg, "")
 	}
+	// The invitation is already stored, so a tenant that cannot be read
+	// sends the email inviting to "a team" rather than none at all.
+	tenantName, err := s.tenantDisplayName(ctx, inv.ProjectID, inv.TenantID)
+	if err != nil {
+		logger.Warn("tenant_invitation_tenant_lookup_failed", zap.Error(err))
+	}
 	html, text, err := email.Render(email.TemplateTenantInvitation, brand.templateData(map[string]any{
 		"UserName":    invitationGreeting(inv.Email),
 		"InviterName": "A tenant administrator",
-		"TenantName":  s.tenantDisplayName(ctx, inv.ProjectID, inv.TenantID),
+		"TenantName":  tenantName,
 		"Role":        inv.Role,
 		"ExpiresIn":   formatExpiresIn(s.invitationTTL()),
 		"Link":        link,
@@ -688,21 +694,21 @@ func invitationLogFields(ctx context.Context, invitationID string) []zap.Field {
 	return fields
 }
 
-// tenantDisplayName is the tenant name an invitation email shows: the name
-// of an operator-made or auto-formed tenant, else its primary domain, or ""
-// (the email then invites to "a team"). A self-service tenant's name is
-// whatever its creator typed, unvetted, so it never appears: otherwise
-// anyone could create a tenant named after a company and have the service
-// send its invitations. Lookup failures are non-fatal and yield "".
-func (s *MembershipService) tenantDisplayName(ctx context.Context, projectID, tenantID string) string {
+// tenantDisplayName is the tenant name an invitation shows: the name of an
+// operator-made or auto-formed tenant, else its primary domain, or "" (the
+// email then invites to "a team"). A self-service tenant's name is whatever
+// its creator typed, unvetted, so it never appears: otherwise anyone could
+// create a tenant named after a company and have the service send its
+// invitations.
+func (s *MembershipService) tenantDisplayName(ctx context.Context, projectID, tenantID string) (string, error) {
 	t, err := s.tenants.GetTenant(ctx, projectID, tenantID)
 	if err != nil || t == nil || t.CreatedBy != "" {
-		return ""
+		return "", err
 	}
 	if n := strings.TrimSpace(t.Name); n != "" {
-		return n
+		return n, nil
 	}
-	return strings.TrimSpace(t.PrimaryDomain)
+	return strings.TrimSpace(t.PrimaryDomain), nil
 }
 
 // invitationTTL returns the configured invitation validity window, defaulting

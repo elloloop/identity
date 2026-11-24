@@ -1341,7 +1341,9 @@ type Config struct {
 	RateLimitLoginPerIP int
 	// RateLimitResetPerIP is the per-IP request cap per window on RequestPasswordReset.
 	RateLimitResetPerIP int
-	// RateLimitVerifyPerIP is the per-IP request cap per window on the verification endpoints.
+	// RateLimitVerifyPerIP is the per-IP request cap per window on the
+	// verification endpoints, and the size of two more budgets, each its own:
+	// GetProjectEmailDelivery's and GetTenantInvitation's.
 	RateLimitVerifyPerIP int
 	// RateLimitPasswordlessPerIP is the per-IP cap per window on
 	// RequestEmailLoginCode and on RequestMagicLink, each its own budget, and

@@ -153,6 +153,45 @@ func TestRegisterGRPC_LookupUsersSharesHTTPBudget(t *testing.T) {
 	}
 }
 
+// Reading a tenant invitation by its token draws on one budget per client IP
+// across HTTP and native gRPC, which is the read's own: an over-quota native
+// call is RESOURCE_EXHAUSTED with the window as its retry-after, before the
+// handler (UNIMPLEMENTED on the memory driver) runs, and a lookup still
+// spends its own budget afterwards.
+func TestRegisterGRPC_TenantInvitationReadSharesHTTPBudget(t *testing.T) {
+	t.Parallel()
+	srv := newTestServerWith(t, func(c *config.Config) {
+		c.RateLimitVerifyPerIP = 2
+		c.RateLimitDirectoryPerIP = 1
+		c.RateLimitWindowSeconds = 40
+	}, nil)
+	httpSrv := httptest.NewServer(srv.Handler())
+	t.Cleanup(httpSrv.Close)
+	httpClient := identityconnectgen.NewIdentityServiceClient(httpSrv.Client(), httpSrv.URL)
+	grpcClient := serveGRPC(t, srv)
+	req := &identitypb.GetTenantInvitationRequest{Token: "a-token"}
+
+	if _, err := httpClient.GetTenantInvitation(context.Background(), connect.NewRequest(req)); connect.CodeOf(err) != connect.CodeUnimplemented {
+		t.Fatalf("HTTP: %v, want Unimplemented from the handler", err)
+	}
+	if _, err := grpcClient.GetTenantInvitation(context.Background(), req); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("native: %v, want Unimplemented from the handler", err)
+	}
+	var header metadata.MD
+	if _, err := grpcClient.GetTenantInvitation(context.Background(), req, grpc.Header(&header)); status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("native over quota: %v, want ResourceExhausted", err)
+	}
+	if got := header.Get("retry-after"); len(got) != 1 || got[0] != "40" {
+		t.Fatalf("retry-after = %v, want [40]", got)
+	}
+	if _, err := httpClient.GetTenantInvitation(context.Background(), connect.NewRequest(req)); connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("HTTP over quota: %v, want the 429 (Unavailable)", err)
+	}
+	if _, err := grpcClient.LookupUsers(context.Background(), lookupRequest()); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("LookupUsers after the invitation read spent its budget: %v, want Unimplemented from the handler", err)
+	}
+}
+
 // tenantOperatorCalls calls each tenant operation over native gRPC, keyed by
 // its procedure, so a test can drive every one app.TenantOperatorProcedures
 // names.

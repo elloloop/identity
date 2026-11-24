@@ -200,3 +200,20 @@ func TestAuthMiddleware_CompleteRequiredPasswordChange_Exempt(t *testing.T) {
 	assert.True(t, called, "CompleteRequiredPasswordChange must be JWT-exempt")
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+// A tenant invitation's link is read by someone who may have no account yet:
+// the token is the credential, never a session.
+func TestAuthMiddleware_TenantInvitationRead_Exempt(t *testing.T) {
+	kr := testSigner(t)
+	var called bool
+	var userID string
+
+	handler := AuthMiddleware(kr, TokenTenants{}, "", false)(echoHandler(&called, &userID))
+	req := httptest.NewRequest(http.MethodPost, "/identity.v1.IdentityService/GetTenantInvitation", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.True(t, called, "GetTenantInvitation must be JWT-exempt")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, userID)
+}

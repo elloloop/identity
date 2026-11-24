@@ -1714,7 +1714,7 @@
     "type": "integer",
     "default": "20",
     "required": false,
-    "description": "is the per-IP request cap per window on the verification endpoints.",
+    "description": "is the per-IP request cap per window on the verification endpoints, and the size of two more budgets, each its own: GetProjectEmailDelivery's and GetTenantInvitation's.",
     "category": "Rate limiting",
     "anchor": "rate-limiting"
   },
