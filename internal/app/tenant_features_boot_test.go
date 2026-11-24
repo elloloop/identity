@@ -24,6 +24,7 @@ func governanceDeps(cfg *config.Config) Deps {
 		InvitationStore: &stubInvitationStore{},
 		MembershipStore: &stubMembershipStore{},
 		TenantStore:     &stubTenantStore{},
+		DomainStore:     &stubDomainStore{},
 	}
 }
 
@@ -55,6 +56,10 @@ func TestNew_RefusesTenantSwitchesWithoutTheirStores(t *testing.T) {
 			c.DefaultProjectAccessMode = "invite"
 			c.DefaultProjectAdmitTenantInvitations = true
 		},
+		"GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN": func(c *config.Config) {
+			c.DefaultProjectAccessMode = "invite"
+			c.DefaultProjectAdmitDomainJoin = true
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := newTestConfig()
@@ -80,6 +85,21 @@ func TestCheckTenantFeatures_EachStoreIsRequired(t *testing.T) {
 	}
 }
 
+// The default project's domain-join switch needs the domain and tenant
+// stores, and nothing else.
+func TestCheckTenantFeatures_DomainJoinNeedsTheDomainAndTenantStores(t *testing.T) {
+	cfg := &config.Config{DefaultProjectAdmitDomainJoin: true}
+	require.NoError(t, checkTenantFeatures(Deps{Config: cfg, DomainStore: &stubDomainStore{}, TenantStore: &stubTenantStore{}}, zap.NewNop()))
+	for name, deps := range map[string]Deps{
+		"no domain store": {Config: cfg, TenantStore: &stubTenantStore{}},
+		"no tenant store": {Config: cfg, DomainStore: &stubDomainStore{}},
+	} {
+		err := checkTenantFeatures(deps, zap.NewNop())
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), "GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN", name)
+	}
+}
+
 // The boot log says whether each tenant feature is served and, when it is,
 // under which TTL and limits, so an operator can confirm the effective values
 // without reading the environment.
@@ -90,6 +110,7 @@ func TestCheckTenantFeatures_LogsBootState(t *testing.T) {
 			TenantSelectionEnabled: true, TenantStatusCacheTTLSeconds: 45,
 			SelfServiceTenantsEnabled: true, SelfServiceTenantsMaxPerUser: 4, SelfServiceTenantsWindowSeconds: 600,
 			DefaultProjectAdmitTenantInvitations: true,
+			DefaultProjectAdmitDomainJoin:        true,
 		}
 		require.NoError(t, checkTenantFeatures(governanceDeps(cfg), zap.New(core)))
 
@@ -104,6 +125,8 @@ func TestCheckTenantFeatures_LogsBootState(t *testing.T) {
 		assert.Zero(t, logs.FilterMessage("self_service_tenants_disabled").Len())
 		assert.Equal(t, 1, logs.FilterMessage("invited_signup_enabled").Len())
 		assert.Zero(t, logs.FilterMessage("invited_signup_disabled").Len())
+		assert.Equal(t, 1, logs.FilterMessage("domain_join_signup_enabled").Len())
+		assert.Zero(t, logs.FilterMessage("domain_join_signup_disabled").Len())
 	})
 
 	t.Run("disabled", func(t *testing.T) {
@@ -125,6 +148,10 @@ func TestCheckTenantFeatures_LogsBootState(t *testing.T) {
 			assert.Equal(t, name == "postgres", invited[0].ContextMap()["other_projects_may_enable"], name)
 			assert.NotContains(t, invited[0].ContextMap(), "hint", "%s: no hint where the default project is not invite-only", name)
 			assert.Zero(t, logs.FilterMessage("invited_signup_enabled").Len(), name)
+			domainJoin := logs.FilterMessage("domain_join_signup_disabled").All()
+			require.Len(t, domainJoin, 1, name)
+			assert.Equal(t, name == "postgres", domainJoin[0].ContextMap()["other_projects_may_enable"], name)
+			assert.Zero(t, logs.FilterMessage("domain_join_signup_enabled").Len(), name)
 		}
 	})
 

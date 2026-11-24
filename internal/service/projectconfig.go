@@ -815,6 +815,13 @@ type ProjectAccessConfig struct {
 	// invitations qualify is OpenInvitationReader's contract. Valid with mode
 	// invite only; off by default.
 	AdmitTenantInvitations bool `json:"admit_tenant_invitations"`
+
+	// AdmitDomainJoin lets an invite project create the account of an address
+	// whose domain lets its people join a tenant (joinableDomainFor), once
+	// its owner proves the address as for AdmitTenantInvitations. The account
+	// joins no tenant until it calls JoinTenantByDomain. Valid with mode
+	// invite only; off by default.
+	AdmitDomainJoin bool `json:"admit_domain_join"`
 }
 
 // hasDenyLayer reports whether any deny rule is configured. It is what makes
@@ -885,6 +892,7 @@ func NewDefaultProjectAccess(cfg *config.Config) (ProjectAccessConfig, error) {
 		BlockedDomains:          cfg.DefaultProjectBlockedEmailDomainList(),
 		ExemptEmails:            cfg.DefaultProjectExemptEmailList(),
 		AdmitTenantInvitations:  cfg.DefaultProjectAdmitTenantInvitations,
+		AdmitDomainJoin:         cfg.DefaultProjectAdmitDomainJoin,
 	})
 }
 
@@ -937,6 +945,9 @@ func (a ProjectAccessConfig) validate() error {
 	}
 	if a.AdmitTenantInvitations && a.mode() != AccessModeInvite {
 		return fmt.Errorf("access: admit_tenant_invitations is only valid with mode %q (mode is %q)", AccessModeInvite, a.Mode)
+	}
+	if a.AdmitDomainJoin && a.mode() != AccessModeInvite {
+		return fmt.Errorf("access: admit_domain_join is only valid with mode %q (mode is %q)", AccessModeInvite, a.Mode)
 	}
 	return a.validateDenyLayer()
 }
@@ -1043,6 +1054,7 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 	}
 	out.BlockPublicEmailDomains = a.BlockPublicEmailDomains
 	out.AdmitTenantInvitations = a.AdmitTenantInvitations
+	out.AdmitDomainJoin = a.AdmitDomainJoin
 	if len(a.BlockedDomains) > 0 {
 		out.BlockedDomains = canonicalizeDomains(a.BlockedDomains)
 	}

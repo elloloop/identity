@@ -1535,7 +1535,12 @@ type AuthService struct {
 	// openInvitations finds the tenant invitation that lets an invite project
 	// with access.admit_tenant_invitations create an account for a proven
 	// address. nil admits no such account.
-	openInvitations    OpenInvitationReader
+	openInvitations OpenInvitationReader
+	// joinDomains and joinTenants answer whether an address's domain lets an
+	// invite project with access.admit_domain_join create its account
+	// (WithDomainJoin). Either nil admits no such account.
+	joinDomains        DomainStore
+	joinTenants        TenantStore
 	signer             jwt.Signer
 	passkeys           *passkeys.WebAuthnService
 	audit              *audit.Logger
@@ -1723,6 +1728,15 @@ func (s *AuthService) WithTenantSelection(r UserTenantReader) *AuthService {
 // for chaining. Without one no invitation admits an account.
 func (s *AuthService) WithOpenInvitations(r OpenInvitationReader) *AuthService {
 	s.openInvitations = r
+	return s
+}
+
+// WithDomainJoin wires the stores an invite project with
+// access.admit_domain_join reads at sign-up to find the tenant an address's
+// domain lets it join, and returns the service for chaining. Without both
+// no domain admits an account.
+func (s *AuthService) WithDomainJoin(domains DomainStore, tenants TenantStore) *AuthService {
+	s.joinDomains, s.joinTenants = domains, tenants
 	return s
 }
 

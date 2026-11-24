@@ -717,7 +717,9 @@ keeping them separate when reading a config.
 `closed`. Under `invite` an account is created only by an admin invitation,
 or, when the project sets `access.admit_tenant_invitations` (off by default),
 for an address a pending invitation from a tenant not made through
-self-service names, once its owner proves it (an OAuth provider that verified
+self-service names, or, when it sets `access.admit_domain_join` (off by
+default), for an address on a domain such a tenant has verified and opened to
+joining, once its owner proves it (an OAuth provider that verified
 it, or a redeemed emailed code or link). It **fails DENY**: an unset, empty, or unrecognized mode denies
 everyone, so a project nobody has explicitly opened cannot authenticate
 anyone. `allowed_emails` / `allowed_domains` belong to `allowlist` mode and
@@ -830,6 +832,22 @@ domain's, until it accepts, and outlives a later revocation. Postgres only:
 per-project `config_json` lives only in the Postgres control plane, and the
 default project's variable refuses to boot on memory or SQLite. See the
 multi-tenancy docs, "invited sign-up".
+
+**`access.admit_domain_join`** (`GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN`
+for the default project) is valid only with mode `invite` and off by default.
+It lets a proven sign-in create the account of an address whose domain a
+claimed tenant not made through self-service `CreateTenant` has verified and
+opened to joining (`SetDomainJoin`), and that is not a public mail domain: the
+rule `JoinTenantByDomain` applies, asked before the account exists. A
+self-service tenant admits nobody, since anyone could make one and verify a
+domain they own. The deny layer still refuses, `accounts.email_signup` must be
+`self`, a password or passkey sign-up stays refused, and no emailed code goes
+where redeeming it would be refused. The account joins no tenant, and forms
+none, until it calls `JoinTenantByDomain`; its admission is audited as
+`signup_admitted_by_domain_join`. Turning joining off later leaves the account,
+like any other, able to sign in under `invite`. Postgres only, as above: the
+default project's variable refuses to boot without the domain and tenant
+stores. See the multi-tenancy docs, "domain-join sign-up".
 
 ## Recovery emails
 

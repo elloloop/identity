@@ -1,5 +1,50 @@
 # Upgrade guide
 
+## Next — an invite project can let a domain open to joining create the account: `access.admit_domain_join` and `GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN` (off by default; no migration; additive audit event `signup_admitted_by_domain_join`; `AuthService.WithDomainJoin` (Go API))
+
+A tenant admin can let the people on a verified domain join it themselves
+(`SetDomainJoin`, `JoinTenantByDomain`), but an `invite` project refuses to
+create an account, so a person on that domain with no account could not get
+far enough to join. A project can now opt in to creating that account.
+
+- **Nothing changes until a project opts in.** `access.admit_domain_join` in a
+  project's `config_json` (or `GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN=true`
+  for the env-configured default project) is `false` by default and valid only
+  with `access.mode: invite`; with any other mode the config is rejected (the
+  default project's refuses to boot). It needs the Postgres driver, which alone
+  keeps tenant domains: the default project's switch without the domain and
+  tenant stores refuses to boot. The boot logs `domain_join_signup_enabled` or
+  `domain_join_signup_disabled`.
+- **What it admits.** With it on, a sign-in that proves the address, through an
+  OAuth provider that verified it or a redeemed emailed code or link, creates
+  the account when the address's domain is one `JoinTenantByDomain` would let
+  it join by: verified by a claimed tenant that has turned joining on, and not
+  a public mail domain. The tenant must **not** have been made through
+  self-service `CreateTenant` (`tenants.created_by` empty), as for
+  `access.admit_tenant_invitations`: anyone could make a tenant, verify a domain
+  they own and admit any number of accounts. An emailed code is sent to such
+  an address.
+- **What it still refuses.** A password sign-up, a passkey sign-up and the
+  anonymous-account upgrade; any address the deny layer refuses;
+  `accounts.email_signup` `admin` or `off`; and, for code and link sign-up,
+  `GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false`. In each case no code is sent to
+  such an address that has no account. Any other address is refused with the
+  same `PERMISSION_DENIED` as before, and the code-send decision runs the same
+  lookups for every address. A failed lookup refuses.
+- **The account joins nothing by itself.** It skips domain auto-formation, so
+  it forms no tenant and joins none, the domain's included, until it calls
+  `JoinTenantByDomain`. Turning joining off afterwards leaves an account that
+  can still sign in under `invite` (as every existing account can) but belongs
+  to no tenant; suspend or delete it to remove access.
+- **Both opt-ins on.** An address an open invitation names is admitted by the
+  invitation and recorded as such.
+- **Audit.** Once the account exists, each admission records
+  `signup_admitted_by_domain_join` (target the new account, the sign-in's IP
+  address and user agent; the project, tenant and domain ids and the address's
+  domain in the details) and logs `signup_admitted_by_domain_join`.
+- **Go API.** An embedder that builds `AuthService` itself calls
+  `WithDomainJoin` with its domain and tenant stores.
+
 ## Next — an owner or admin revokes a pending tenant invitation: `RevokeTenantInvitation` (additive RPC and audit event `tenant_invitation_revoked`; no migration; `InvitationStore.RevokeInvitation` (Go API))
 
 A tenant's owners and admins could invite and list invitations, but the only

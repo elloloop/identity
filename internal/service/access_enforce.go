@@ -20,21 +20,48 @@ func (s *AuthService) enforceProjectAccessSignup(ctx context.Context, email cano
 	return s.enforceProjectAccess(ctx, email, true)
 }
 
+// signupAdmission is what lets an invite project create the account of an
+// address its owner has just proven: an open tenant invitation, or a domain
+// that lets its people join a tenant. Exactly one is set.
+type signupAdmission struct {
+	invitation *TenantInvitation
+	joinDomain *Domain
+}
+
 // enforceProjectAccessProvenSignup gates an account creation for an address
 // whose owner has just proven they hold it (a provider that verified it, or a
-// redeemed emailed code or link). On an invite project with
-// access.admit_tenant_invitations, the address an open invitation names
-// (openInvitationFor) and the deny layer does not refuse is admitted, and the
-// invitation is returned for the caller to record once the account exists.
-// Every other address gets enforceProjectAccessSignup's answer.
-func (s *AuthService) enforceProjectAccessProvenSignup(ctx context.Context, email canonicalEmail) (*TenantInvitation, error) {
+// redeemed emailed code or link). On an invite project, an address
+// provenSignupAdmission admits and the deny layer does not refuse is let in,
+// and the admission is returned for the caller to record once the account
+// exists. Every other address gets enforceProjectAccessSignup's answer.
+func (s *AuthService) enforceProjectAccessProvenSignup(ctx context.Context, email canonicalEmail) (*signupAdmission, error) {
 	scope := ProjectScopeFromContext(ctx)
 	if scope != nil && scope.Access.mode() == AccessModeInvite && !scope.Access.denies(s.cfg, email) {
-		if inv := s.openInvitationFor(ctx, scope, email); inv != nil {
-			return inv, nil
+		if admission := s.provenSignupAdmission(ctx, scope, email); admission != nil {
+			return admission, nil
 		}
 	}
 	return nil, s.enforceProjectAccessSignup(ctx, email)
+}
+
+// provenSignupAdmission is what lets an invite project create email's account
+// once its owner proves the address, or nil: an open invitation
+// (openInvitationFor), else a domain that lets its people join
+// (joinableDomainFor). Sending a code and redeeming it ask this one question,
+// so a code goes only where redeeming it creates the account. Both lookups
+// run for every address, so the time the decision takes does not tell which,
+// if either, admits it.
+func (s *AuthService) provenSignupAdmission(ctx context.Context, scope *ProjectScope, email canonicalEmail) *signupAdmission {
+	inv := s.openInvitationFor(ctx, scope, email)
+	joinDomain := s.joinableDomainFor(ctx, scope, email)
+	switch {
+	case inv != nil:
+		return &signupAdmission{invitation: inv}
+	case joinDomain != nil:
+		return &signupAdmission{joinDomain: joinDomain}
+	default:
+		return nil
+	}
 }
 
 // recordInvitedSignup logs and audits an account an invitation admitted, once
@@ -61,13 +88,35 @@ func (s *AuthService) recordInvitedSignup(ctx context.Context, user *User, inv *
 		}))
 }
 
+// recordDomainJoinSignup logs and audits an account a domain open to joining
+// admitted, once it exists.
+func (s *AuthService) recordDomainJoinSignup(ctx context.Context, user *User, joinDomain *Domain, ipAddr, userAgent string) {
+	projectID := s.projectID(ctx)
+	domain := emailDomain(user.Email)
+	s.logger.Info("signup_admitted_by_domain_join",
+		zap.String("project_id", projectID),
+		zap.String("user_id", user.ID),
+		zap.String("tenant_id", joinDomain.TenantID),
+		zap.String("domain_id", joinDomain.ID),
+		zap.String("email_domain", domain))
+	s.audit.Log(ctx, audit.EventSignupAdmittedByDomainJoin,
+		audit.WithTarget(user.ID),
+		audit.WithIP(ipAddr),
+		audit.WithUserAgent(userAgent),
+		audit.WithSuccess(true),
+		audit.WithDetails(map[string]any{
+			"project_id":   projectID,
+			"tenant_id":    joinDomain.TenantID,
+			"domain_id":    joinDomain.ID,
+			"email_domain": domain,
+		}))
+}
+
 // openInvitationFor is the open tenant invitation that lets an invite project
 // create email's account, or nil: the project opted in
 // (access.admit_tenant_invitations), lets people create their own email
 // accounts (accounts.email_signup self), and OpenInvitationReader finds one.
-// Sending a code and redeeming it ask the same question, so a code goes only
-// where redeeming it creates the account. A lookup error is "none", which
-// fails closed.
+// A lookup error is "none", which fails closed.
 func (s *AuthService) openInvitationFor(ctx context.Context, scope *ProjectScope, email canonicalEmail) *TenantInvitation {
 	if s.openInvitations == nil || !scope.Access.AdmitTenantInvitations || scope.Accounts.emailSignup() != SignupSelf {
 		return nil
@@ -82,6 +131,35 @@ func (s *AuthService) openInvitationFor(ctx context.Context, scope *ProjectScope
 		return nil
 	}
 	return inv
+}
+
+// joinableDomainFor is the domain that lets an invite project create email's
+// account, or nil: the project opted in (access.admit_domain_join), lets
+// people create their own email accounts (accounts.email_signup self), and
+// the address's domain is one JoinTenantByDomain would let it join by
+// (joinableTenantForDomain), of a tenant not made through self-service
+// CreateTenant (its CreatedBy is empty). Anyone may make a self-service
+// tenant and verify a domain they own, so such a tenant admits nobody, as
+// for an invitation (OpenInvitationReader). A lookup error is "none", which
+// fails closed.
+func (s *AuthService) joinableDomainFor(ctx context.Context, scope *ProjectScope, email canonicalEmail) *Domain {
+	if s.joinDomains == nil || s.joinTenants == nil || !scope.Access.AdmitDomainJoin || scope.Accounts.emailSignup() != SignupSelf {
+		return nil
+	}
+	projectID := s.projectID(ctx)
+	domain := emailDomain(FoldEmail(string(email)))
+	t, joinDomain, err := joinableTenantForDomain(ctx, s.joinDomains, s.joinTenants, s.cfg, projectID, domain)
+	if err != nil {
+		s.logger.Warn("signup_domain_join_lookup_failed",
+			zap.String("project_id", projectID),
+			zap.String("email_domain", domain),
+			zap.Error(err))
+		return nil
+	}
+	if t == nil || t.CreatedBy != "" {
+		return nil
+	}
+	return joinDomain
 }
 
 // enforceProjectAccessLogin gates a LOGIN or invitation acceptance by an
@@ -254,8 +332,8 @@ func (s *AuthService) enforceEmailSelfSignup(ctx context.Context, scope *Project
 // It gates spam/SMTP-abuse — a closed or off-list allowlist project must not
 // emit credential mail to arbitrary addresses. Invite mode sends to an
 // already-provisioned user, and, while passwordless sign-up is on, to an
-// address whose redemption would create the account (openInvitationFor); a code
-// to anyone else would be undeliverable spam, since redemption refuses it.
+// address whose redemption would create the account (provenSignupAdmission); a
+// code to anyone else would be undeliverable spam, since redemption refuses it.
 //
 // It fails CLOSED: no permit → no send, and a user-existence lookup error also
 // suppresses the send.
@@ -280,11 +358,11 @@ func (s *AuthService) accessAllowsCodeSend(ctx context.Context, email canonicalE
 		// under — otherwise a real user requesting with non-canonical casing/dots
 		// would miss and have their OTP silently dropped. The caller canonicalized
 		// once; the type carries that guarantee here. Mirrors the allowlist branch.
-		// Both lookups run for every address, so the time the decision takes
-		// does not tell an account from an invitation from neither.
+		// Every lookup runs for every address, so the time the decision takes
+		// does not tell an account from an admission from neither.
 		exists := s.userExists(ctx, email)
-		invited := s.cfg.PasswordlessSignupEnabled && s.openInvitationFor(ctx, scope, email) != nil
-		return exists || invited
+		admitted := s.cfg.PasswordlessSignupEnabled && s.provenSignupAdmission(ctx, scope, email) != nil
+		return exists || admitted
 	default:
 		// AccessModeClosed and any unset/unrecognized mode: never send.
 		return false

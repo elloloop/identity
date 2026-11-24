@@ -82,6 +82,7 @@
   "recovery_email_sign_in",
   "scim_auth_failed",
   "session_revoked",
+  "signup_admitted_by_domain_join",
   "signup_admitted_by_invitation",
   "teammate_access_issued",
   "teammate_key_manager_refused",

@@ -855,6 +855,7 @@ func New(deps Deps) (*Built, error) {
 		// or the driver has no governance stores (memory, SQLite).
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
+		WithDomainJoin(deps.DomainStore, deps.TenantStore).
 		WithTemplateMessages(senders.templates).
 		WithEventPublisher(eventPublisher).
 		WithActiveProjects(deps.ActiveProjects).
@@ -1017,7 +1018,7 @@ func New(deps Deps) (*Built, error) {
 		// died holding only GATEWAY_* variables.
 		return nil, fmt.Errorf(
 			"default project access config (check GATEWAY_DEFAULT_PROJECT_ACCESS_MODE, "+
-				"GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS, "+
+				"GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS, GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN, "+
 				"GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS, GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS, "+
@@ -1333,6 +1334,14 @@ func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
 		logger.Info("invited_signup_disabled",
 			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)))
 	}
+	if cfg.DefaultProjectAdmitDomainJoin && !domainJoinServed(deps) {
+		return errors.New("app: GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN needs the domain and tenant stores, which only the postgres driver provides")
+	}
+	if cfg.DefaultProjectAdmitDomainJoin {
+		logger.Info("domain_join_signup_enabled")
+	} else {
+		logger.Info("domain_join_signup_disabled", zap.Bool("other_projects_may_enable", domainJoinServed(deps)))
+	}
 	if cfg.SelfServiceTenantsEnabled {
 		logger.Info("self_service_tenants_enabled",
 			zap.Int("max_per_user", cfg.SelfServiceTenantsLimit()),
@@ -1358,6 +1367,12 @@ func tenantSelectionServed(deps Deps) bool {
 // CreateTenant.
 func membershipServiceServed(deps Deps) bool {
 	return deps.InvitationStore != nil && deps.MembershipStore != nil && deps.TenantStore != nil
+}
+
+// domainJoinServed reports whether the build has what access.admit_domain_join
+// reads at sign-up: the domain and tenant stores.
+func domainJoinServed(deps Deps) bool {
+	return deps.DomainStore != nil && deps.TenantStore != nil
 }
 
 // tenantSelectionReader is what RefreshToken resolves a selected tenant
