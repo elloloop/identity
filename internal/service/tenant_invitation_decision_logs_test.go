@@ -86,6 +86,23 @@ func TestTenantInvitationDecisionLogs_Read(t *testing.T) {
 		line := decisionLine(t, logs, "tenant_invitation_read")
 		require.Equal(t, InvitationStatusRevoked, line["status"])
 		require.NotContains(t, line, "account_exists", "what is not answered is not logged")
+		require.Equal(t, "mail_not_delivered", line["account_exists_withheld"])
+	})
+	t.Run("account_unanswered_for_a_token_that_left_the_email", func(t *testing.T) {
+		f := newInvitationLookupFixture(true)
+		logger, logs := observedLogger()
+		f.svc.logger = logger
+		token := f.seed("inv-1", InvitationStatusPending, time.Hour)
+		f.invitations.byID[f.invitations.key(mTestProject, "inv-1")].TokenOnlyInEmail = false
+		seedUser(f.accounts, mInvitee, "", StatusActive)
+
+		_, err := f.svc.GetTenantInvitation(withProject(mTestProject), token)
+		require.NoError(t, err)
+		require.Equal(t, map[string]any{
+			"project_id": mTestProject, "tenant_id": mTestTenant, "invitation_id": "inv-1",
+			"status": InvitationStatusPending, "account_exists_withheld": "token_outside_email",
+		}, decisionLine(t, logs, "tenant_invitation_read"))
+		requireNothingPersonal(t, logs, mInvitee, token)
 	})
 	t.Run("not_found", func(t *testing.T) {
 		f := newInvitationLookupFixture(true)
@@ -125,6 +142,12 @@ func TestTenantInvitationDecisionLogs_SignUp(t *testing.T) {
 			t.Helper()
 			f.pendingInvitation()
 			return inviteOnlyScope(t), randomToken(invitationTokenBytes)
+		}},
+		{reason: "token_outside_email", setup: func(t *testing.T, f *invitationSignupFixture) (context.Context, string) {
+			t.Helper()
+			token := f.pendingInvitation()
+			f.handOut("inv-1")
+			return inviteOnlyScope(t), token
 		}},
 		{reason: "invitation_closed", extra: map[string]any{"status": InvitationStatusRevoked}, setup: func(t *testing.T, f *invitationSignupFixture) (context.Context, string) {
 			t.Helper()
@@ -185,7 +208,7 @@ func TestTenantInvitationDecisionLogs_SignUp(t *testing.T) {
 		f.invitations.byID[f.invitations.key(mTestProject, "inv-1")] = &TenantInvitation{
 			ID: "inv-1", ProjectID: mTestProject, TenantID: mTestTenant, TokenHash: sha256Hex(raw),
 			Email: "ravi@gmail.com", InvitedBy: mAdminID, Role: RoleMember, Status: InvitationStatusPending,
-			ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli(),
+			ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli(), TokenOnlyInEmail: true,
 		}
 		ctx := invitationSignupScope(t, `{"access":{"mode":"invite","admit_tenant_invitations":true,"block_public_email_domains":true}}`)
 

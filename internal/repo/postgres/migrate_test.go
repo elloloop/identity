@@ -245,6 +245,49 @@ func hasColumn(ctx context.Context, t *testing.T, conn *pgx.Conn, table, column 
 	return n == 1
 }
 
+// tokenOnlyInEmailMigrationVersion is the migration that records where an
+// invitation's token went (tenant_invitations.token_only_in_email).
+const tokenOnlyInEmailMigrationVersion = 67
+
+// TestMigrate_0067InvitationsStoredBeforeItLeftTheEmail: where the token of an
+// invitation stored before 0067 went is unknown, so it comes through reading
+// token_only_in_email false; the down migration drops the column and keeps
+// the invitation.
+func TestMigrate_0067InvitationsStoredBeforeItLeftTheEmail(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping real-postgres 0067 invitation test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	scratch := createScratchDatabase(ctx, t, dsn)
+	m, err := newMigrator(scratch)
+	require.NoError(t, err)
+	defer closeMigrator(m)
+	require.NoError(t, m.Migrate(uint(tokenOnlyInEmailMigrationVersion-1)))
+
+	conn, err := pgx.Connect(ctx, scratch)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close(ctx) }()
+	_, err = conn.Exec(ctx, `
+		INSERT INTO projects (id, storage_scope_id, created_at_ms, updated_at_ms) VALUES ('p', 'scope-p', 0, 0);
+		INSERT INTO tenants (id, project_id, created_at_ms, updated_at_ms) VALUES ('t', 'p', 0, 0);
+		INSERT INTO tenant_invitations (id, project_id, tenant_id, token_hash, email, status, expires_at_ms, created_at_ms)
+		VALUES ('inv', 'p', 't', 'h', 'zoe@corp.com', 'pending', 9999999999999, 0)`)
+	require.NoError(t, err)
+
+	require.NoError(t, m.Migrate(uint(tokenOnlyInEmailMigrationVersion)))
+	var onlyInEmail bool
+	require.NoError(t, conn.QueryRow(ctx, `SELECT token_only_in_email FROM tenant_invitations WHERE id = 'inv'`).Scan(&onlyInEmail))
+	require.False(t, onlyInEmail)
+
+	require.NoError(t, m.Migrate(uint(tokenOnlyInEmailMigrationVersion-1)))
+	require.False(t, hasColumn(ctx, t, conn, "tenant_invitations", "token_only_in_email"))
+	var kept int
+	require.NoError(t, conn.QueryRow(ctx, `SELECT count(*) FROM tenant_invitations WHERE id = 'inv'`).Scan(&kept))
+	require.Equal(t, 1, kept)
+}
+
 // TestMigrate_0034CanonicalizesPendingInvitations: pending invitations stored
 // before the service canonicalized carry the address as typed. 0034 rewrites
 // each all-ASCII one in exactly the form emailaddr.Canonicalize gives,

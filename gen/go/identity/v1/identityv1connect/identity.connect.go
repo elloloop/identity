@@ -904,7 +904,10 @@ type IdentityServiceClient interface {
 	// is not marked so, and the token is not used up. A token no invitation
 	// of the resolved project has is NOT_FOUND and a blank one
 	// INVALID_ARGUMENT, so a caller without a real token learns nothing. Send
-	// it as a POST, so the token travels in the body rather than in a URL.
+	// it as a POST, so this call does not put the token in a URL. The emailed
+	// link does: the page it opens should send Referrer-Policy: no-referrer,
+	// take the token out of its URL once it has read it, and load no
+	// third-party resources.
 	// Calls are limited per client IP (GATEWAY_RATE_LIMIT_VERIFY_PER_IP per
 	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, a budget of their own), one budget for
 	// the HTTP handler and the native gRPC registration: over it the call is
@@ -929,7 +932,11 @@ type IdentityServiceClient interface {
 	// invitation create an account (access.mode invite with
 	// access.admit_tenant_invitations, and accounts.email_signup self), or
 	// the server has no mail provider, which hands an invitation's token to
-	// its inviter; NOT_FOUND for a token no invitation of the project has;
+	// its inviter, and, whatever the server's mail settings now, for an
+	// invitation created while it had none, or before the server recorded
+	// where an invitation's token went (schema 67), as its token may have
+	// gone to the inviter; NOT_FOUND for a token no invitation of the project
+	// has;
 	// FAILED_PRECONDITION for an invitation that was accepted, was revoked or
 	// has expired; PERMISSION_DENIED for one that cannot create an account
 	// (its tenant was made through self-service CreateTenant or cannot take
@@ -945,8 +952,12 @@ type IdentityServiceClient interface {
 	// Once the account exists its session is refused as any sign-in's is: for
 	// a missing required date of birth, FAILED_PRECONDITION with
 	// DOBRequiredDetails. Calls share PasswordSignup's per-IP budget
-	// (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS)
-	// on the HTTP handler only. Available only on the postgres control-plane
+	// (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS),
+	// one budget for the HTTP handler and the native gRPC registration: over
+	// it the call is refused before the RPC runs, over HTTP with status 429
+	// and a Retry-After header, which Connect clients surface as UNAVAILABLE,
+	// and over native gRPC with RESOURCE_EXHAUSTED and "retry-after"
+	// metadata. Available only on the postgres control-plane
 	// driver; the memory and SQLite drivers return Unimplemented.
 	SignUpWithTenantInvitation(context.Context, *connect.Request[v1.SignUpWithTenantInvitationRequest]) (*connect.Response[v1.SignUpWithTenantInvitationResponse], error)
 	AcceptTenantInvitation(context.Context, *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error)
@@ -3977,7 +3988,10 @@ type IdentityServiceHandler interface {
 	// is not marked so, and the token is not used up. A token no invitation
 	// of the resolved project has is NOT_FOUND and a blank one
 	// INVALID_ARGUMENT, so a caller without a real token learns nothing. Send
-	// it as a POST, so the token travels in the body rather than in a URL.
+	// it as a POST, so this call does not put the token in a URL. The emailed
+	// link does: the page it opens should send Referrer-Policy: no-referrer,
+	// take the token out of its URL once it has read it, and load no
+	// third-party resources.
 	// Calls are limited per client IP (GATEWAY_RATE_LIMIT_VERIFY_PER_IP per
 	// GATEWAY_RATE_LIMIT_WINDOW_SECONDS, a budget of their own), one budget for
 	// the HTTP handler and the native gRPC registration: over it the call is
@@ -4002,7 +4016,11 @@ type IdentityServiceHandler interface {
 	// invitation create an account (access.mode invite with
 	// access.admit_tenant_invitations, and accounts.email_signup self), or
 	// the server has no mail provider, which hands an invitation's token to
-	// its inviter; NOT_FOUND for a token no invitation of the project has;
+	// its inviter, and, whatever the server's mail settings now, for an
+	// invitation created while it had none, or before the server recorded
+	// where an invitation's token went (schema 67), as its token may have
+	// gone to the inviter; NOT_FOUND for a token no invitation of the project
+	// has;
 	// FAILED_PRECONDITION for an invitation that was accepted, was revoked or
 	// has expired; PERMISSION_DENIED for one that cannot create an account
 	// (its tenant was made through self-service CreateTenant or cannot take
@@ -4018,8 +4036,12 @@ type IdentityServiceHandler interface {
 	// Once the account exists its session is refused as any sign-in's is: for
 	// a missing required date of birth, FAILED_PRECONDITION with
 	// DOBRequiredDetails. Calls share PasswordSignup's per-IP budget
-	// (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS)
-	// on the HTTP handler only. Available only on the postgres control-plane
+	// (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS),
+	// one budget for the HTTP handler and the native gRPC registration: over
+	// it the call is refused before the RPC runs, over HTTP with status 429
+	// and a Retry-After header, which Connect clients surface as UNAVAILABLE,
+	// and over native gRPC with RESOURCE_EXHAUSTED and "retry-after"
+	// metadata. Available only on the postgres control-plane
 	// driver; the memory and SQLite drivers return Unimplemented.
 	SignUpWithTenantInvitation(context.Context, *connect.Request[v1.SignUpWithTenantInvitationRequest]) (*connect.Response[v1.SignUpWithTenantInvitationResponse], error)
 	AcceptTenantInvitation(context.Context, *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error)

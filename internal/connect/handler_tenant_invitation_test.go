@@ -25,14 +25,15 @@ func invitationTokenHash(raw string) string {
 
 // invitationReadServer serves a MembershipService whose mailer delivers, over
 // an operator's tenant "Acme" holding one pending invitation to
-// invitee@example.com from its owner, whose address already has an account.
+// invitee@example.com from its owner, emailed, whose address already has an
+// account.
 func invitationReadServer(t *testing.T) *membershipServer {
 	t.Helper()
 	invitations := newConnectInvitationStore()
 	inv := &service.TenantInvitation{
 		ID: "inv-1", ProjectID: testProjectID, TenantID: "tenant-1", TokenHash: invitationTokenHash(invitationLinkToken),
 		Email: "invitee@example.com", InvitedBy: "owner-1", Role: service.RoleMember,
-		Status: service.InvitationStatusPending, ExpiresAtMs: 4_102_444_800_000,
+		Status: service.InvitationStatusPending, ExpiresAtMs: 4_102_444_800_000, TokenOnlyInEmail: true,
 	}
 	invitations.byHash[inv.TokenHash], invitations.byID[inv.ID] = inv, inv
 	users := &connectUserDirectory{byID: map[string]*service.User{

@@ -233,14 +233,15 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	expiresAtMs := now.Add(s.invitationTTL()).UnixMilli()
 
 	inv := &TenantInvitation{
-		ProjectID:   projectID,
-		TenantID:    tenantID,
-		TokenHash:   sha256Hex(rawToken),
-		Email:       normEmail,
-		InvitedBy:   callerID,
-		Role:        role,
-		ExpiresAtMs: expiresAtMs,
-		CreatedAtMs: now.UnixMilli(),
+		ProjectID:        projectID,
+		TenantID:         tenantID,
+		TokenHash:        sha256Hex(rawToken),
+		Email:            normEmail,
+		InvitedBy:        callerID,
+		Role:             role,
+		ExpiresAtMs:      expiresAtMs,
+		CreatedAtMs:      now.UnixMilli(),
+		TokenOnlyInEmail: s.mailerDelivers,
 	}
 	id, err := s.invitations.CreateInvitation(ctx, inv, s.invitationLimits(now))
 	if err != nil {
@@ -259,10 +260,12 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	sendErr := s.sendInvitationEmail(ctx, inv, rawToken)
 	out := &CreatedInvitation{Invitation: inv}
 	switch {
-	case !s.mailerDelivers:
+	case !inv.TokenOnlyInEmail:
 		// No delivery channel: surface the token so the caller can hand it
-		// over out-of-band. The token never accompanies a configured mailer,
-		// even one that failed, as it belongs in the recipient's inbox.
+		// over out-of-band; the stored invitation says so, and its token
+		// never proves the address. The token never accompanies a configured
+		// mailer, even one that failed, as it belongs in the recipient's
+		// inbox.
 		out.RawToken = rawToken
 		out.EmailStatus = EmailNotConfigured
 	case sendErr != nil:

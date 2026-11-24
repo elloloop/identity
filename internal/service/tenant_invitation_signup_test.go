@@ -61,8 +61,8 @@ func inviteOnlyScope(t *testing.T) context.Context {
 }
 
 // invite stores an invitation of tenantID to signupInvitee in status,
-// expiring expiresIn from now, created createdAgo before now, and returns the
-// raw token its email would carry.
+// expiring expiresIn from now, created createdAgo before now, whose token
+// went only into its email, and returns the raw token that email would carry.
 func (f *invitationSignupFixture) invite(id, tenantID, status string, expiresIn, createdAgo time.Duration) string {
 	raw := randomToken(invitationTokenBytes)
 	now := time.Now()
@@ -70,8 +70,16 @@ func (f *invitationSignupFixture) invite(id, tenantID, status string, expiresIn,
 		ID: id, ProjectID: mTestProject, TenantID: tenantID, TokenHash: sha256Hex(raw),
 		Email: signupInvitee, InvitedBy: mAdminID, Role: RoleMember, Status: status,
 		ExpiresAtMs: now.Add(expiresIn).UnixMilli(), CreatedAtMs: now.Add(-createdAgo).UnixMilli(),
+		TokenOnlyInEmail: true,
 	}
 	return raw
+}
+
+// handOut records that invitation id's token did not go only into its
+// email, as for one created without a mailer that delivers, or stored before
+// that was recorded.
+func (f *invitationSignupFixture) handOut(id string) {
+	f.invitations.byID[f.invitations.key(mTestProject, id)].TokenOnlyInEmail = false
 }
 
 func (f *invitationSignupFixture) pendingInvitation() string {
@@ -201,7 +209,7 @@ func TestSignUpWithTenantInvitation_UnknownTokenIsNotFound(t *testing.T) {
 	f.invitations.byID[f.invitations.key("proj-2", "inv-other")] = &TenantInvitation{
 		ID: "inv-other", ProjectID: "proj-2", TenantID: mTestTenant, TokenHash: sha256Hex(other),
 		Email: signupInvitee, InvitedBy: mAdminID, Role: RoleMember, Status: InvitationStatusPending,
-		ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli(),
+		ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli(), TokenOnlyInEmail: true,
 	}
 	_, err = f.signUp(ctx, other, signupName, signupPassword)
 	require.ErrorIs(t, err, ErrNotFound, "another project's invitation is not this project's")
@@ -363,6 +371,49 @@ func TestSignUpWithTenantInvitation_RefusedWhereMailIsNotDelivered(t *testing.T)
 	require.Equal(t, InvitationStatusPending, f.status("inv-1"))
 }
 
+// A token that did not go only into its invitation's email, handed to the
+// inviter by a server without mail or stored before that was recorded,
+// proves nothing about the address: it creates no account though the mailer
+// delivers now, with the refusal a server without mail gives, whatever the
+// invitation's status. The invitee still accepts it after a sign-in that
+// proves the address.
+func TestSignUpWithTenantInvitation_RefusedWhenTheTokenLeftTheEmail(t *testing.T) {
+	for name, status := range map[string]string{
+		"pending": InvitationStatusPending,
+		"revoked": InvitationStatusRevoked,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newInvitationSignupFixture(t)
+			token := f.invite("inv-1", mTestTenant, status, time.Hour, time.Minute)
+			f.handOut("inv-1")
+
+			_, err := f.signUp(inviteOnlyScope(t), token, signupName, signupPassword)
+			require.ErrorIs(t, err, ErrInvitationSignupUnavailable)
+			f.requireNoAccount(t)
+			require.Equal(t, status, f.status("inv-1"), "a refusal records nothing on the invitation")
+		})
+	}
+
+	t.Run("accepted_after_a_proven_sign_in", func(t *testing.T) {
+		f := newInvitationSignupFixture(t)
+		token := f.pendingInvitation()
+		f.handOut("inv-1")
+		ctx := inviteOnlyScope(t)
+		_, err := f.signUp(ctx, token, signupName, signupPassword)
+		require.ErrorIs(t, err, ErrInvitationSignupUnavailable)
+
+		id, err := f.repo.CreateUser(ctx, &User{Email: signupInvitee, Status: StatusActive, EmailVerified: true})
+		require.NoError(t, err)
+		tenants := newFakeTenantStore()
+		tenants.ensure(mTestProject, mTestTenant)
+		members := NewMembershipService(f.invitations, newFakeMembershipStore(), tenants, RepositoryUserDirectory(f.repo), &recordingMailer{}, true, &config.Config{}, nil)
+		m, err := members.AcceptTenantInvitation(ctx, id, token)
+		require.NoError(t, err)
+		require.Equal(t, mTestTenant, m.TenantID)
+		require.Equal(t, InvitationStatusAccepted, f.status("inv-1"))
+	})
+}
+
 // The token's own invitation must be one that may create an account: an
 // older invitation still counts while a newer one is open, and another open
 // invitation to the address does not stand in for one that is not.
@@ -396,7 +447,7 @@ func TestSignUpWithTenantInvitation_DenyLayerRefusesTheAddress(t *testing.T) {
 	f.invitations.byID[f.invitations.key(mTestProject, "inv-public")] = &TenantInvitation{
 		ID: "inv-public", ProjectID: mTestProject, TenantID: mTestTenant, TokenHash: sha256Hex(raw),
 		Email: "ravi@gmail.com", InvitedBy: mAdminID, Role: RoleMember, Status: InvitationStatusPending,
-		ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli(),
+		ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli(), TokenOnlyInEmail: true,
 	}
 	ctx := invitationSignupScope(t, `{"access":{"mode":"invite","admit_tenant_invitations":true,"block_public_email_domains":true}}`)
 

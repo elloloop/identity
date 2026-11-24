@@ -941,13 +941,14 @@ func NewInvitationStore(r *pgRepository) *InvitationStore {
 
 const invitationColumns = `
 	id, project_id, tenant_id, token_hash, email, invited_by, role, status,
-	expires_at_ms, accepted_at_ms, created_at_ms`
+	expires_at_ms, accepted_at_ms, created_at_ms, token_only_in_email`
 
 func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 	var v service.TenantInvitation
 	if err := row.Scan(
 		&v.ID, &v.ProjectID, &v.TenantID, &v.TokenHash, &v.Email, &v.InvitedBy,
 		&v.Role, &v.Status, &v.ExpiresAtMs, &v.AcceptedAtMs, &v.CreatedAtMs,
+		&v.TokenOnlyInEmail,
 	); err != nil {
 		return nil, err
 	}
@@ -1103,10 +1104,10 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 		ctx, `
 		INSERT INTO tenant_invitations (
 			id, project_id, tenant_id, token_hash, email, invited_by, role,
-			status, expires_at_ms, accepted_at_ms, created_at_ms
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, 0, $9)`,
+			status, expires_at_ms, accepted_at_ms, created_at_ms, token_only_in_email
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, 0, $9, $10)`,
 		id, inv.ProjectID, inv.TenantID, inv.TokenHash, inv.Email, inv.InvitedBy,
-		role, inv.ExpiresAtMs, inv.CreatedAtMs,
+		role, inv.ExpiresAtMs, inv.CreatedAtMs, inv.TokenOnlyInEmail,
 	); err != nil {
 		return "", wrapPgErr("CreateInvitation(insert)", err)
 	}
@@ -1123,7 +1124,7 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 // openInvitationQuery selects the open invitations of project $1 at $3, as
 // service.OpenInvitationReader counts one open; the caller appends which ($2).
 const openInvitationQuery = `SELECT i.id, i.project_id, i.tenant_id, i.token_hash, i.email, i.invited_by, i.role, i.status,
-		i.expires_at_ms, i.accepted_at_ms, i.created_at_ms
+		i.expires_at_ms, i.accepted_at_ms, i.created_at_ms, i.token_only_in_email
 		FROM tenant_invitations i
 		JOIN tenants t ON t.project_id = i.project_id AND t.id = i.tenant_id
 		JOIN tenant_memberships m ON m.project_id = i.project_id AND m.tenant_id = i.tenant_id

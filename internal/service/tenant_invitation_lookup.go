@@ -26,7 +26,8 @@ type TenantInvitationView struct {
 	// expiry reported as InvitationStatusExpired (invitationStatusAt).
 	Status string
 	// AccountExists reports whether an account of the project holds Email.
-	// It is false whenever the mailer does not deliver.
+	// It is false whenever the mailer does not deliver or the invitation's
+	// token did not go only into its email (TokenOnlyInEmail).
 	AccountExists bool
 }
 
@@ -38,9 +39,10 @@ type TenantInvitationView struct {
 // caller without a real token nothing.
 //
 // Whether the invited address has an account is answered only when the
-// mailer delivers. Without one, CreateTenantInvitation hands the token to the
-// inviter, and answering it would let a tenant admin learn whether any
-// address they invite has an account.
+// mailer delivers and the invitation records that its token went only into
+// its email (TokenOnlyInEmail). Otherwise CreateTenantInvitation may have
+// handed the token to the inviter, and answering would let a tenant admin
+// learn whether any address they invite has an account.
 func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken string) (*TenantInvitationView, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -82,7 +84,12 @@ func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken st
 		}
 	}
 	fields := append(invitationDecisionLogFields(ctx, projectID, inv), zap.String("status", view.Status))
-	if s.mailerDelivers {
+	switch {
+	case !s.mailerDelivers:
+		fields = append(fields, zap.String("account_exists_withheld", "mail_not_delivered"))
+	case !inv.TokenOnlyInEmail:
+		fields = append(fields, zap.String("account_exists_withheld", "token_outside_email"))
+	default:
 		if s.accounts == nil {
 			return nil, fmt.Errorf("%w: no account store", ErrUnavailable)
 		}

@@ -363,6 +363,8 @@ func TestCreateTenantInvitation_AdminInvitesAndEmails(t *testing.T) {
 
 	// The stored token hash must not equal any raw token in the response.
 	require.NotEmpty(t, out.Invitation.TokenHash)
+	require.True(t, f.invitations.byID[f.invitations.key(mTestProject, out.Invitation.ID)].TokenOnlyInEmail,
+		"the invitation records that its token went only into its email")
 }
 
 // The invitation email links to GATEWAY_TENANT_INVITATION_PAGE_URL when one is
@@ -433,6 +435,8 @@ func TestCreateTenantInvitation_NoMailerReturnsRawToken(t *testing.T) {
 
 	// The returned raw token must hash to the stored token hash.
 	require.Equal(t, out.Invitation.TokenHash, sha256Hex(out.RawToken))
+	require.False(t, f.invitations.byID[f.invitations.key(mTestProject, out.Invitation.ID)].TokenOnlyInEmail,
+		"the invitation records that its token was handed out")
 }
 
 // A mailer that accepts nothing fails the email, not the call: the invitation
@@ -450,6 +454,7 @@ func TestCreateTenantInvitation_SendFailureReportsFailed(t *testing.T) {
 	stored := f.invitations.byID[f.invitations.key(mTestProject, out.Invitation.ID)]
 	require.NotNil(t, stored, "the invitation is stored before the email is sent")
 	require.Equal(t, InvitationStatusPending, stored.Status)
+	require.True(t, stored.TokenOnlyInEmail, "a failed send hands the token to nobody")
 }
 
 // An email that cannot be built (here, an invalid sender address the mailer

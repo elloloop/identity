@@ -33,8 +33,8 @@ func newInvitationLookupFixture(mailerDelivers bool) *invitationLookupFixture {
 }
 
 // seed stores an invitation of mTestProject's tenant to mInvitee, from
-// mAdminID, in status, expiring expiresIn from lookupNow, and returns the raw
-// token its email would carry.
+// mAdminID, in status, expiring expiresIn from lookupNow, whose token went
+// only into its email, and returns the raw token that email would carry.
 func (f *invitationLookupFixture) seed(id, status string, expiresIn time.Duration) string {
 	return f.seedIn(mTestProject, id, status, expiresIn)
 }
@@ -45,6 +45,7 @@ func (f *invitationLookupFixture) seedIn(projectID, id, status string, expiresIn
 		ID: id, ProjectID: projectID, TenantID: mTestTenant, TokenHash: sha256Hex(raw),
 		Email: mInvitee, InvitedBy: mAdminID, Role: RoleAdmin, Status: status,
 		ExpiresAtMs: lookupNow.Add(expiresIn).UnixMilli(), CreatedAtMs: lookupNow.Add(-time.Hour).UnixMilli(),
+		TokenOnlyInEmail: true,
 	}
 	return raw
 }
@@ -193,6 +194,23 @@ func TestGetTenantInvitation_AccountExistsUnansweredWithoutAMailer(t *testing.T)
 	require.NoError(t, err)
 	require.False(t, view.AccountExists)
 	require.Equal(t, mInvitee, view.Email, "the rest of the invitation is still described")
+}
+
+// An invitation whose token did not go only into its email, handed to the
+// inviter by a server without mail or stored before that was recorded, does
+// not say whether the address has an account, though the mailer delivers
+// now.
+func TestGetTenantInvitation_AccountExistsUnansweredForATokenThatLeftTheEmail(t *testing.T) {
+	f := newInvitationLookupFixture(true)
+	token := f.seed("inv-1", InvitationStatusPending, time.Hour)
+	f.invitations.byID[f.invitations.key(mTestProject, "inv-1")].TokenOnlyInEmail = false
+	seedUser(f.accounts, mInvitee, "", StatusActive)
+
+	view, err := f.svc.GetTenantInvitation(withProject(mTestProject), token)
+	require.NoError(t, err)
+	require.False(t, view.AccountExists)
+	require.Equal(t, mInvitee, view.Email, "the rest of the invitation is still described")
+	require.Equal(t, InvitationStatusPending, view.Status)
 }
 
 // The tenant is named as the invitation email names it: a self-service

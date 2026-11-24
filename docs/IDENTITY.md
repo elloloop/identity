@@ -833,7 +833,11 @@ domain's, until it accepts, and outlives a later revocation.
 `SignUpWithTenantInvitation` makes such an account from the invitation's
 own link, with a name and a password: the token's invitation must itself be
 open as above, and the call is refused outright on a server with no mail
-provider, which hands invitation tokens to their inviters. Postgres only:
+provider, which hands invitation tokens to their inviters. Each invitation
+records whether its token went only into its email
+(`tenant_invitations.token_only_in_email`, schema 67), so the token of one
+created without mail settings, or stored before that was recorded, creates
+no account even once the server has them. Postgres only:
 per-project `config_json` lives only in the Postgres control plane, and the
 default project's variable refuses to boot on memory or SQLite. See the
 multi-tenancy docs, "invited sign-up".

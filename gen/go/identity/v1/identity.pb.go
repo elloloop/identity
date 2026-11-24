@@ -14749,7 +14749,10 @@ type CreateTenantInvitationResponse struct {
 	// no mailer is configured (email_send_status NOT_CONFIGURED, so a
 	// headless/dev deployment can still drive the flow); otherwise it is
 	// empty, because the token belongs in the recipient's inbox, not the API
-	// response.
+	// response. The invitation records that its token was handed out, so it
+	// never creates an account (SignUpWithTenantInvitation), even once the
+	// server has mail settings; the invitee still accepts it after a sign-in
+	// that proves the address.
 	RawToken string `protobuf:"bytes,2,opt,name=raw_token,json=rawToken,proto3" json:"raw_token,omitempty"`
 	// email_send_status is what became of the one attempt this call made,
 	// synchronously, to send the invitation's email. It is reported here only
@@ -14882,8 +14885,10 @@ type GetTenantInvitationResponse struct {
 	Status string `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`
 	// account_exists reports whether an account of the project holds email,
 	// as its email or as a recovery email. It is always false on a server with
-	// no mail provider: CreateTenantInvitation then hands the token to the
-	// inviter, so holding it does not show that the caller owns the address.
+	// no mail provider, and for an invitation created on one, or before the
+	// server recorded where an invitation's token went: CreateTenantInvitation
+	// then handed the token to the inviter, or may have, so holding it does
+	// not show that the caller owns the address.
 	AccountExists bool `protobuf:"varint,9,opt,name=account_exists,json=accountExists,proto3" json:"account_exists,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -219,3 +219,56 @@ func TestRedesign_TenantInvitation_NoMailProvider(t *testing.T) {
 		t.Fatalf("sign-up without mail = %v, want FailedPrecondition invitation_signup_unavailable, before the address's account is looked at", err)
 	}
 }
+
+// TestRedesign_TenantInvitation_TokenHandedOutBeforeMailIsConfigured: a
+// server with no mail settings hands an invitation's token to its inviter,
+// and the invitation records that. Once the project is served with mail
+// settings the token still creates no account, with the refusal a server
+// without mail gives, while an invitation that server emails does; and the
+// read still does not say whether the address has an account, even once it
+// has one. The invitee accepts the invitation after a sign-in that proves
+// the address.
+func TestRedesign_TenantInvitation_TokenHandedOutBeforeMailIsConfigured(t *testing.T) {
+	before := startRedesignHarnessWithoutMail(t)
+	ctx := context.Background()
+	owner := signupOwner(t, before, "invitation-mail-later-owner")
+	invitee := fmt.Sprintf("mail-later-%d@example-corp.com", time.Now().UnixNano())
+	created, err := owner.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+		TenantId: owner.tenantID, Email: invitee, Role: service.RoleMember,
+	}))
+	if err != nil {
+		t.Fatalf("CreateTenantInvitation without mail: %v", err)
+	}
+	token := created.Msg.GetRawToken()
+	if token == "" {
+		t.Fatalf("without mail the inviter is handed the token: %+v", created.Msg)
+	}
+
+	after := startRedesignHarnessBeside(t, before)
+	laterOwner := signupOwner(t, after, "invitation-mail-now-owner")
+	setProjectConfig(t, after, invitedSignupConfig)
+
+	_, err = signUpFromInvitation(after, token)
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "invitation_signup_unavailable") {
+		t.Fatalf("sign-up with mail from a token handed out without it = %v, want FailedPrecondition invitation_signup_unavailable", err)
+	}
+	requireNoAccount(t, after, invitee)
+
+	emailedTo := fmt.Sprintf("mail-now-%d@example-corp.com", time.Now().UnixNano())
+	_, emailedToken := inviteFrom(t, after, laterOwner, emailedTo)
+	if _, err := signUpFromInvitation(after, emailedToken); err != nil {
+		t.Fatalf("sign-up from an invitation the server emailed: %v", err)
+	}
+
+	signedIn := signInWithCode(t, after, invitee)
+	if got := readInvitation(t, after, token); got.GetAccountExists() || got.GetStatus() != service.InvitationStatusPending {
+		t.Fatalf("read once the address has an account = %+v, want pending without saying so", got)
+	}
+	accepted, err := after.AuthedClient(signedIn.GetAccessToken()).AcceptTenantInvitation(ctx, connect.NewRequest(&identitypb.AcceptTenantInvitationRequest{Token: token}))
+	if err != nil {
+		t.Fatalf("AcceptTenantInvitation after a proven sign-in: %v", err)
+	}
+	if got := accepted.Msg.GetMembership(); got.GetTenantId() != owner.tenantID || got.GetUserId() != signedIn.GetUser().GetId() {
+		t.Fatalf("membership = %+v, want the invitee in the inviting tenant", got)
+	}
+}

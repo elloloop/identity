@@ -462,14 +462,21 @@ RestoreTenantMember(tenant_id, user_id)
     <code>account_exists</code>: whether an account of the project holds the
     address, as its email or as a recovery email. A server with no mail
     settings hands the token to the inviter, so it never answers
-    <code>account_exists</code> (always false): the answer would tell an
-    inviter whether any address they invite has an account. A token no
+    <code>account_exists</code> (always false), and the invitation records
+    that its token was handed out, so it is never answered for that
+    invitation, or one stored before the server recorded this (schema 67),
+    even once the server has mail settings: the answer would tell an inviter
+    whether any address they invite has an account. A token no
     invitation of the project has is <code>NOT_FOUND</code>, and a blank one
     <code>INVALID_ARGUMENT</code>. Calls are limited per client IP
     (<code>GATEWAY_RATE_LIMIT_VERIFY_PER_IP</code>, default 20 per window, a
     budget of their own, shared by HTTP and native gRPC). Send it as a POST,
-    so the token stays out of URLs; the response is
-    <code>Cache-Control: no-store</code>.
+    so this call puts the token in no URL; the response is
+    <code>Cache-Control: no-store</code>. The emailed link does carry the
+    token in its URL, and the token can create the account, so the page it
+    opens should send <code>Referrer-Policy: no-referrer</code>, take the
+    token out of its URL once it has read it
+    (<code>history.replaceState</code>), and load no third-party resources.
   </p>
   <Code
     code={`GetTenantInvitation(token)
@@ -534,7 +541,8 @@ RestoreTenantMember(tenant_id, user_id)
     <code>X-Assurance-Token</code> header while
     <code>GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP</code> is on, and the
     sign-up budget per client IP (<code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code>,
-    shared with <code>PasswordSignup</code> and <code>UsernameSignup</code>).
+    shared with <code>PasswordSignup</code> and <code>UsernameSignup</code>,
+    and spent over HTTP and native gRPC alike).
     It does not accept the invitation: the account joins no tenant, not even
     its email domain's, and the invitation stays pending until the account
     calls <code>AcceptTenantInvitation</code>, which its new session can do at
@@ -552,11 +560,13 @@ RestoreTenantMember(tenant_id, user_id)
       the call is always refused, and so is a project that has not opted in:
       both <code>FAILED_PRECONDITION</code> with the stable
       <code>invitation_signup_unavailable</code> token, before the token is
-      looked up. An invitation created before the server had mail settings
-      was handed to its inviter, and stays usable for its lifetime once mail
-      is configured: revoke such invitations, or wait out
-      <code>GATEWAY_TENANT_INVITATION_EXPIRY_SECONDS</code>, before turning
-      the opt-in on.
+      looked up. Each invitation records whether its token went only into its
+      email, so the token of one created while the server had no mail
+      settings, or stored before the server recorded this (schema 67),
+      creates no account even once the server has them: the same refusal.
+      Its invitee still accepts it after a sign-in that proves the address,
+      which creates the account here; invite the address again once mail is
+      configured to send them a link that creates it.
     </li>
     <li>
       An invitation that was accepted, revoked or has expired is

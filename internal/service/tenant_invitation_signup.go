@@ -16,10 +16,12 @@ import (
 var (
 	// ErrInvitationSignupUnavailable refuses SignUpWithTenantInvitation where
 	// an invitation cannot create an account: the project has not opted in
-	// (access.admit_tenant_invitations, with accounts.email_signup self), or
-	// the mailer does not deliver, so an invitation's token went to its
-	// inviter. Mapped to CodeFailedPrecondition; the message leads with the
-	// stable `invitation_signup_unavailable` token.
+	// (access.admit_tenant_invitations, with accounts.email_signup self), the
+	// mailer does not deliver, or the token's invitation does not record that
+	// its token went only into its email (TenantInvitation.TokenOnlyInEmail),
+	// so the token may have gone to its inviter. Mapped to
+	// CodeFailedPrecondition; the message leads with the stable
+	// `invitation_signup_unavailable` token.
 	ErrInvitationSignupUnavailable = errors.New("invitation_signup_unavailable: an invitation cannot create an account here")
 	// ErrInvitationRevoked refuses an invitation that was revoked. Mapped to
 	// CodeFailedPrecondition, as an accepted or expired one is.
@@ -52,7 +54,9 @@ func (s *AuthService) WithMailDelivery(delivers bool) *AuthService {
 // emailed, so a project that has not opted in (mode invite with
 // access.admit_tenant_invitations and accounts.email_signup self), or a
 // mailer that does not deliver, refuses with ErrInvitationSignupUnavailable
-// before the token is looked up. An unknown token is ErrNotFound; an
+// before the token is looked up, and so does an invitation whose token did
+// not go only into its email (TokenOnlyInEmail) once it is found, whatever
+// the mailer does now. An unknown token is ErrNotFound; an
 // accepted, expired or revoked invitation ErrInvitationUsed,
 // ErrInvitationExpired or ErrInvitationRevoked; one that is not open, or an
 // address the deny layer refuses, ErrPermissionDenied or ErrAccessNotAllowed;
@@ -95,6 +99,10 @@ func (s *AuthService) SignUpWithTenantInvitation(ctx context.Context, rawToken, 
 	if inv == nil {
 		s.logInvitationSignupRefused(ctx, nil, "not_found")
 		return nil, fmt.Errorf("%w: invitation", ErrNotFound)
+	}
+	if !inv.TokenOnlyInEmail {
+		s.logInvitationSignupRefused(ctx, inv, "token_outside_email")
+		return nil, ErrInvitationSignupUnavailable
 	}
 	status := invitationStatusAt(inv, s.nowMs())
 	if err := invitationClosedError(status); err != nil {

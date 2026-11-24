@@ -1,5 +1,54 @@
 # Upgrade guide
 
+## Next — a tenant invitation whose token was handed out never creates an account (migration `0067_add_tenant_invitation_token_only_in_email`, schema 67; `SignUpWithTenantInvitation` now on the sign-up budget over native gRPC too; `TenantInvitation.TokenOnlyInEmail` (Go API))
+
+A server with no mail settings hands each new invitation's token to its
+inviter (`raw_token`), and nothing recorded that, so once mail was configured
+an owner or admin still holding such a token could create a verified account
+with a password on the invited address with `SignUpWithTenantInvitation`, and
+learn from `GetTenantInvitation` whether an address had an account first.
+Each invitation now records where its token went.
+
+- **`tenant_invitations.token_only_in_email`** is true for an invitation whose
+  token went into its email and nowhere else: `CreateTenantInvitation` writes
+  it true only where the mailer delivers, the one case it returns no
+  `raw_token`. An invitation created without mail settings stores false, and
+  so does every invitation stored before this migration, whose token may have
+  gone anywhere.
+- **`SignUpWithTenantInvitation`** refuses an invitation whose token did not
+  go only into its email, whatever the server's mail settings are now, with
+  the refusal a server without mail gives: `FAILED_PRECONDITION` with the
+  stable `invitation_signup_unavailable` token. It logs
+  `tenant_invitation_signup_refused` with `reason` `token_outside_email`.
+- **`GetTenantInvitation`** does not answer `account_exists` (false) for such
+  an invitation, and its `tenant_invitation_read` line carries
+  `account_exists_withheld`: `token_outside_email`, or `mail_not_delivered`
+  where the server's mailer does not deliver.
+- **Such invitations still let the invitee in.** They accept it with
+  `AcceptTenantInvitation` after a sign-in that proves the address (and in a
+  project with `access.admit_tenant_invitations`, that sign-in creates the
+  account). Nothing needs revoking before mail is configured or a project
+  opts in; to give an invitee the link that creates the account, invite the
+  address again once mail is configured.
+- **`SignUpWithTenantInvitation` over native gRPC** now spends the sign-up
+  budget per client IP (`GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`) it spends over
+  HTTP, one budget across both: over it a native call is
+  `RESOURCE_EXHAUSTED` with `retry-after` metadata.
+- **Go API.** `TenantInvitation` gains `TokenOnlyInEmail`. An embedder with
+  its own `InvitationStore` stores it on `CreateInvitation` and returns it
+  from every read; its zero value refuses the sign-up, so a store that drops
+  it fails closed.
+
+### Migration
+
+`0067_add_tenant_invitation_token_only_in_email` adds
+`token_only_in_email BOOLEAN NOT NULL DEFAULT false` to `tenant_invitations`.
+A constant default rewrites no row, so it holds the table's lock only for the
+moment of the catalog change; `lock_timeout = 10s` bounds the wait to acquire
+it. A server older than it that is still running during a rolling upgrade
+writes invitations that keep the default, false, so their tokens create no
+account. Its down migration drops the column.
+
 ## Next — tenant invitation decisions are logged (new info log lines; no API, schema or configuration change)
 
 Reading, signing up from and accepting a tenant invitation each log one info
@@ -9,16 +58,18 @@ names an invitation, `tenant_id`, `invitation_id` and, when the request is
 traced, `trace_id`; never the address, the token, a password or a name.
 
 - **`GetTenantInvitation`** logs `tenant_invitation_read` with the `status`
-  it answered (`pending`, `expired`, `accepted` or `revoked`) and, where mail
-  is delivered and so it is answered, `account_exists`; or
+  it answered (`pending`, `expired`, `accepted` or `revoked`) and, where it
+  is answered, `account_exists`, or else `account_exists_withheld` with why:
+  `mail_not_delivered` or `token_outside_email`; or
   `tenant_invitation_read_refused` with `reason` `not_found`.
 - **`SignUpWithTenantInvitation`** logs `tenant_invitation_signup_created`
   with the new account's `user_id` (after which the admission line
   `signup_admitted_by_tenant_invitation` follows, as for every account an
   invitation admits), or `tenant_invitation_signup_refused` with the `reason`:
-  `not_opted_in`, `mail_not_delivered`, `not_found`, `invitation_closed` (with
-  its `status`), `deny_layer` (with the address's `email_domain`),
-  `invitation_not_open`, `account_exists`, `login_policy` or `password_rule`.
+  `not_opted_in`, `mail_not_delivered`, `not_found`, `token_outside_email`,
+  `invitation_closed` (with its `status`), `deny_layer` (with the address's
+  `email_domain`), `invitation_not_open`, `account_exists`, `login_policy` or
+  `password_rule`.
 - **`AcceptTenantInvitation`** logs `tenant_invitation_accepted` with the
   caller's `user_id` and the membership's `role` and `source`, and `changed`
   false when the caller already held that role or a higher one and was kept
@@ -50,7 +101,10 @@ well, and can now create the account with a name and a password.
   `FAILED_PRECONDITION` with the stable `invitation_signup_unavailable` token
   (or, for the two switches, the refusals `PasswordSignup` gives), before the
   token is looked up. A server with no mail settings hands an invitation's
-  token to its inviter (`raw_token`), so holding it proves nothing there.
+  token to its inviter (`raw_token`), so holding it proves nothing there, and
+  the invitation records that: its token creates no account even once the
+  server has mail settings (the same refusal), nor does the token of an
+  invitation stored before schema 67.
 - **Which invitations.** The token's own invitation must be pending and
   unexpired, from a claimed or latent tenant not made through self-service
   `CreateTenant`, sent by someone still an active owner or admin there who can
@@ -69,16 +123,11 @@ well, and can now create the account with a name and a password.
 - **Abuse limits.** The call is JWT-exempt and gated as `PasswordSignup` is:
   the `X-Assurance-Token` header while
   `GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP` is on, and the per-IP sign-up
-  budget it shares with `PasswordSignup` and `UsernameSignup` (HTTP only).
+  budget it shares with `PasswordSignup` and `UsernameSignup`, on HTTP and,
+  for this call, native gRPC.
 - **Audit.** The admission records `signup_admitted_by_invitation` naming the
   token's invitation, and the sign-in `login_success` with method
   `tenant_invitation_signup`.
-- **Invitations made before mail was configured.** A server that had no mail
-  settings handed each invitation's token to its inviter. Once mail is
-  configured those invitations stay pending for their lifetime
-  (`GATEWAY_TENANT_INVITATION_EXPIRY_SECONDS`, 7 days by default), and their
-  tokens would create accounts. Revoke them, by inviting the address again,
-  or wait for them to expire before a project turns the opt-in on.
 - **Go API.** `OpenInvitationReader` gains `GetInvitationByTokenHash` (moved
   from `InvitationStore`, which still has it) and `OpenInvitationForToken`;
   an embedder with its own invitation store adds the latter. An embedder that
@@ -103,8 +152,9 @@ a session. It can now read the invitation by the token on its link.
 - **`account_exists`** is true when an account of the project holds the
   address, as its email or as a recovery email. A server with no mail settings
   hands an invitation's token to the inviter (`raw_token`), so there it is
-  always false: answering would tell a tenant admin whether any address they
-  invite has an account.
+  always false, and so it is for an invitation created on such a server, or
+  stored before schema 67, once the server has mail settings: answering would
+  tell a tenant admin whether any address they invite has an account.
 - **Refusals.** A token no invitation of the resolved project has is
   `NOT_FOUND`, whatever project it belongs to, and a blank one
   `INVALID_ARGUMENT`. The memory and SQLite drivers return `UNIMPLEMENTED`.
@@ -113,8 +163,12 @@ a session. It can now read the invitation by the token on its link.
   a budget of their own shared by the HTTP handler and the native gRPC
   registration: HTTP 429 with `Retry-After` (Connect clients surface
   `UNAVAILABLE`), and native gRPC `RESOURCE_EXHAUSTED` with `retry-after`
-  metadata. The RPC is POST only, so the token stays out of URLs and access
-  logs, and the response carries `Cache-Control: no-store`.
+  metadata. The RPC is POST only, so this call puts the token in no URL, and
+  the response carries `Cache-Control: no-store`. The emailed link does carry
+  the token in its URL (`?token=`), and the token can create the account, so
+  the page it opens should send `Referrer-Policy: no-referrer`, take the token
+  out of its URL once it has read it (`history.replaceState`), and load no
+  third-party resources.
 - **Go API.** `MembershipService.GetTenantInvitation` returns a
   `TenantInvitationView`; it reads the account store `WithAccounts` sets, and
   refuses with `ErrUnavailable` without one where mail is delivered. A tenant
