@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 )
 
@@ -14,7 +15,9 @@ import (
 // such a person finds the tenant (ListJoinableTenants) and joins it
 // (JoinTenantByDomain) without an invitation. It is off on every domain
 // until an admin turns it on. A signup on a verified domain still joins as
-// auto-formation always did (TenantAutoFormStore). Auto-formation runs only
+// auto-formation always did (TenantAutoFormStore), except one an invite
+// project admitted by the domain (access.admit_domain_join), which joins
+// only through JoinTenantByDomain. Auto-formation runs only
 // at signup, so this is for the people on the domain it left outside the
 // tenant: those who signed up into the latent tenant auto-formation made
 // for the domain before another tenant verified it, those whose email moved
@@ -266,23 +269,51 @@ func (s *MembershipService) heldMembership(ctx context.Context, projectID, tenan
 }
 
 // joinableTenant returns the tenant user's verified email's domain lets
-// them join, and that domain: the claimed tenant that has verified the
-// domain, while the domain allows joining. It returns nil, nil, nil when
-// there is none: the email is unverified or on a public provider's domain,
-// no tenant has verified the domain, the domain does not allow joining, or
-// its tenant is latent or suspended.
+// them join, and that domain (joinableTenantForDomain); none while the email
+// is unverified.
 func (s *MembershipService) joinableTenant(ctx context.Context, projectID string, user *User) (*Tenant, *Domain, error) {
-	domain := verifiedEmailDomain(user)
-	if domain == "" || s.config().IsPublicEmailDomain(domain) {
-		return nil, nil, nil
+	t, d, _, err := joinableTenantForDomain(ctx, s.domains, s.tenants, s.config(), projectID, verifiedEmailDomain(user))
+	return t, d, err
+}
+
+// The rules joinableTenantForDomain names when a domain lets nobody join.
+const (
+	domainJoinNoDomain         = "no_domain"
+	domainJoinPublicMailDomain = "public_mail_domain"
+	domainJoinNotVerified      = "domain_not_verified"
+	domainJoinOff              = "joining_off"
+	domainJoinTenantNotClaimed = "tenant_not_claimed"
+)
+
+// joinableTenantForDomain returns the tenant the people on domain may join
+// by it, and that domain: the claimed tenant that has verified the domain,
+// while the domain allows joining. When there is none it returns the rule
+// that says so: domain is "" (domainJoinNoDomain) or a public provider's
+// (domainJoinPublicMailDomain), no tenant has verified it
+// (domainJoinNotVerified), it does not allow joining (domainJoinOff), or its
+// tenant is latent or suspended (domainJoinTenantNotClaimed).
+func joinableTenantForDomain(ctx context.Context, domains DomainStore, tenants TenantStore, cfg *config.Config, projectID, domain string) (t *Tenant, d *Domain, refusal string, err error) {
+	switch {
+	case domain == "":
+		return nil, nil, domainJoinNoDomain, nil
+	case cfg.IsPublicEmailDomain(domain):
+		return nil, nil, domainJoinPublicMailDomain, nil
 	}
-	d, err := s.domains.GetVerifiedDomain(ctx, projectID, domain)
-	if err != nil || d == nil || !d.AllowJoin {
-		return nil, nil, err
+	d, err = domains.GetVerifiedDomain(ctx, projectID, domain)
+	switch {
+	case err != nil:
+		return nil, nil, "", err
+	case d == nil:
+		return nil, nil, domainJoinNotVerified, nil
+	case !d.AllowJoin:
+		return nil, nil, domainJoinOff, nil
 	}
-	t, err := s.tenants.GetTenant(ctx, projectID, d.TenantID)
-	if err != nil || t == nil || t.Status != TenantStatusClaimed {
-		return nil, nil, err
+	t, err = tenants.GetTenant(ctx, projectID, d.TenantID)
+	switch {
+	case err != nil:
+		return nil, nil, "", err
+	case t == nil || t.Status != TenantStatusClaimed:
+		return nil, nil, domainJoinTenantNotClaimed, nil
 	}
-	return t, d, nil
+	return t, d, "", nil
 }

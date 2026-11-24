@@ -18,6 +18,7 @@ type (
 	stubInvitationStore struct{ service.InvitationStore }
 	stubMembershipStore struct{ service.MembershipStore }
 	stubTenantStore     struct{ service.TenantStore }
+	stubDomainStore     struct{ service.DomainStore }
 	stubUserDirectory   struct{ service.UserDirectory }
 )
 

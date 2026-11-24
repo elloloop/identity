@@ -226,6 +226,10 @@ func (f *recoveryEmailFixture) heldGrants(userID string, session SessionSignIn) 
 			_, err := members.CreateTenantInvitation(f.ctx, userID, session, "tenant-1", "invitee@example.org", RoleAdmin)
 			return err
 		},
+		"RevokeTenantInvitation": func() error {
+			_, err := members.RevokeTenantInvitation(f.ctx, userID, session, "tenant-1", "invitation-1", "", "")
+			return err
+		},
 		"RemoveTenantMember": func() error {
 			return members.RemoveTenantMember(f.ctx, userID, session, "tenant-1", "member-1", "", "")
 		},

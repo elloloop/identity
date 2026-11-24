@@ -97,6 +97,27 @@ func (h *IdentityHandler) ListTenantInvitations(
 	}), nil
 }
 
+// RevokeTenantInvitation withdraws a pending invitation of a tenant.
+// Owner/admin only.
+func (h *IdentityHandler) RevokeTenantInvitation(
+	ctx context.Context,
+	req *connect.Request[identitypb.RevokeTenantInvitationRequest],
+) (*connect.Response[identitypb.RevokeTenantInvitationResponse], error) {
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	inv, err := h.members.RevokeTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), req.Msg.GetInvitationId(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.RevokeTenantInvitationResponse{Invitation: invitationToProto(inv)}), nil
+}
+
 // ListTenantMembers lists every membership in a tenant. Owner/admin only.
 func (h *IdentityHandler) ListTenantMembers(
 	ctx context.Context,

@@ -144,6 +144,7 @@ const (
 	IdentityService_CreateTenantInvitation_FullMethodName                 = "/identity.v1.IdentityService/CreateTenantInvitation"
 	IdentityService_AcceptTenantInvitation_FullMethodName                 = "/identity.v1.IdentityService/AcceptTenantInvitation"
 	IdentityService_ListTenantInvitations_FullMethodName                  = "/identity.v1.IdentityService/ListTenantInvitations"
+	IdentityService_RevokeTenantInvitation_FullMethodName                 = "/identity.v1.IdentityService/RevokeTenantInvitation"
 	IdentityService_ListTenantMembers_FullMethodName                      = "/identity.v1.IdentityService/ListTenantMembers"
 	IdentityService_RemoveTenantMember_FullMethodName                     = "/identity.v1.IdentityService/RemoveTenantMember"
 	IdentityService_SuspendTenantMember_FullMethodName                    = "/identity.v1.IdentityService/SuspendTenantMember"
@@ -499,6 +500,21 @@ type IdentityServiceClient interface {
 	CreateTenantInvitation(ctx context.Context, in *CreateTenantInvitationRequest, opts ...grpc.CallOption) (*CreateTenantInvitationResponse, error)
 	AcceptTenantInvitation(ctx context.Context, in *AcceptTenantInvitationRequest, opts ...grpc.CallOption) (*AcceptTenantInvitationResponse, error)
 	ListTenantInvitations(ctx context.Context, in *ListTenantInvitationsRequest, opts ...grpc.CallOption) (*ListTenantInvitationsResponse, error)
+	// RevokeTenantInvitation withdraws a pending invitation: it becomes
+	// "revoked" and its token no longer redeems (AcceptTenantInvitation is
+	// PERMISSION_DENIED). The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+	// An invitation_id that is not one of tenant_id's invitations, unknown or
+	// another tenant's, is NOT_FOUND, and an accepted invitation is
+	// FAILED_PRECONDITION: remove the member instead. Revoking a revoked or
+	// expired invitation returns it unchanged and records nothing; a revocation
+	// is audited. A missing tenant_id or invitation_id is INVALID_ARGUMENT. A
+	// revoke never overwrites an invitation accepted before it, but an accept
+	// that had already read the invitation as pending still completes, so a
+	// successful revoke does not prove nobody joined: read ListTenantMembers.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	RevokeTenantInvitation(ctx context.Context, in *RevokeTenantInvitationRequest, opts ...grpc.CallOption) (*RevokeTenantInvitationResponse, error)
 	ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error)
 	// RemoveTenantMember removes user_id's membership of tenant_id. The caller
 	// must be an active owner or admin of a tenant that is not suspended
@@ -2204,6 +2220,16 @@ func (c *identityServiceClient) ListTenantInvitations(ctx context.Context, in *L
 	return out, nil
 }
 
+func (c *identityServiceClient) RevokeTenantInvitation(ctx context.Context, in *RevokeTenantInvitationRequest, opts ...grpc.CallOption) (*RevokeTenantInvitationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeTenantInvitationResponse)
+	err := c.cc.Invoke(ctx, IdentityService_RevokeTenantInvitation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) ListTenantMembers(ctx context.Context, in *ListTenantMembersRequest, opts ...grpc.CallOption) (*ListTenantMembersResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListTenantMembersResponse)
@@ -3088,6 +3114,21 @@ type IdentityServiceServer interface {
 	CreateTenantInvitation(context.Context, *CreateTenantInvitationRequest) (*CreateTenantInvitationResponse, error)
 	AcceptTenantInvitation(context.Context, *AcceptTenantInvitationRequest) (*AcceptTenantInvitationResponse, error)
 	ListTenantInvitations(context.Context, *ListTenantInvitationsRequest) (*ListTenantInvitationsResponse, error)
+	// RevokeTenantInvitation withdraws a pending invitation: it becomes
+	// "revoked" and its token no longer redeems (AcceptTenantInvitation is
+	// PERMISSION_DENIED). The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+	// An invitation_id that is not one of tenant_id's invitations, unknown or
+	// another tenant's, is NOT_FOUND, and an accepted invitation is
+	// FAILED_PRECONDITION: remove the member instead. Revoking a revoked or
+	// expired invitation returns it unchanged and records nothing; a revocation
+	// is audited. A missing tenant_id or invitation_id is INVALID_ARGUMENT. A
+	// revoke never overwrites an invitation accepted before it, but an accept
+	// that had already read the invitation as pending still completes, so a
+	// successful revoke does not prove nobody joined: read ListTenantMembers.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	RevokeTenantInvitation(context.Context, *RevokeTenantInvitationRequest) (*RevokeTenantInvitationResponse, error)
 	ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error)
 	// RemoveTenantMember removes user_id's membership of tenant_id. The caller
 	// must be an active owner or admin of a tenant that is not suspended
@@ -3917,6 +3958,9 @@ func (UnimplementedIdentityServiceServer) AcceptTenantInvitation(context.Context
 }
 func (UnimplementedIdentityServiceServer) ListTenantInvitations(context.Context, *ListTenantInvitationsRequest) (*ListTenantInvitationsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTenantInvitations not implemented")
+}
+func (UnimplementedIdentityServiceServer) RevokeTenantInvitation(context.Context, *RevokeTenantInvitationRequest) (*RevokeTenantInvitationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeTenantInvitation not implemented")
 }
 func (UnimplementedIdentityServiceServer) ListTenantMembers(context.Context, *ListTenantMembersRequest) (*ListTenantMembersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTenantMembers not implemented")
@@ -6366,6 +6410,24 @@ func _IdentityService_ListTenantInvitations_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_RevokeTenantInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeTenantInvitationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).RevokeTenantInvitation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_RevokeTenantInvitation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).RevokeTenantInvitation(ctx, req.(*RevokeTenantInvitationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_ListTenantMembers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListTenantMembersRequest)
 	if err := dec(in); err != nil {
@@ -7934,6 +7996,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTenantInvitations",
 			Handler:    _IdentityService_ListTenantInvitations_Handler,
+		},
+		{
+			MethodName: "RevokeTenantInvitation",
+			Handler:    _IdentityService_RevokeTenantInvitation_Handler,
 		},
 		{
 			MethodName: "ListTenantMembers",

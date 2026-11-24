@@ -277,6 +277,14 @@ type InvitationStore interface {
 	// accepting, stamps accepted_at_ms (0 defaults to now on accept).
 	// Unknown ids are a no-op.
 	SetInvitationStatus(ctx context.Context, projectID, invitationID, status string, acceptedAtMs int64) error
+	// RevokeInvitation makes tenantID's pending invitation invitationID
+	// revoked, deciding where it writes, so it never overwrites an
+	// invitation accepted meanwhile and of two concurrent revokes one alone
+	// reports a change. Returns the invitation as it now stands, and whether
+	// this call revoked it: a revoked or expired invitation is returned
+	// unchanged. An accepted invitation is ErrInvitationUsed, and an id that
+	// is not one of the tenant's invitations is ErrNotFound.
+	RevokeInvitation(ctx context.Context, projectID, tenantID, invitationID string) (inv *TenantInvitation, changed bool, err error)
 	// ListInvitationsForTenant returns every invitation in a tenant,
 	// newest first.
 	ListInvitationsForTenant(ctx context.Context, projectID, tenantID string) ([]*TenantInvitation, error)

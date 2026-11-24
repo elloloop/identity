@@ -1,5 +1,106 @@
 # Upgrade guide
 
+## Next — an invite project can let a domain open to joining create the account: `access.admit_domain_join` and `GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN` (off by default; no migration; additive audit event `signup_admitted_by_domain_join`; `AuthService.WithDomainJoin` (Go API))
+
+A tenant admin can let the people on a verified domain join it themselves
+(`SetDomainJoin`, `JoinTenantByDomain`), but an `invite` project refuses to
+create an account, so a person on that domain with no account could not get
+far enough to join. A project can now opt in to creating that account.
+
+- **Nothing changes until a project opts in.** `access.admit_domain_join` in a
+  project's `config_json` (or `GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN=true`
+  for the env-configured default project) is `false` by default and valid only
+  with `access.mode: invite`; with any other mode the config is rejected (the
+  default project's refuses to boot). It needs the Postgres driver, which alone
+  keeps tenant domains: the default project's switch without the domain and
+  tenant stores refuses to boot. The boot logs `domain_join_signup_enabled` or
+  `domain_join_signup_disabled`.
+- **What it admits.** With it on, a sign-in that proves the address, through an
+  OAuth provider that verified it or a redeemed emailed code or link, creates
+  the account when the address's domain is one `JoinTenantByDomain` would let
+  it join by: verified by a claimed tenant that has turned joining on, and not
+  a public mail domain. The tenant must **not** have been made through
+  self-service `CreateTenant` (`tenants.created_by` empty), as for
+  `access.admit_tenant_invitations`: anyone could make a tenant, verify a domain
+  they own and admit any number of accounts. An emailed code is sent to such
+  an address.
+- **What it still refuses.** A password sign-up, a passkey sign-up and the
+  anonymous-account upgrade; any address the deny layer refuses;
+  `accounts.email_signup` `admin` or `off`; and, for code and link sign-up,
+  `GATEWAY_PASSWORDLESS_SIGNUP_ENABLED=false`. In each case no code is sent to
+  such an address that has no account. Any other address is refused with the
+  same `PERMISSION_DENIED` as before, and the code-send decision runs the same
+  lookups for every address. A failed lookup refuses.
+- **The account joins nothing by itself.** It skips domain auto-formation, so
+  it forms no tenant and joins none, the domain's included, until it calls
+  `JoinTenantByDomain`. Turning joining off afterwards leaves an account that
+  can still sign in under `invite` (as every existing account can) but belongs
+  to no tenant; suspend or delete it to remove access.
+- **Both opt-ins on.** An address an open invitation names is admitted by the
+  invitation and recorded as such.
+- **Audit.** Once the account exists, each admission records
+  `signup_admitted_by_domain_join` (target the new account, the sign-in's IP
+  address and user agent; the project, tenant and domain ids and the address's
+  domain in the details).
+- **Logs.** On a project that opted in, each decision about an address with no
+  account logs one INFO line carrying `project_id` and `email_domain`, never
+  the address: `signup_admitted_by_domain_join` (with `user_id`, `tenant_id`,
+  `domain_id`, `method`, `provider`) when the account is created,
+  `signup_not_admitted_by_domain_join` (with `method`, `provider`, `reason`)
+  when the domain refuses it, and `signup_code_allowed_by_domain_join` (with
+  `tenant_id`, `domain_id`) or `signup_code_withheld_by_domain_join` (with
+  `reason`) when a sign-in code is asked for. `reason` names the rule:
+  `public_mail_domain`, `domain_not_verified`, `joining_off`,
+  `tenant_not_claimed`, `self_service_tenant`, `email_signup_not_self`,
+  `passwordless_signup_off` (code requests only), `lookup_failed`,
+  `unavailable` or `no_domain`. A refusal by the deny layer is the existing
+  `project_access_denied` line's.
+- **Go API.** An embedder that builds `AuthService` itself calls
+  `WithDomainJoin` with its domain and tenant stores.
+
+## Next — an owner or admin revokes a pending tenant invitation: `RevokeTenantInvitation` (additive RPC and audit event `tenant_invitation_revoked`; no migration; `InvitationStore.RevokeInvitation` (Go API))
+
+A tenant's owners and admins could invite and list invitations, but the only
+way to withdraw one was to invite the same address again, which revoked the
+open invitation and sent a new one.
+
+- **`RevokeTenantInvitation(tenant_id, invitation_id)`** makes a pending
+  invitation `revoked`, and `AcceptTenantInvitation` refuses its token from
+  then on (`PERMISSION_DENIED`, as for any invitation that is not pending). The
+  response carries the invitation as it now stands.
+- **Who may call it.** An active owner or admin of `tenant_id`, a tenant that is
+  not suspended; anyone else is `PERMISSION_DENIED` before the invitation is
+  read. A session a recovery email opened is held from it as from
+  `CreateTenantInvitation`.
+- **What it refuses.** An `invitation_id` that is not one of `tenant_id`'s
+  invitations, another tenant's or nobody's, is `NOT_FOUND`; an accepted
+  invitation is `FAILED_PRECONDITION` (remove the member with
+  `RemoveTenantMember`); a missing id is `INVALID_ARGUMENT`. Revoking a revoked
+  invitation, or one `AcceptTenantInvitation` already marked expired, returns
+  it unchanged and records nothing.
+- **Concurrency.** The store reads and writes the invitation in one locked
+  transaction, so a revoke never overwrites an invitation accepted before it,
+  and of two concurrent revokes one alone is audited. An accept that already
+  read the invitation as pending when the revoke landed still completes: its
+  invitee becomes a member and the invitation ends accepted. A caller must not
+  take a successful revoke as proof that nobody joined; read
+  `ListTenantMembers` where that matters.
+- **Audit.** A revocation records `tenant_invitation_revoked`: actor the
+  caller, target the invitation, the caller's IP address and user agent, and
+  the project and tenant ids, the role offered and the inviter in the details.
+- **Logs.** Each call logs one INFO line with `project_id`, `tenant_id`,
+  `invitation_id` and `user_id` (the caller): `tenant_invitation_revoked`,
+  `tenant_invitation_revoke_unchanged` (with the `status` it kept), or
+  `tenant_invitation_revoke_refused` with `reason` (`not_permitted`,
+  `not_found`, `accepted`, `invalid_argument`, `held_session`,
+  `unauthenticated`, `no_project` or `store_error`) and the error.
+- **Postgres only**, like the other invitation calls; the memory and SQLite
+  drivers return `UNIMPLEMENTED`. It is served on the native gRPC bridge, and
+  has no per-IP budget of its own, as it sends no email.
+- **Go API.** `InvitationStore` gains `RevokeInvitation`; an embedder with its
+  own implementation adds it. `MembershipService.RevokeTenantInvitation` serves
+  the RPC.
+
 ## Next — ID-only account classification (PostgreSQL 0066)
 
 `ClassifyAccounts` returns coarse live standing for one or two exact account

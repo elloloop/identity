@@ -369,6 +369,100 @@ func TestInvitationStore_ConcurrentCreatesLeaveOneOpenInvite(t *testing.T) {
 	require.Equal(t, 1, pending, "one open invite per mailbox, however the creates interleave")
 }
 
+// TestInvitationStore_RevokeInvitation: a revoke moves only the named
+// tenant's pending invitation to revoked, and says whether it did; a revoked
+// or expired invitation comes back unchanged, an accepted one is
+// service.ErrInvitationUsed and is left accepted, and an id the tenant does
+// not hold is service.ErrNotFound. Of concurrent revokes one alone reports
+// the change.
+func TestInvitationStore_RevokeInvitation(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset — skipping invitation revoke test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, truncateAll(ctx, dsn))
+	_, is, projectID, tenantID, user1, _ := newMembershipFixture(ctx, t, dsn)
+
+	invite := func(email string) string {
+		t.Helper()
+		id, err := is.CreateInvitation(ctx, &service.TenantInvitation{
+			ProjectID: projectID, TenantID: tenantID, Email: email,
+			TokenHash: "revoke-" + email, InvitedBy: user1, ExpiresAtMs: nowMs() + 86_400_000,
+		}, unlimitedInvitations)
+		require.NoError(t, err)
+		return id
+	}
+	status := func(email string) string {
+		t.Helper()
+		inv, err := is.GetInvitationByTokenHash(ctx, projectID, "revoke-"+email)
+		require.NoError(t, err)
+		return inv.Status
+	}
+
+	pending := invite("pending@acme.com")
+	got, changed, err := is.RevokeInvitation(ctx, projectID, tenantID, pending)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, pending, got.ID)
+	require.Equal(t, service.InvitationStatusRevoked, got.Status)
+	require.Equal(t, "pending@acme.com", got.Email)
+	require.Equal(t, service.InvitationStatusRevoked, status("pending@acme.com"))
+
+	again, changed, err := is.RevokeInvitation(ctx, projectID, tenantID, pending)
+	require.NoError(t, err)
+	require.False(t, changed, "a revoked invitation is returned unchanged")
+	require.Equal(t, service.InvitationStatusRevoked, again.Status)
+
+	other := invite("other@acme.com")
+	_, _, err = is.RevokeInvitation(ctx, projectID, "another-tenant", other)
+	require.ErrorIs(t, err, service.ErrNotFound, "another tenant's id")
+	_, _, err = is.RevokeInvitation(ctx, "another-project", tenantID, other)
+	require.ErrorIs(t, err, service.ErrNotFound, "another project's id")
+	_, _, err = is.RevokeInvitation(ctx, projectID, tenantID, "no-such-invitation")
+	require.ErrorIs(t, err, service.ErrNotFound)
+	require.Equal(t, service.InvitationStatusPending, status("other@acme.com"))
+
+	accepted := invite("accepted@acme.com")
+	require.NoError(t, is.SetInvitationStatus(ctx, projectID, accepted, service.InvitationStatusAccepted, 0))
+	_, _, err = is.RevokeInvitation(ctx, projectID, tenantID, accepted)
+	require.ErrorIs(t, err, service.ErrInvitationUsed)
+	require.Equal(t, service.InvitationStatusAccepted, status("accepted@acme.com"))
+
+	expired := invite("expired@acme.com")
+	require.NoError(t, is.SetInvitationStatus(ctx, projectID, expired, service.InvitationStatusExpired, 0))
+	kept, changed, err := is.RevokeInvitation(ctx, projectID, tenantID, expired)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, service.InvitationStatusExpired, kept.Status)
+
+	_, _, err = is.RevokeInvitation(ctx, projectID, "", other)
+	require.ErrorIs(t, err, service.ErrInvalidArgument)
+	_, _, err = is.RevokeInvitation(ctx, projectID, tenantID, "")
+	require.ErrorIs(t, err, service.ErrInvalidArgument)
+
+	const racers = 8
+	changes := make(chan bool, racers)
+	errs := make(chan error, racers)
+	for range racers {
+		go func() {
+			_, changed, err := is.RevokeInvitation(ctx, projectID, tenantID, other)
+			changes <- changed
+			errs <- err
+		}()
+	}
+	revoked := 0
+	for range racers {
+		require.NoError(t, <-errs)
+		if <-changes {
+			revoked++
+		}
+	}
+	require.Equal(t, 1, revoked, "of concurrent revokes one alone reports the change")
+	require.Equal(t, service.InvitationStatusRevoked, status("other@acme.com"))
+}
+
 // TestMembershipStore_GrantNeverLowersARole: a grant makes an active member
 // at its role, promotes a lower one, re-activates an ended one at the grant's
 // role, and leaves an active membership at that role or above unchanged —

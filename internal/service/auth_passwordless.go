@@ -405,6 +405,7 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 		emailVerified: true, // proving control of the inbox verifies the email
 		ipAddr:        ipAddr,
 		userAgent:     userAgent,
+		method:        method,
 	})
 	if err != nil {
 		return nil, err

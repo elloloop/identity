@@ -446,6 +446,15 @@ type Config struct {
 	// otherwise.
 	DefaultProjectAdmitTenantInvitations bool
 
+	// DefaultProjectAdmitDomainJoin lets the default project, on access mode
+	// invite, create the account of an address whose domain an operator-made
+	// tenant has verified and opened to joining, once its owner proves the
+	// address. Set via GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN; off by
+	// default. It REQUIRES GATEWAY_DEFAULT_PROJECT_ACCESS_MODE=invite and the
+	// postgres driver, which alone keeps tenant domains; the server refuses to
+	// boot otherwise.
+	DefaultProjectAdmitDomainJoin bool
+
 	// DefaultProjectBlockedEmailDomains is the comma-separated list of extra
 	// email domains refused on the default project, in addition to the
 	// consumer mailbox providers the public-domain switch already covers. Set via
@@ -1681,6 +1690,7 @@ func loadFromEnv() *Config {
 		// the access its mode already grants.
 		DefaultProjectBlockPublicEmailDomains: envBool("GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS", false),
 		DefaultProjectAdmitTenantInvitations:  envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS", false),
+		DefaultProjectAdmitDomainJoin:         envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN", false),
 		DefaultProjectBlockedEmailDomains:     envStr("GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS", ""),
 		DefaultProjectExemptEmails:            envStr("GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS", ""),
 		RequireVerifiedAuthDomain:             envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),

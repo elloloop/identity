@@ -397,6 +397,15 @@ const (
 	// inviter ids and the address's domain in the details.
 	EventSignupAdmittedByInvitation EventType = "signup_admitted_by_invitation"
 
+	// EventSignupAdmittedByDomainJoin records an invite project having
+	// created an account because its address's domain lets its people join a
+	// tenant (access.admit_domain_join). It is written once the account
+	// exists: no actor, target the new account, the sign-in's IP address and
+	// user agent, and the project, tenant and domain ids and the address's
+	// domain in the details. The account joins no tenant until it calls
+	// JoinTenantByDomain.
+	EventSignupAdmittedByDomainJoin EventType = "signup_admitted_by_domain_join"
+
 	// EventTenantSuspended / EventTenantRestored record an operator
 	// suspending a claimed tenant or restoring a suspended one
 	// (AdminSuspendTenant, AdminRestoreTenant), with the operator's IP
@@ -472,6 +481,13 @@ const (
 	// asked for, an active owner or admin one. Restoring an active member
 	// records nothing.
 	EventTenantMemberRestored EventType = "tenant_member_restored"
+
+	// EventTenantInvitationRevoked records a tenant owner or admin revoking a
+	// pending invitation (RevokeTenantInvitation): actor the caller and
+	// target the invitation, with the project and tenant ids, the role it
+	// offered and its inviter in the details. Revoking a revoked or expired
+	// invitation records nothing.
+	EventTenantInvitationRevoked EventType = "tenant_invitation_revoked"
 
 	// EventTenantOperatorRefused records a tenant_operator credential of an
 	// active project being refused on a tenant operation, under its own
@@ -582,6 +598,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantAdminAdded:              {},
 	EventTenantMemberAdded:             {},
 	EventSignupAdmittedByInvitation:    {},
+	EventSignupAdmittedByDomainJoin:    {},
 	EventTenantSuspended:               {},
 	EventTenantRestored:                {},
 	EventTenantOwnershipTransferred:    {},
@@ -591,6 +608,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantMemberRemoved:           {},
 	EventTenantMemberSuspended:         {},
 	EventTenantMemberRestored:          {},
+	EventTenantInvitationRevoked:       {},
 	EventTenantOperatorRefused:         {},
 }
 

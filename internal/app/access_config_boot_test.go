@@ -116,3 +116,23 @@ func TestNew_DefaultProjectAdmitTenantInvitationsNeedsInviteMode(t *testing.T) {
 		t.Errorf("boot error does not name the variable: %v", err)
 	}
 }
+
+// admit_domain_join is valid with mode invite only, so the default project's
+// switch on any other mode stops the boot, naming its variable, even with
+// the stores it reads.
+func TestNew_DefaultProjectAdmitDomainJoinNeedsInviteMode(t *testing.T) {
+	deps := bootDeps(t, &config.Config{
+		DefaultProjectAccessMode:      "open",
+		DefaultProjectAdmitDomainJoin: true,
+	})
+	deps.DomainStore, deps.TenantStore = &stubDomainStore{}, &stubTenantStore{}
+	_, err := New(deps)
+	if err == nil {
+		t.Fatal("expected New to fail on admit_domain_join without mode invite")
+	}
+	for _, want := range []string{"GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN", `admit_domain_join is only valid with mode "invite"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("boot error %q does not say %q", err, want)
+		}
+	}
+}
