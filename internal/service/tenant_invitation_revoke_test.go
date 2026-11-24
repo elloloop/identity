@@ -7,6 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/pkg/audit"
 )
@@ -15,11 +18,13 @@ import (
 
 const revokedEvent = string(audit.EventTenantInvitationRevoked)
 
-// revokeFixture is a no-mail membership fixture whose audit trail is
-// recorded, with mAdminID an owner of mTestTenant and mInvitee invited to it.
+// revokeFixture is a no-mail membership fixture whose audit trail and logs
+// are recorded, with mAdminID an owner of mTestTenant and mInvitee invited to
+// it.
 type revokeFixture struct {
 	*membershipFixture
 	audit *recordingAuditWriter
+	logs  *observer.ObservedLogs
 	inv   *TenantInvitation
 	token string
 }
@@ -28,12 +33,24 @@ func newRevokeFixture(t *testing.T) *revokeFixture {
 	t.Helper()
 	f := newMembershipFixtureNoMail()
 	w := newRecordingAuditWriter()
+	core, logs := observer.New(zapcore.InfoLevel)
 	f.svc.WithAudit(audit.NewLogger(w, "test-tenant", nil))
+	f.svc.logger = zap.New(core)
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleAdmin)
 	require.NoError(t, err)
 	f.users.put(mTestProject, mInviteeID, mInvitee)
-	return &revokeFixture{membershipFixture: f, audit: w, inv: out.Invitation, token: out.RawToken}
+	return &revokeFixture{membershipFixture: f, audit: w, logs: logs, inv: out.Invitation, token: out.RawToken}
+}
+
+// requireRevokeRefused asserts the one refusal line the last revoke logged
+// names reason.
+func (f *revokeFixture) requireRevokeRefused(t *testing.T, caller, tenantID, invitationID, reason string) {
+	t.Helper()
+	requireOneLogLine(t, f.logs, "tenant_invitation_revoke_refused", map[string]any{
+		"project_id": mTestProject, "tenant_id": tenantID, "invitation_id": invitationID, "user_id": caller, "reason": reason,
+	})
+	f.logs.TakeAll()
 }
 
 func (f *revokeFixture) stored(t *testing.T, projectID, invitationID string) *TenantInvitation {
@@ -59,6 +76,9 @@ func TestRevokeTenantInvitation_OwnerRevokesAndTheTokenStopsRedeeming(t *testing
 		"project_id": mTestProject, "tenant_id": mTestTenant, "role": RoleAdmin, "invited_by": mAdminID,
 	}}, f.audit.detailsOf(revokedEvent))
 	assert.Equal(t, [][2]string{{"203.0.113.7", "test-agent"}}, f.audit.clientsOf(revokedEvent))
+	requireOneLogLine(t, f.logs, "tenant_invitation_revoked", map[string]any{
+		"project_id": mTestProject, "tenant_id": mTestTenant, "invitation_id": f.inv.ID, "user_id": mAdminID,
+	})
 
 	_, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, f.token)
 	require.ErrorIs(t, err, ErrPermissionDenied)
@@ -89,6 +109,11 @@ func TestRevokeTenantInvitation_RevokingTwiceChangesNothing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, first, again)
 	assert.Equal(t, 1, f.audit.countByEventType(revokedEvent))
+	assert.Equal(t, 1, f.logs.FilterMessage("tenant_invitation_revoked").Len())
+	requireOneLogLine(t, f.logs, "tenant_invitation_revoke_unchanged", map[string]any{
+		"project_id": mTestProject, "tenant_id": mTestTenant, "invitation_id": f.inv.ID, "user_id": mAdminID,
+		"status": InvitationStatusRevoked,
+	})
 }
 
 // Only an active owner or admin of a tenant that may be governed revokes its
@@ -120,6 +145,7 @@ func TestRevokeTenantInvitation_RefusesWhoCannotGovernTheTenant(t *testing.T) {
 			require.ErrorIs(t, err, ErrPermissionDenied)
 			assert.Equal(t, InvitationStatusPending, f.stored(t, mTestProject, f.inv.ID).Status)
 			assert.Zero(t, f.audit.countByEventType(revokedEvent))
+			f.requireRevokeRefused(t, caller, mTestTenant, f.inv.ID, "not_permitted")
 		})
 	}
 }
@@ -139,13 +165,16 @@ func TestRevokeTenantInvitation_AnotherTenantsOrUnknownInvitationIsNotFound(t *t
 	_, err = f.svc.RevokeTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, other.Invitation.ID, "", "")
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.Equal(t, InvitationStatusPending, f.stored(t, mTestProject, other.Invitation.ID).Status)
+	f.requireRevokeRefused(t, mAdminID, mTestTenant, other.Invitation.ID, "not_found")
 
 	_, err = f.svc.RevokeTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "inv-unknown", "", "")
 	require.ErrorIs(t, err, ErrNotFound)
+	f.requireRevokeRefused(t, mAdminID, mTestTenant, "inv-unknown", "not_found")
 
 	_, err = f.svc.RevokeTenantInvitation(ctx, mAdminID, SessionSignIn{}, otherTenant, other.Invitation.ID, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	assert.Equal(t, InvitationStatusPending, f.stored(t, mTestProject, other.Invitation.ID).Status)
+	f.requireRevokeRefused(t, mAdminID, otherTenant, other.Invitation.ID, "not_permitted")
 
 	_, err = f.svc.RevokeTenantInvitation(withProject("proj-other"), mAdminID, SessionSignIn{}, mTestTenant, f.inv.ID, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "the caller governs the tenant in its own project only")
@@ -163,6 +192,7 @@ func TestRevokeTenantInvitation_AcceptedInvitationIsRefused(t *testing.T) {
 	_, err = f.svc.RevokeTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, f.inv.ID, "", "")
 	require.ErrorIs(t, err, ErrInvitationUsed)
 	assert.Equal(t, InvitationStatusAccepted, f.stored(t, mTestProject, f.inv.ID).Status)
+	f.requireRevokeRefused(t, mAdminID, mTestTenant, f.inv.ID, "accepted")
 	m, err := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mInviteeID)
 	require.NoError(t, err)
 	require.NotNil(t, m)
@@ -183,6 +213,7 @@ func TestRevokeTenantInvitation_ExpiredInvitationIsUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, InvitationStatusExpired, got.Status)
 	assert.Zero(t, f.audit.countByEventType(revokedEvent))
+	requireOneLogLine(t, f.logs, "tenant_invitation_revoke_unchanged", map[string]any{"status": InvitationStatusExpired})
 }
 
 func TestRevokeTenantInvitation_RejectsMissingProjectCallerAndIDs(t *testing.T) {
@@ -191,11 +222,16 @@ func TestRevokeTenantInvitation_RejectsMissingProjectCallerAndIDs(t *testing.T) 
 
 	_, err := f.svc.RevokeTenantInvitation(context.Background(), mAdminID, SessionSignIn{}, mTestTenant, f.inv.ID, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "no project")
+	requireOneLogLine(t, f.logs, "tenant_invitation_revoke_refused", map[string]any{"project_id": "", "reason": "no_project"})
+	f.logs.TakeAll()
 	_, err = f.svc.RevokeTenantInvitation(ctx, "", SessionSignIn{}, mTestTenant, f.inv.ID, "", "")
 	require.ErrorIs(t, err, ErrUnauthenticated, "no caller")
+	f.requireRevokeRefused(t, "", mTestTenant, f.inv.ID, "unauthenticated")
 	_, err = f.svc.RevokeTenantInvitation(ctx, mAdminID, SessionSignIn{}, " ", f.inv.ID, "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument, "no tenant_id")
+	f.requireRevokeRefused(t, mAdminID, "", f.inv.ID, "invalid_argument")
 	_, err = f.svc.RevokeTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, " ", "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument, "no invitation_id")
+	f.requireRevokeRefused(t, mAdminID, mTestTenant, "", "invalid_argument")
 	assert.Equal(t, InvitationStatusPending, f.stored(t, mTestProject, f.inv.ID).Status)
 }

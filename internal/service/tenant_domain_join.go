@@ -272,25 +272,48 @@ func (s *MembershipService) heldMembership(ctx context.Context, projectID, tenan
 // them join, and that domain (joinableTenantForDomain); none while the email
 // is unverified.
 func (s *MembershipService) joinableTenant(ctx context.Context, projectID string, user *User) (*Tenant, *Domain, error) {
-	return joinableTenantForDomain(ctx, s.domains, s.tenants, s.config(), projectID, verifiedEmailDomain(user))
+	t, d, _, err := joinableTenantForDomain(ctx, s.domains, s.tenants, s.config(), projectID, verifiedEmailDomain(user))
+	return t, d, err
 }
+
+// The rules joinableTenantForDomain names when a domain lets nobody join.
+const (
+	domainJoinNoDomain         = "no_domain"
+	domainJoinPublicMailDomain = "public_mail_domain"
+	domainJoinNotVerified      = "domain_not_verified"
+	domainJoinOff              = "joining_off"
+	domainJoinTenantNotClaimed = "tenant_not_claimed"
+)
 
 // joinableTenantForDomain returns the tenant the people on domain may join
 // by it, and that domain: the claimed tenant that has verified the domain,
-// while the domain allows joining. It returns nil, nil, nil when there is
-// none: domain is "" or a public provider's, no tenant has verified it, it
-// does not allow joining, or its tenant is latent or suspended.
-func joinableTenantForDomain(ctx context.Context, domains DomainStore, tenants TenantStore, cfg *config.Config, projectID, domain string) (*Tenant, *Domain, error) {
-	if domain == "" || cfg.IsPublicEmailDomain(domain) {
-		return nil, nil, nil
+// while the domain allows joining. When there is none it returns the rule
+// that says so: domain is "" (domainJoinNoDomain) or a public provider's
+// (domainJoinPublicMailDomain), no tenant has verified it
+// (domainJoinNotVerified), it does not allow joining (domainJoinOff), or its
+// tenant is latent or suspended (domainJoinTenantNotClaimed).
+func joinableTenantForDomain(ctx context.Context, domains DomainStore, tenants TenantStore, cfg *config.Config, projectID, domain string) (t *Tenant, d *Domain, refusal string, err error) {
+	switch {
+	case domain == "":
+		return nil, nil, domainJoinNoDomain, nil
+	case cfg.IsPublicEmailDomain(domain):
+		return nil, nil, domainJoinPublicMailDomain, nil
 	}
-	d, err := domains.GetVerifiedDomain(ctx, projectID, domain)
-	if err != nil || d == nil || !d.AllowJoin {
-		return nil, nil, err
+	d, err = domains.GetVerifiedDomain(ctx, projectID, domain)
+	switch {
+	case err != nil:
+		return nil, nil, "", err
+	case d == nil:
+		return nil, nil, domainJoinNotVerified, nil
+	case !d.AllowJoin:
+		return nil, nil, domainJoinOff, nil
 	}
-	t, err := tenants.GetTenant(ctx, projectID, d.TenantID)
-	if err != nil || t == nil || t.Status != TenantStatusClaimed {
-		return nil, nil, err
+	t, err = tenants.GetTenant(ctx, projectID, d.TenantID)
+	switch {
+	case err != nil:
+		return nil, nil, "", err
+	case t == nil || t.Status != TenantStatusClaimed:
+		return nil, nil, domainJoinTenantNotClaimed, nil
 	}
-	return t, d, nil
+	return t, d, "", nil
 }

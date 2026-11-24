@@ -393,33 +393,52 @@ func (s *MembershipService) ListTenantInvitations(ctx context.Context, callerID,
 // tenant holds it, and an accepted invitation is ErrInvitationUsed: its
 // member is removed with RemoveTenantMember. Revoking a revoked or expired
 // invitation returns it unchanged and records nothing; a revocation is
-// audited as EventTenantInvitationRevoked.
+// audited as EventTenantInvitationRevoked. Each call logs one line:
+// tenant_invitation_revoked, tenant_invitation_revoke_unchanged, or
+// tenant_invitation_revoke_refused with the reason.
 func (s *MembershipService) RevokeTenantInvitation(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, invitationID, ip, userAgent string) (*TenantInvitation, error) {
+	tenantID, invitationID = strings.TrimSpace(tenantID), strings.TrimSpace(invitationID)
 	projectID, err := s.requireProject(ctx)
-	if err != nil {
+	fields := []zap.Field{
+		zap.String("project_id", projectID), zap.String("tenant_id", tenantID),
+		zap.String("invitation_id", invitationID), zap.String("user_id", callerID),
+	}
+	refuse := func(reason string, err error) (*TenantInvitation, error) {
+		s.logger.Info("tenant_invitation_revoke_refused", append(fields, zap.String("reason", reason), zap.Error(err))...)
 		return nil, err
+	}
+	if err != nil {
+		return refuse("no_project", err)
 	}
 	if callerID == "" {
-		return nil, ErrUnauthenticated
+		return refuse("unauthenticated", ErrUnauthenticated)
 	}
 	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
-		return nil, err
+		return refuse("held_session", err)
 	}
-	tenantID, invitationID = strings.TrimSpace(tenantID), strings.TrimSpace(invitationID)
 	if tenantID == "" {
-		return nil, fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
+		return refuse("invalid_argument", fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument))
 	}
 	if invitationID == "" {
-		return nil, fmt.Errorf("%w: missing invitation_id", ErrInvalidArgument)
+		return refuse("invalid_argument", fmt.Errorf("%w: missing invitation_id", ErrInvalidArgument))
 	}
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
-		return nil, err
+		return refuse("not_permitted", err)
 	}
 	inv, changed, err := s.invitations.RevokeInvitation(ctx, projectID, tenantID, invitationID)
-	if err != nil {
-		return nil, err
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return refuse("not_found", err)
+	case errors.Is(err, ErrInvitationUsed):
+		return refuse("accepted", err)
+	case err != nil:
+		return refuse("store_error", err)
+	case !changed:
+		s.logger.Info("tenant_invitation_revoke_unchanged", append(fields, zap.String("status", inv.Status))...)
+		return inv, nil
 	}
-	if changed && s.audit != nil {
+	s.logger.Info("tenant_invitation_revoked", fields...)
+	if s.audit != nil {
 		s.audit.Log(ctx, audit.EventTenantInvitationRevoked,
 			audit.WithActor(callerID), audit.WithTarget(inv.ID),
 			audit.WithIP(ip), audit.WithUserAgent(userAgent),

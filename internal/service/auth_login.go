@@ -1079,6 +1079,8 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 		emailVerified: ProofCarriesTo(identity.Email, emailStr),
 		ipAddr:        ipAddr,
 		userAgent:     userAgent,
+		method:        "oauth",
+		provider:      identity.Provider,
 	})
 	if errors.Is(err, ErrAlreadyExists) {
 		return nil, false, s.refuseProviderSignIn(ctx, "", identity.Provider, "provider_address_is_a_recovery_email")
@@ -1161,6 +1163,11 @@ type resolveOrCreateOpts struct {
 	// an account an invitation admitted.
 	ipAddr    string
 	userAgent string
+	// method and provider name the sign-in that proved the address ("oauth"
+	// and the provider, or a passwordless method), for the log of an account
+	// a domain admitted or refused.
+	method   string
+	provider string
 }
 
 // resolveOrCreateUserByEmail is the single by-email account resolver: it looks
@@ -1195,7 +1202,7 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	// open to joining, admits it.
 	var admittedBy *signupAdmission
 	if opts.emailVerified {
-		admittedBy, err = s.enforceProjectAccessProvenSignup(ctx, email)
+		admittedBy, err = s.enforceProjectAccessProvenSignup(ctx, email, opts.method, opts.provider)
 	} else {
 		err = s.enforceProjectAccessSignup(ctx, email)
 	}
@@ -1245,7 +1252,7 @@ func (s *AuthService) resolveOrCreateUserByEmail(ctx context.Context, email cano
 	case admittedBy.invitation != nil:
 		s.recordInvitedSignup(ctx, newUser, admittedBy.invitation, opts.ipAddr, opts.userAgent)
 	default:
-		s.recordDomainJoinSignup(ctx, newUser, admittedBy.joinDomain, opts.ipAddr, opts.userAgent)
+		s.recordDomainJoinSignup(ctx, newUser, admittedBy.joinDomain, opts.method, opts.provider, opts.ipAddr, opts.userAgent)
 	}
 
 	// Best-effort: emit a user.created lifecycle event. No-op when eventing

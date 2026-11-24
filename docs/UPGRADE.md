@@ -41,7 +41,20 @@ far enough to join. A project can now opt in to creating that account.
 - **Audit.** Once the account exists, each admission records
   `signup_admitted_by_domain_join` (target the new account, the sign-in's IP
   address and user agent; the project, tenant and domain ids and the address's
-  domain in the details) and logs `signup_admitted_by_domain_join`.
+  domain in the details).
+- **Logs.** On a project that opted in, each decision about an address with no
+  account logs one INFO line carrying `project_id` and `email_domain`, never
+  the address: `signup_admitted_by_domain_join` (with `user_id`, `tenant_id`,
+  `domain_id`, `method`, `provider`) when the account is created,
+  `signup_not_admitted_by_domain_join` (with `method`, `provider`, `reason`)
+  when the domain refuses it, and `signup_code_allowed_by_domain_join` (with
+  `tenant_id`, `domain_id`) or `signup_code_withheld_by_domain_join` (with
+  `reason`) when a sign-in code is asked for. `reason` names the rule:
+  `public_mail_domain`, `domain_not_verified`, `joining_off`,
+  `tenant_not_claimed`, `self_service_tenant`, `email_signup_not_self`,
+  `passwordless_signup_off` (code requests only), `lookup_failed`,
+  `unavailable` or `no_domain`. A refusal by the deny layer is the existing
+  `project_access_denied` line's.
 - **Go API.** An embedder that builds `AuthService` itself calls
   `WithDomainJoin` with its domain and tenant stores.
 
@@ -75,6 +88,12 @@ open invitation and sent a new one.
 - **Audit.** A revocation records `tenant_invitation_revoked`: actor the
   caller, target the invitation, the caller's IP address and user agent, and
   the project and tenant ids, the role offered and the inviter in the details.
+- **Logs.** Each call logs one INFO line with `project_id`, `tenant_id`,
+  `invitation_id` and `user_id` (the caller): `tenant_invitation_revoked`,
+  `tenant_invitation_revoke_unchanged` (with the `status` it kept), or
+  `tenant_invitation_revoke_refused` with `reason` (`not_permitted`,
+  `not_found`, `accepted`, `invalid_argument`, `held_session`,
+  `unauthenticated`, `no_project` or `store_error`) and the error.
 - **Postgres only**, like the other invitation calls; the memory and SQLite
   drivers return `UNIMPLEMENTED`. It is served on the native gRPC bridge, and
   has no per-IP budget of its own, as it sends no email.
