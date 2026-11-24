@@ -847,12 +847,27 @@ func lockedEmailDomain(ctx context.Context, tx pgx.Tx, projectID, userID string)
 // AdminAddTenantAdmin can lower an owner, and the cascade that drops an
 // account's memberships when the account is deleted.
 func lockOwnersAnd(ctx context.Context, tx pgx.Tx, projectID, tenantID string, userIDs ...string) (map[string]*service.TenantMembership, error) {
+	return lockActiveAnd(ctx, tx, projectID, tenantID, []string{service.RoleOwner}, userIDs)
+}
+
+// lockGovernorsAnd is lockOwnersAnd over the tenant's active admin
+// memberships too, for a write that must keep the tenant an active owner or
+// admin (keepAGovernor). It takes its locks in the same single ordered pass,
+// so it queues with lockOwnersAnd's writes as they queue with each other.
+func lockGovernorsAnd(ctx context.Context, tx pgx.Tx, projectID, tenantID string, userIDs ...string) (map[string]*service.TenantMembership, error) {
+	return lockActiveAnd(ctx, tx, projectID, tenantID, []string{service.RoleOwner, service.RoleAdmin}, userIDs)
+}
+
+// lockActiveAnd locks the tenant's active memberships at one of roles and
+// those of userIDs, in one statement and in user_id order, and returns the
+// memberships of userIDs it found, by user id.
+func lockActiveAnd(ctx context.Context, tx pgx.Tx, projectID, tenantID string, roles, userIDs []string) (map[string]*service.TenantMembership, error) {
 	rows, err := tx.Query(ctx, `SELECT `+membershipColumns+`
 		FROM tenant_memberships
 		WHERE project_id = $1 AND tenant_id = $2
-		  AND ((role = 'owner' AND status = 'active') OR user_id = ANY($3))
+		  AND ((role = ANY($4::text[]) AND status = 'active') OR user_id = ANY($3))
 		ORDER BY user_id
-		FOR UPDATE`, projectID, tenantID, userIDs)
+		FOR UPDATE`, projectID, tenantID, userIDs, roles)
 	if err != nil {
 		return nil, err
 	}
@@ -925,6 +940,99 @@ func (s *MembershipStore) TransferOwnership(ctx context.Context, projectID, tena
 		return nil, nil, wrapPgErr("TransferOwnership(commit)", err)
 	}
 	return from, to, nil
+}
+
+// SetMemberRole implements service.MembershipStore. One transaction locks
+// the tenant's active owner and admin memberships with the member's and
+// change.By's (lockGovernorsAnd), then decides on them as they stand: a
+// suspension, removal or demotion of change.By that commits first is seen,
+// and a demotion counts the owners and admins left in a statement of its own
+// (keepAGovernor). Admins are locked with the owners because of that count:
+// two admins of a tenant with no owner, each stepping down, would otherwise
+// each see the other still an admin, and both commit.
+func (s *MembershipStore) SetMemberRole(ctx context.Context, change service.MemberRoleChange) (*service.TenantMembership, string, error) {
+	if change.ProjectID == "" || change.TenantID == "" || change.UserID == "" || change.By == "" {
+		return nil, "", fmt.Errorf("%w: project_id, tenant_id, user_id and the caller are required", service.ErrInvalidArgument)
+	}
+	if change.Role != service.RoleAdmin && change.Role != service.RoleMember {
+		return nil, "", fmt.Errorf("%w: role must be %q or %q", service.ErrInvalidArgument, service.RoleAdmin, service.RoleMember)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, "", wrapPgErr("SetMemberRole", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	held, err := lockGovernorsAnd(ctx, tx, change.ProjectID, change.TenantID, change.UserID, change.By)
+	if err != nil {
+		return nil, "", wrapPgErr("SetMemberRole(lock)", err)
+	}
+	if by := held[change.By]; by == nil || by.Status != service.MembershipStatusActive || (by.Role != service.RoleOwner && by.Role != service.RoleAdmin) {
+		return nil, "", fmt.Errorf("%w: only an active owner or admin of the tenant may set a member's role", service.ErrPermissionDenied)
+	}
+	target := held[change.UserID]
+	if target == nil || (target.Status != service.MembershipStatusActive && target.Status != service.MembershipStatusSuspended) {
+		return nil, "", fmt.Errorf("%w: the user is not a member of the tenant", service.ErrNotFound)
+	}
+	if target.Source == service.MembershipSourceDomain {
+		var onDomain bool
+		if err := tx.QueryRow(ctx, `SELECT `+onVerifiedDomain("m", "$4")+`
+			FROM tenant_memberships m
+			WHERE m.project_id = $1 AND m.tenant_id = $2 AND m.user_id = $3`,
+			change.ProjectID, change.TenantID, change.UserID, change.EmailDomain).Scan(&onDomain); err != nil {
+			return nil, "", wrapPgErr("SetMemberRole(domain)", err)
+		}
+		if !onDomain {
+			return nil, "", fmt.Errorf("%w: the user is not a member of the tenant", service.ErrNotFound)
+		}
+	}
+	switch {
+	case target.Role == service.RoleOwner:
+		return nil, "", service.ErrMemberIsOwner
+	case target.Role == change.Role:
+		return target, target.Role, nil
+	case change.Role == service.RoleAdmin && !change.MayBeAdmin:
+		return nil, "", fmt.Errorf("%w: the account is not an active person's with a verified email", service.ErrIneligibleTenantAdmin)
+	}
+	if err := keepAGovernor(ctx, tx, target); err != nil {
+		return nil, "", err
+	}
+	source := target.Source
+	if change.Role == service.RoleAdmin && source == service.MembershipSourceDomain {
+		source = service.MembershipSourceAdded
+	}
+	updated, err := scanMembership(tx.QueryRow(ctx, `
+		UPDATE tenant_memberships SET role = $4, source = $5, updated_at_ms = $6
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3
+		RETURNING `+membershipColumns, change.ProjectID, change.TenantID, change.UserID, change.Role, source, nowMs()))
+	if err != nil {
+		return nil, "", wrapPgErr("SetMemberRole", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, "", wrapPgErr("SetMemberRole(commit)", err)
+	}
+	return updated, target.Role, nil
+}
+
+// keepAGovernor refuses, with service.ErrLastTenantGovernor, to take target
+// out of the tenant's active owners and admins when no other is left. It
+// must run after lockGovernorsAnd in the same transaction: the count is a
+// statement of its own, so it sees whatever committed while the locks were
+// awaited.
+func keepAGovernor(ctx context.Context, tx pgx.Tx, target *service.TenantMembership) error {
+	if (target.Role != service.RoleOwner && target.Role != service.RoleAdmin) || target.Status != service.MembershipStatusActive {
+		return nil
+	}
+	var others int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM tenant_memberships
+		WHERE project_id = $1 AND tenant_id = $2 AND user_id <> $3
+		  AND role IN ('owner', 'admin') AND status = 'active'`, target.ProjectID, target.TenantID, target.UserID).Scan(&others); err != nil {
+		return wrapPgErr("SetMemberRole(count)", err)
+	}
+	if others == 0 {
+		return service.ErrLastTenantGovernor
+	}
+	return nil
 }
 
 // ── tenant_invitations ──────────────────────────────────────────────────

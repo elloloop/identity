@@ -360,6 +360,10 @@ type fakeMembershipStore struct {
 	// onRestore runs as RestoreMembership starts, standing for a write that
 	// lands between the service's checks and the restore's transaction.
 	onRestore func()
+	// onSetRole does the same for SetMemberRole, and setRoleErr, when set,
+	// is its answer.
+	onSetRole  func()
+	setRoleErr error
 	// verified holds each tenant's verified domains, keyed project/tenant,
 	// for the active-tenant reads' domain rule (verifyDomain).
 	verified map[string]map[string]bool
@@ -637,6 +641,60 @@ func (f *fakeMembershipStore) RestoreMembership(_ context.Context, projectID, te
 	}
 	out := *target
 	return &out, true, nil
+}
+
+// SetMemberRole mirrors the postgres store: c.By must hold an active owner
+// or admin membership, else ErrPermissionDenied; the member must be active
+// or suspended, and a domain one on a domain the tenant verified, else
+// ErrNotFound; an owner is ErrMemberIsOwner; the role held comes back
+// unchanged; a promotion needs c.MayBeAdmin; a demotion keeps an active
+// owner or admin; and a domain member made an admin becomes an added one.
+func (f *fakeMembershipStore) SetMemberRole(_ context.Context, c MemberRoleChange) (*TenantMembership, string, error) {
+	if f.onSetRole != nil {
+		f.onSetRole()
+	}
+	if f.setRoleErr != nil {
+		return nil, "", f.setRoleErr
+	}
+	by := f.byKey[f.key(c.ProjectID, c.TenantID, c.By)]
+	if by == nil || by.Status != MembershipStatusActive || !isAdminRole(by.Role) {
+		return nil, "", ErrPermissionDenied
+	}
+	target, ok := f.byKey[f.key(c.ProjectID, c.TenantID, c.UserID)]
+	switch {
+	case !ok, target.Status != MembershipStatusActive && target.Status != MembershipStatusSuspended,
+		target.Source == MembershipSourceDomain && !f.verified[c.ProjectID+"/"+c.TenantID][c.EmailDomain]:
+		return nil, "", ErrNotFound
+	case target.Role == RoleOwner:
+		return nil, "", ErrMemberIsOwner
+	case target.Role == c.Role:
+		out := *target
+		return &out, target.Role, nil
+	case c.Role == RoleAdmin && !c.MayBeAdmin:
+		return nil, "", ErrIneligibleTenantAdmin
+	}
+	if target.Status == MembershipStatusActive && isAdminRole(target.Role) && !f.othersGovern(target) {
+		return nil, "", ErrLastTenantGovernor
+	}
+	from := target.Role
+	target.Role = c.Role
+	if c.Role == RoleAdmin && target.Source == MembershipSourceDomain {
+		target.Source = MembershipSourceAdded
+	}
+	out := *target
+	return &out, from, nil
+}
+
+// othersGovern reports whether an active owner or admin of target's tenant
+// other than target remains.
+func (f *fakeMembershipStore) othersGovern(target *TenantMembership) bool {
+	for _, m := range f.byKey {
+		if m.ProjectID == target.ProjectID && m.TenantID == target.TenantID && m.UserID != target.UserID &&
+			isAdminRole(m.Role) && m.Status == MembershipStatusActive {
+			return true
+		}
+	}
+	return false
 }
 
 // accountEmailDomain is the domain of the email of userID's account in

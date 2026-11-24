@@ -141,10 +141,11 @@ const (
 	ownerEmailUnverified
 )
 
-// judgeTenantOwner applies the one rule for who may own a tenant: an
-// active, permanent person (an anonymous account is swept by retention, an
-// agent cannot hold what it would own, a merged account is gone) whose email
-// is verified, since an owner sends the tenant's invitations.
+// judgeTenantOwner applies the one rule for who may own a tenant, or be made
+// its admin: an active, permanent person (an anonymous account is swept by
+// retention, an agent cannot hold what it would own, a merged account is
+// gone) whose email is verified, since an owner or admin sends the tenant's
+// invitations.
 func judgeTenantOwner(u *User) tenantOwnerFitness {
 	switch {
 	case !isActivePerson(u):

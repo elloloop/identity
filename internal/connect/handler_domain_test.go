@@ -223,6 +223,22 @@ func (s *connectMembershipStore) RestoreMembership(_ context.Context, projectID,
 	return s.changed(projectID, tenantID, userID, service.MembershipStatusActive)
 }
 
+// SetMemberRole reports userID's invited membership as holding the role
+// asked for in place of the other one, or changeErr.
+func (s *connectMembershipStore) SetMemberRole(_ context.Context, c service.MemberRoleChange) (*service.TenantMembership, string, error) {
+	if s.changeErr != nil {
+		return nil, "", s.changeErr
+	}
+	from := service.RoleMember
+	if c.Role == service.RoleMember {
+		from = service.RoleAdmin
+	}
+	return &service.TenantMembership{
+		ID: "mem-" + c.UserID, ProjectID: c.ProjectID, TenantID: c.TenantID, UserID: c.UserID,
+		Source: service.MembershipSourceInvited, Role: c.Role, Status: service.MembershipStatusActive,
+	}, from, nil
+}
+
 func (s *connectMembershipStore) changed(projectID, tenantID, userID, status string) (*service.TenantMembership, bool, error) {
 	if s.changeErr != nil {
 		return nil, false, s.changeErr

@@ -115,6 +115,11 @@ suite (email, productivity tools).
   invites a new owner; once no owner or admin who is a person both can sign
   in and holds an active membership, an operator appoints one with
   `AdminRecoverTenantOwnership` (ADR-0018, Ownership).
+- An owner or admin makes a member an admin, or an admin a member, with
+  `SetTenantMemberRole`. An owner's role changes only by a transfer, only an
+  account that could own a tenant is made an admin, and no change leaves a
+  tenant without an active owner or admin (ADR-0018, Setting a member's
+  role).
 - An owner or admin stops a member acting in a tenant for a while with
   `SuspendTenantMember`, which keeps the membership's role and source at
   status `suspended`, and lets them back with `RestoreTenantMember`. A

@@ -560,6 +560,14 @@ func listsTenant(tenants []*identitypb.UserTenant, tenantID, role string) bool {
 // without verifying it: the test asserts which tenant the server stamped.
 func decodeTokenTenantClaim(t *testing.T, accessToken string) string {
 	t.Helper()
+	tenant, _ := decodeTokenClaims(t, accessToken)["tenant"].(string)
+	return tenant
+}
+
+// decodeTokenClaims returns the claims of a JWT access token without
+// verifying it.
+func decodeTokenClaims(t *testing.T, accessToken string) map[string]any {
+	t.Helper()
 	parts := strings.Split(accessToken, ".")
 	if len(parts) != 3 {
 		t.Fatalf("access token is not a JWT: %q", accessToken)
@@ -568,13 +576,11 @@ func decodeTokenTenantClaim(t *testing.T, accessToken string) string {
 	if err != nil {
 		t.Fatalf("decode token payload: %v", err)
 	}
-	var claims struct {
-		Tenant string `json:"tenant"`
-	}
+	var claims map[string]any
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		t.Fatalf("unmarshal token claims: %v", err)
 	}
-	return claims.Tenant
+	return claims
 }
 
 // waitForDomainMembership returns the domain-derived membership signup gave

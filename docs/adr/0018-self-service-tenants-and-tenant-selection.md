@@ -75,6 +75,11 @@ the tenant's owners and admins made. A tenant records what authorized the
 restore a suspended tenant a credential created even when nobody governs it
 ([Suspension](#suspension)).
 
+**Amended** (2026-11-24): an owner or admin can set a member's role.
+`SetTenantMemberRole` makes a member an admin or an admin a member, audited,
+never an owner's role, and never so that the tenant is left with no active
+owner or admin ([Setting a member's role](#setting-a-members-role)).
+
 ## Context
 
 Until now a tenant came into being in one of two ways: auto-formed from the
@@ -553,6 +558,31 @@ not listed at all. Suspending the tenant (above) stops everyone.
   revoke their agent grants or machines (decision 7). An access token that
   already names the tenant works until it expires, within the access-token
   lifetime. A product that cannot wait checks the membership itself.
+
+### Setting a member's role
+
+An application whose owners and admins promote and demote members must be
+able to tell identity, or identity goes on enforcing the old role on its own
+tenant calls. `SetTenantMemberRole(tenant_id, user_id, role)` sets `admin` or
+`member`.
+
+- **Ownership still moves only by a transfer.** `owner` is not a role it
+  sets, and an owner's role is not changed, so the owner rules above stand.
+- **A tenant keeps someone who governs it.** No change leaves the tenant
+  with no active owner or admin, the caller stepping down included. The
+  store locks the tenant's active admins with its owners, in the order every
+  membership write takes them, and counts who is left once the locks are
+  held: locking only the owners would let two admins of a tenant with no
+  owner step down side by side.
+- **The caller is checked where the change is written**, as for a restore,
+  so a caller suspended or made a member while the call is in flight
+  changes nothing.
+- **An admin is someone who could own the tenant**: an active, signed-up
+  person with a verified email, as for a transfer, since an admin sends the
+  tenant's invitations. A domain member made an admin becomes an `added`
+  member, as a new owner does.
+- **It counts at once.** The `tenant` claim names a tenant and no role, and
+  every call that needs an owner or admin reads the membership.
 
 ## What this amends
 

@@ -152,6 +152,7 @@ const (
 	IdentityService_SuspendTenantMember_FullMethodName                    = "/identity.v1.IdentityService/SuspendTenantMember"
 	IdentityService_RestoreTenantMember_FullMethodName                    = "/identity.v1.IdentityService/RestoreTenantMember"
 	IdentityService_TransferTenantOwnership_FullMethodName                = "/identity.v1.IdentityService/TransferTenantOwnership"
+	IdentityService_SetTenantMemberRole_FullMethodName                    = "/identity.v1.IdentityService/SetTenantMemberRole"
 	IdentityService_CreateTenant_FullMethodName                           = "/identity.v1.IdentityService/CreateTenant"
 	IdentityService_ListMyTenants_FullMethodName                          = "/identity.v1.IdentityService/ListMyTenants"
 	IdentityService_ListJoinableTenants_FullMethodName                    = "/identity.v1.IdentityService/ListJoinableTenants"
@@ -641,6 +642,33 @@ type IdentityServiceClient interface {
 	// see where ownership stands. Available only on the postgres
 	// control-plane driver.
 	TransferTenantOwnership(ctx context.Context, in *TransferTenantOwnershipRequest, opts ...grpc.CallOption) (*TransferTenantOwnershipResponse, error)
+	// SetTenantMemberRole sets user_id's role in tenant_id to "admin" or
+	// "member", so an owner or admin promotes a member to admin or makes an
+	// admin a member. The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended, and must still hold an active
+	// owner or admin membership when the change is written (PERMISSION_DENIED
+	// otherwise, and nothing changes). A missing tenant_id or user_id, or a
+	// role other than "admin" or "member", is INVALID_ARGUMENT; "owner" is
+	// refused too, as ownership moves only by TransferTenantOwnership. A
+	// user_id that is not an active or suspended member is NOT_FOUND, as is a
+	// member only through their email's domain once the tenant no longer
+	// verifies it. FAILED_PRECONDITION for an owner, whose role changes only by
+	// a transfer; for a promotion to admin of an account that is not an
+	// active, signed-up person's with a verified email, as an admin sends the
+	// tenant's invitations; and for a change that would leave the tenant with
+	// no active owner or admin, such as the last admin of a tenant with no
+	// owner stepping down. Naming the caller is allowed, so an admin can step
+	// down. A suspended member stays "suspended" with the new role. A member
+	// through their email's domain made an admin becomes an "added" member, as
+	// a transfer makes an owner, so the role does not end when the email
+	// leaves the domain. Setting the role a member already has returns the
+	// membership unchanged and records nothing; a change is audited with the
+	// previous and the new role. The role counts at once: an access token
+	// carries no tenant role, and ListMyTenants, ListTenantMembers and every
+	// call that needs an owner or admin read the membership as it stands.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	SetTenantMemberRole(ctx context.Context, in *SetTenantMemberRoleRequest, opts ...grpc.CallOption) (*SetTenantMemberRoleResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -2365,6 +2393,16 @@ func (c *identityServiceClient) TransferTenantOwnership(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *identityServiceClient) SetTenantMemberRole(ctx context.Context, in *SetTenantMemberRoleRequest, opts ...grpc.CallOption) (*SetTenantMemberRoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetTenantMemberRoleResponse)
+	err := c.cc.Invoke(ctx, IdentityService_SetTenantMemberRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateTenantResponse)
@@ -3338,6 +3376,33 @@ type IdentityServiceServer interface {
 	// see where ownership stands. Available only on the postgres
 	// control-plane driver.
 	TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*TransferTenantOwnershipResponse, error)
+	// SetTenantMemberRole sets user_id's role in tenant_id to "admin" or
+	// "member", so an owner or admin promotes a member to admin or makes an
+	// admin a member. The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended, and must still hold an active
+	// owner or admin membership when the change is written (PERMISSION_DENIED
+	// otherwise, and nothing changes). A missing tenant_id or user_id, or a
+	// role other than "admin" or "member", is INVALID_ARGUMENT; "owner" is
+	// refused too, as ownership moves only by TransferTenantOwnership. A
+	// user_id that is not an active or suspended member is NOT_FOUND, as is a
+	// member only through their email's domain once the tenant no longer
+	// verifies it. FAILED_PRECONDITION for an owner, whose role changes only by
+	// a transfer; for a promotion to admin of an account that is not an
+	// active, signed-up person's with a verified email, as an admin sends the
+	// tenant's invitations; and for a change that would leave the tenant with
+	// no active owner or admin, such as the last admin of a tenant with no
+	// owner stepping down. Naming the caller is allowed, so an admin can step
+	// down. A suspended member stays "suspended" with the new role. A member
+	// through their email's domain made an admin becomes an "added" member, as
+	// a transfer makes an owner, so the role does not end when the email
+	// leaves the domain. Setting the role a member already has returns the
+	// membership unchanged and records nothing; a change is audited with the
+	// previous and the new role. The role counts at once: an access token
+	// carries no tenant role, and ListMyTenants, ListTenantMembers and every
+	// call that needs an owner or admin read the membership as it stands.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	SetTenantMemberRole(context.Context, *SetTenantMemberRoleRequest) (*SetTenantMemberRoleResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -4130,6 +4195,9 @@ func (UnimplementedIdentityServiceServer) RestoreTenantMember(context.Context, *
 }
 func (UnimplementedIdentityServiceServer) TransferTenantOwnership(context.Context, *TransferTenantOwnershipRequest) (*TransferTenantOwnershipResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TransferTenantOwnership not implemented")
+}
+func (UnimplementedIdentityServiceServer) SetTenantMemberRole(context.Context, *SetTenantMemberRoleRequest) (*SetTenantMemberRoleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetTenantMemberRole not implemented")
 }
 func (UnimplementedIdentityServiceServer) CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTenant not implemented")
@@ -6708,6 +6776,24 @@ func _IdentityService_TransferTenantOwnership_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_SetTenantMemberRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTenantMemberRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).SetTenantMemberRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_SetTenantMemberRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).SetTenantMemberRole(ctx, req.(*SetTenantMemberRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_CreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateTenantRequest)
 	if err := dec(in); err != nil {
@@ -8218,6 +8304,10 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TransferTenantOwnership",
 			Handler:    _IdentityService_TransferTenantOwnership_Handler,
+		},
+		{
+			MethodName: "SetTenantMemberRole",
+			Handler:    _IdentityService_SetTenantMemberRole_Handler,
 		},
 		{
 			MethodName: "CreateTenant",

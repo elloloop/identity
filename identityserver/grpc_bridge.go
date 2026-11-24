@@ -981,6 +981,10 @@ func (b *grpcBridge) TransferTenantOwnership(ctx context.Context, in *identitypb
 	return invoke(ctx, b, in, b.h.TransferTenantOwnership)
 }
 
+func (b *grpcBridge) SetTenantMemberRole(ctx context.Context, in *identitypb.SetTenantMemberRoleRequest) (*identitypb.SetTenantMemberRoleResponse, error) {
+	return invoke(ctx, b, in, b.h.SetTenantMemberRole)
+}
+
 func (b *grpcBridge) CreateTenant(ctx context.Context, in *identitypb.CreateTenantRequest) (*identitypb.CreateTenantResponse, error) {
 	return invoke(ctx, b, in, b.h.CreateTenant)
 }
