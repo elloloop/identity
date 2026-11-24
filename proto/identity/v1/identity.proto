@@ -806,9 +806,10 @@ message ListRecoveryEmailsResponse {
 // guardian's control over a child (GrantParentalConsent,
 // CreateManagedChildAccount and the ManagedChild calls), give an agent to
 // someone else (TransferAgent), change who belongs to a tenant or with what
-// role (CreateTenantInvitation, RemoveTenantMember, SuspendTenantMember,
-// RestoreTenantMember, TransferTenantOwnership, CreateDomain, VerifyDomain,
-// SetDomainJoin), or, as a project admin, add, merge or reactivate an account
+// role (CreateTenantInvitation, RevokeTenantInvitation, RemoveTenantMember,
+// SuspendTenantMember, RestoreTenantMember, TransferTenantOwnership,
+// SetTenantMemberRole, CreateDomain, VerifyDomain, SetDomainJoin), or, as a
+// project admin, add, merge or reactivate an account
 // or set a role or another account's password (InviteUser, CreateUser,
 // UpdateUser, ResetUserPassword, MergeUsers, ReactivateUser). So whoever got into a recovery mailbox cannot take the
 // rest of the account, take it from the owner, or hand out what removing the
@@ -2446,6 +2447,19 @@ message TransferTenantOwnershipResponse {
   TenantMembership owner = 1;
   // previous_owner is the caller's membership, now an admin one.
   TenantMembership previous_owner = 2;
+}
+
+// SetTenantMemberRoleRequest names the member whose role an owner or admin of
+// the tenant sets, and the role.
+message SetTenantMemberRoleRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  string role = 3; // "admin" | "member"
+}
+
+message SetTenantMemberRoleResponse {
+  // membership is the member's membership as it then stands.
+  TenantMembership membership = 1;
 }
 
 message ListJoinableTenantsRequest {}
@@ -4257,6 +4271,33 @@ service IdentityService {
   // see where ownership stands. Available only on the postgres
   // control-plane driver.
   rpc TransferTenantOwnership(TransferTenantOwnershipRequest) returns (TransferTenantOwnershipResponse);
+  // SetTenantMemberRole sets user_id's role in tenant_id to "admin" or
+  // "member", so an owner or admin promotes a member to admin or makes an
+  // admin a member. The caller must be an active owner or admin of
+  // tenant_id, a tenant that is not suspended, and must still hold an active
+  // owner or admin membership when the change is written (PERMISSION_DENIED
+  // otherwise, and nothing changes). A missing tenant_id or user_id, or a
+  // role other than "admin" or "member", is INVALID_ARGUMENT; "owner" is
+  // refused too, as ownership moves only by TransferTenantOwnership. A
+  // user_id that is not an active or suspended member is NOT_FOUND, as is a
+  // member only through their email's domain once the tenant no longer
+  // verifies it. FAILED_PRECONDITION for an owner, whose role changes only by
+  // a transfer; for a promotion to admin of an account that is not an
+  // active, signed-up person's with a verified email, as an admin sends the
+  // tenant's invitations; and for a change that would leave the tenant with
+  // no active owner or admin, such as the last admin of a tenant with no
+  // owner stepping down. Naming the caller is allowed, so an admin can step
+  // down. A suspended member stays "suspended" with the new role. A member
+  // through their email's domain made an admin becomes an "added" member, as
+  // a transfer makes an owner, so the role does not end when the email
+  // leaves the domain. Setting the role a member already has returns the
+  // membership unchanged and records nothing; a change is audited with the
+  // previous and the new role. The role counts at once: an access token
+  // carries no tenant role, and ListMyTenants, ListTenantMembers and every
+  // call that needs an owner or admin read the membership as it stands.
+  // Available only on the postgres control-plane driver; the memory and
+  // SQLite drivers return Unimplemented.
+  rpc SetTenantMemberRole(SetTenantMemberRoleRequest) returns (SetTenantMemberRoleResponse);
 
   // Self-service tenants. Authenticated and project-scoped. CreateTenant
   // makes a claimed tenant with the caller as its owner, in one transaction;

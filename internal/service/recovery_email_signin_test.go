@@ -245,6 +245,10 @@ func (f *recoveryEmailFixture) heldGrants(userID string, session SessionSignIn) 
 			_, err := members.TransferTenantOwnership(f.ctx, userID, session, "tenant-1", "member-1", "", "")
 			return err
 		},
+		"SetTenantMemberRole": func() error {
+			_, err := members.SetTenantMemberRole(f.ctx, userID, session, "tenant-1", "member-1", RoleAdmin, "", "")
+			return err
+		},
 		"CreateDomain": func() error {
 			_, err := domains.CreateDomain(f.ctx, userID, session, "tenant-1", "example.org", DomainVerificationDNSTXT)
 			return err

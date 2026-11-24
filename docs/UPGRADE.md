@@ -1,5 +1,59 @@
 # Upgrade guide
 
+## Next — an owner or admin sets a member's role: `SetTenantMemberRole` (additive RPC and audit event `tenant_member_role_changed`; no migration; `MembershipStore.SetMemberRole` (Go API))
+
+A tenant member's role changed only by `TransferTenantOwnership`, so an
+application whose owners and admins promote or demote members could not tell
+identity, which went on enforcing the old role on its own tenant calls.
+
+- **`SetTenantMemberRole(tenant_id, user_id, role)`**, `role` `admin` or
+  `member`, makes a member an admin or an admin a member, and returns the
+  membership as it then stands. `owner`, a blank or any other role is
+  `INVALID_ARGUMENT`: ownership moves only by `TransferTenantOwnership`.
+- **Who may call it.** An active owner or admin of `tenant_id`, a tenant that
+  is not suspended, from a session no recovery hold binds; anyone else is
+  `PERMISSION_DENIED`. The caller's membership is checked again where the
+  change is written, so a caller suspended or made a member while the call is
+  in flight changes nothing. Naming yourself is allowed, so an admin can step
+  down.
+- **What it refuses.** A `user_id` that is not an active or suspended member,
+  or a member only through their email's domain once the tenant no longer
+  verifies it, is `NOT_FOUND`. `FAILED_PRECONDITION` for an owner; for a
+  promotion of an account that is not an active, signed-up person's with a
+  verified email, as an admin sends the tenant's invitations (so an agent
+  account is never made one); and for a change that would leave the tenant
+  with no active owner or admin.
+- **What it keeps.** A suspended member stays suspended with the new role. A
+  member through the email's domain made an admin becomes an `added` member,
+  as a transfer makes an owner. Setting the role a member holds returns the
+  membership unchanged and records nothing.
+- **When it counts.** At once. No access token carries a tenant role (the
+  `tenant` claim names the tenant only), and `ListMyTenants`,
+  `ListTenantMembers` and every call that needs an owner or admin read the
+  membership as it stands.
+- **Concurrency.** The store locks the tenant's active owner and admin
+  memberships with the member's and the caller's, in the order every
+  membership write takes them, and counts who is left once it holds them: of
+  two admins of a tenant with no owner stepping down at once, one is refused.
+- **Audit and logs.** A change records `tenant_member_role_changed`: actor the
+  caller, target the member, the caller's IP address and user agent, and the
+  project and tenant ids, the new `role`, `previous_role`, `source` and
+  `status` in the details. Each call logs one info line carrying the project,
+  tenant, member (`user_id`) and caller (`caller_id`) ids and never an
+  address: `tenant_member_role_changed` with `from_role` and `to_role`,
+  `tenant_member_role_unchanged`, or `tenant_member_role_change_refused` with
+  the `reason`: `no_project`, `unauthenticated`, `held_session`,
+  `invalid_argument`, `not_permitted`, `not_found`, `member_is_owner`,
+  `ineligible_admin`, `last_governor` or `store_error`.
+- **Postgres only**, like the other membership calls; the memory and SQLite
+  drivers return `UNIMPLEMENTED`. It is served on the native gRPC bridge, and
+  has no per-IP budget of its own, as it sends no email.
+- **Go API.** `MembershipStore` gains `SetMemberRole(ctx, MemberRoleChange)`;
+  an embedder with its own implementation adds it.
+  `MembershipService.SetTenantMemberRole` serves the RPC, refusing with
+  `service.ErrMemberIsOwner`, `ErrIneligibleTenantAdmin` and
+  `ErrLastTenantGovernor` among the existing errors.
+
 ## Next — a tenant invitation whose token was handed out never creates an account (migration `0067_add_tenant_invitation_token_only_in_email`, schema 67; `SignUpWithTenantInvitation` now on the sign-up budget over native gRPC too; `TenantInvitation.TokenOnlyInEmail` (Go API))
 
 A server with no mail settings hands each new invitation's token to its

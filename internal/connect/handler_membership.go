@@ -231,6 +231,27 @@ func (h *IdentityHandler) TransferTenantOwnership(
 	}), nil
 }
 
+// SetTenantMemberRole makes a member an admin, or an admin a member.
+// Owner/admin only; never an owner's role.
+func (h *IdentityHandler) SetTenantMemberRole(
+	ctx context.Context,
+	req *connect.Request[identitypb.SetTenantMemberRoleRequest],
+) (*connect.Response[identitypb.SetTenantMemberRoleResponse], error) {
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+
+	m, err := h.members.SetTenantMemberRole(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), req.Msg.GetUserId(), req.Msg.GetRole(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.SetTenantMemberRoleResponse{Membership: membershipToProto(m)}), nil
+}
+
 // invitationToProto converts a service-layer TenantInvitation to the proto
 // wire message. The token hash is never exposed.
 func invitationToProto(inv *service.TenantInvitation) *identitypb.TenantInvitation {

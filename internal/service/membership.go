@@ -144,6 +144,28 @@ func (r Restorer) IsOperator() bool { return r.operator }
 // an operator, which the store refuses before it reads anything.
 func (r Restorer) NamesNobody() bool { return !r.operator && r.userID == "" }
 
+// MemberRoleChange is an owner's or admin's change of a member's role,
+// written by MembershipStore.SetMemberRole.
+type MemberRoleChange struct {
+	ProjectID string
+	TenantID  string
+	UserID    string
+	// Role is the role the member is to hold: RoleAdmin or RoleMember.
+	Role string
+	// By is the owner or admin making the change, who must hold an active
+	// owner or admin membership of the tenant when it is written.
+	By string
+	// EmailDomain is the member's verified email domain
+	// (verifiedEmailDomain), "" while the email is unverified: a membership
+	// through the email's domain is one only while the tenant has verified
+	// that domain, as UserTenantReader counts it.
+	EmailDomain string
+	// MayBeAdmin reports whether the member's account may be made an admin.
+	// The zero value refuses every promotion, so a caller that does not say
+	// fails closed.
+	MayBeAdmin bool
+}
+
 // TenantMemberPhoneMatcher finds a tenant's members by their phone number,
 // given only its hash.
 type TenantMemberPhoneMatcher interface {
@@ -263,6 +285,21 @@ type MembershipStore interface {
 	// membership is returned unchanged. Any other status, or no membership,
 	// is ErrNotFound.
 	RestoreMembership(ctx context.Context, projectID, tenantID, userID string, by Restorer) (m *TenantMembership, changed bool, err error)
+	// SetMemberRole makes change.UserID's membership of the tenant hold
+	// change.Role, keeping its status, so a suspended member stays
+	// suspended. It decides where it writes, holding the tenant's active
+	// owner and admin memberships with the member's and change.By's:
+	// change.By must hold an active owner or admin one
+	// (ErrPermissionDenied); the member must be active or suspended, and one
+	// through the email's domain on a domain the tenant has verified
+	// (ErrNotFound); an owner's role is not set (ErrMemberIsOwner); a
+	// promotion needs change.MayBeAdmin (ErrIneligibleTenantAdmin); and the
+	// tenant keeps an active owner or admin (ErrLastTenantGovernor). A
+	// membership through the email's domain made an admin takes source
+	// MembershipSourceAdded, as TransferOwnership gives an owner. Returns the
+	// membership as it now stands and the role it held before, which is
+	// m.Role when nothing changed.
+	SetMemberRole(ctx context.Context, change MemberRoleChange) (m *TenantMembership, previousRole string, err error)
 }
 
 // InvitationStore persists TenantInvitations within a Project. Reads that

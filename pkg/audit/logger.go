@@ -484,6 +484,14 @@ const (
 	// records nothing.
 	EventTenantMemberRestored EventType = "tenant_member_restored"
 
+	// EventTenantMemberRoleChanged records a tenant owner or admin setting a
+	// member's role (SetTenantMemberRole), their own included: actor the
+	// caller and target the member, with the project and tenant ids, the
+	// role, source and status the membership now has, and the role it had
+	// before as previous_role, in the details. Setting the role the member
+	// already has records nothing.
+	EventTenantMemberRoleChanged EventType = "tenant_member_role_changed"
+
 	// EventTenantInvitationRevoked records a tenant owner or admin revoking a
 	// pending invitation (RevokeTenantInvitation): actor the caller and
 	// target the invitation, with the project and tenant ids, the role it
@@ -610,6 +618,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantMemberRemoved:           {},
 	EventTenantMemberSuspended:         {},
 	EventTenantMemberRestored:          {},
+	EventTenantMemberRoleChanged:       {},
 	EventTenantInvitationRevoked:       {},
 	EventTenantOperatorRefused:         {},
 }

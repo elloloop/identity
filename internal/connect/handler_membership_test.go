@@ -193,6 +193,10 @@ func TestMembershipRPCs_NilService_ReturnUnimplemented(t *testing.T) {
 		withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t", UserId: "u2"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
 
+	_, err = srv.client.SetTenantMemberRole(ctx,
+		withAuth(&identitypb.SetTenantMemberRoleRequest{TenantId: "t", UserId: "u2", Role: service.RoleAdmin}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+
 	_, err = srv.client.CreateTenant(ctx,
 		withAuth(&identitypb.CreateTenantRequest{Name: "Acme"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
@@ -256,6 +260,10 @@ func TestMembershipRPCs_MissingAuth_Unauthenticated(t *testing.T) {
 
 	_, err = srv.client.RestoreTenantMember(ctx,
 		connect.NewRequest(&identitypb.RestoreTenantMemberRequest{TenantId: "t", UserId: "u2"}))
+	requireCode(t, err, connect.CodeUnauthenticated)
+
+	_, err = srv.client.SetTenantMemberRole(ctx,
+		connect.NewRequest(&identitypb.SetTenantMemberRoleRequest{TenantId: "t", UserId: "u2", Role: service.RoleAdmin}))
 	requireCode(t, err, connect.CodeUnauthenticated)
 
 	_, err = srv.client.CreateTenant(ctx,
@@ -550,6 +558,66 @@ func TestSuspendAndRestoreTenantMember_Handler(t *testing.T) {
 	requireCode(t, err, connect.CodePermissionDenied)
 	_, err = srv.client.RestoreTenantMember(ctx,
 		withAuth(&identitypb.RestoreTenantMemberRequest{TenantId: "t-1", UserId: "admin-1"}, "admin-1"))
+	requireCode(t, err, connect.CodePermissionDenied)
+}
+
+// ── SetTenantMemberRole through the handler ─────────────────────────────
+
+// A promotion and a demotion come back as the membership then stands; a
+// missing id or a role other than admin or member is INVALID_ARGUMENT, a
+// caller who does not govern PERMISSION_DENIED, and each refusal the store
+// makes keeps its code.
+func TestSetTenantMemberRole_Handler(t *testing.T) {
+	t.Parallel()
+	members := &connectMembershipStore{member: &service.TenantMembership{
+		Role: service.RoleAdmin, Status: service.MembershipStatusActive,
+	}}
+	users := &connectUserDirectory{byID: map[string]*service.User{
+		"bob": {ID: "bob", Email: "bob@example.test", Status: service.StatusActive, EmailVerified: true},
+	}}
+	srv := startMembershipServer(t, newMembershipSvc(newConnectInvitationStore(), members, claimedTenantStore(), users))
+	ctx := context.Background()
+	setRole := func(userID, role string) (*connect.Response[identitypb.SetTenantMemberRoleResponse], error) {
+		return srv.client.SetTenantMemberRole(ctx, withAuth(&identitypb.SetTenantMemberRoleRequest{
+			TenantId: "t-1", UserId: userID, Role: role,
+		}, "admin-1"))
+	}
+
+	for _, role := range []string{service.RoleAdmin, service.RoleMember} {
+		resp, err := setRole("bob", role)
+		if err != nil {
+			t.Fatalf("SetTenantMemberRole(%s): %v", role, err)
+		}
+		if m := resp.Msg.GetMembership(); m.GetUserId() != "bob" || m.GetTenantId() != "t-1" ||
+			m.GetRole() != role || m.GetStatus() != service.MembershipStatusActive {
+			t.Fatalf("membership = %+v, want bob %s", m, role)
+		}
+	}
+
+	for _, role := range []string{service.RoleOwner, "", "superuser"} {
+		_, err := setRole("bob", role)
+		requireCode(t, err, connect.CodeInvalidArgument)
+	}
+	_, err := setRole(" ", service.RoleAdmin)
+	requireCode(t, err, connect.CodeInvalidArgument)
+	_, err = setRole("nobody", service.RoleAdmin)
+	requireCode(t, err, connect.CodeNotFound)
+
+	for err, code := range map[error]connect.Code{
+		service.ErrMemberIsOwner:         connect.CodeFailedPrecondition,
+		service.ErrIneligibleTenantAdmin: connect.CodeFailedPrecondition,
+		service.ErrLastTenantGovernor:    connect.CodeFailedPrecondition,
+		service.ErrNotFound:              connect.CodeNotFound,
+		service.ErrPermissionDenied:      connect.CodePermissionDenied,
+	} {
+		members.changeErr = err
+		_, got := setRole("bob", service.RoleMember)
+		requireCode(t, got, code)
+	}
+
+	members.changeErr = nil
+	members.member.Role = service.RoleMember
+	_, err = setRole("bob", service.RoleAdmin)
 	requireCode(t, err, connect.CodePermissionDenied)
 }
 

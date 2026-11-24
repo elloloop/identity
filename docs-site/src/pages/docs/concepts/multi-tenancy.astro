@@ -162,7 +162,8 @@ docker run ... \\
     <code>PERMISSION_DENIED</code> by every domain and membership call
     (registering, verifying and listing domains; letting a domain's people
     join; inviting; listing invitations and members; removing, suspending
-    or restoring a member; transferring ownership), and an invitation to it
+    or restoring a member; setting a member's role; transferring
+    ownership), and an invitation to it
     can no longer be
     accepted, nor can anyone join it by domain. Nothing they had set up is
     changed.
@@ -318,6 +319,44 @@ RestoreTenantMember(tenant_id, user_id)
     nothing records nothing. A removal's <code>tenant_member_removed</code>
     records the status the membership had, so removing a suspended member
     shows as one.
+  </p>
+  <h3 id="setting-a-members-role">Setting a member's role</h3>
+  <p>
+    An owner or admin makes a member an admin, or an admin a member:
+  </p>
+  <Code
+    code={`SetTenantMemberRole(tenant_id, user_id, role)   # role: "admin" | "member"
+  -> membership { role, status, source }   # also if the member already holds role
+  -> INVALID_ARGUMENT      # a missing id, or a role other than "admin" or "member"; "owner" moves by TransferTenantOwnership
+  -> FAILED_PRECONDITION   # user_id is an owner; a promotion of an account that is not an active, signed-up person's with a verified email; or no active owner or admin would be left
+  -> NOT_FOUND             # not an active or suspended member; a domain member off the tenant's verified domains
+  -> PERMISSION_DENIED     # not an active owner or admin of tenant_id, or the tenant is suspended`}
+    lang="bash"
+  />
+  <p>
+    The caller may name themselves, so an admin steps down, but a tenant
+    with no active owner keeps at least one active admin. The check is made
+    where the change is written, holding the memberships of the tenant's
+    owners and admins, so two admins stepping down at once cannot both
+    succeed, and a caller suspended or made a member while their call is in
+    flight changes nothing. An admin may change another admin's role, as an
+    admin may suspend or remove one; an owner's role changes only by
+    <code>TransferTenantOwnership</code>. A promotion needs an account that
+    could own a tenant, since an admin sends the tenant's invitations, so an
+    agent account is never made an admin. A suspended member keeps the
+    suspension with the new role. A member through their email's domain made
+    an admin becomes an <code>added</code> member, as a transfer makes an
+    owner, so the role does not end when the email leaves the domain.
+  </p>
+  <p>
+    The role counts at once. An access token names the tenant, not the
+    holder's role in it, so nothing waits for a refresh:
+    <code>ListMyTenants</code>, <code>ListTenantMembers</code> and every
+    call that needs an owner or admin read the membership as it stands. A
+    change is audited as <code>tenant_member_role_changed</code>, with the
+    new role, the one it replaced (<code>previous_role</code>), and the
+    membership's source and status; setting the role a member holds records
+    nothing.
   </p>
 
   <h2 id="choosing-a-tenant-for-a-token">Choosing a tenant for a token</h2>

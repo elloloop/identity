@@ -434,6 +434,9 @@ const (
 	// IdentityServiceTransferTenantOwnershipProcedure is the fully-qualified name of the
 	// IdentityService's TransferTenantOwnership RPC.
 	IdentityServiceTransferTenantOwnershipProcedure = "/identity.v1.IdentityService/TransferTenantOwnership"
+	// IdentityServiceSetTenantMemberRoleProcedure is the fully-qualified name of the IdentityService's
+	// SetTenantMemberRole RPC.
+	IdentityServiceSetTenantMemberRoleProcedure = "/identity.v1.IdentityService/SetTenantMemberRole"
 	// IdentityServiceCreateTenantProcedure is the fully-qualified name of the IdentityService's
 	// CreateTenant RPC.
 	IdentityServiceCreateTenantProcedure = "/identity.v1.IdentityService/CreateTenant"
@@ -1038,6 +1041,33 @@ type IdentityServiceClient interface {
 	// see where ownership stands. Available only on the postgres
 	// control-plane driver.
 	TransferTenantOwnership(context.Context, *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error)
+	// SetTenantMemberRole sets user_id's role in tenant_id to "admin" or
+	// "member", so an owner or admin promotes a member to admin or makes an
+	// admin a member. The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended, and must still hold an active
+	// owner or admin membership when the change is written (PERMISSION_DENIED
+	// otherwise, and nothing changes). A missing tenant_id or user_id, or a
+	// role other than "admin" or "member", is INVALID_ARGUMENT; "owner" is
+	// refused too, as ownership moves only by TransferTenantOwnership. A
+	// user_id that is not an active or suspended member is NOT_FOUND, as is a
+	// member only through their email's domain once the tenant no longer
+	// verifies it. FAILED_PRECONDITION for an owner, whose role changes only by
+	// a transfer; for a promotion to admin of an account that is not an
+	// active, signed-up person's with a verified email, as an admin sends the
+	// tenant's invitations; and for a change that would leave the tenant with
+	// no active owner or admin, such as the last admin of a tenant with no
+	// owner stepping down. Naming the caller is allowed, so an admin can step
+	// down. A suspended member stays "suspended" with the new role. A member
+	// through their email's domain made an admin becomes an "added" member, as
+	// a transfer makes an owner, so the role does not end when the email
+	// leaves the domain. Setting the role a member already has returns the
+	// membership unchanged and records nothing; a change is audited with the
+	// previous and the new role. The role counts at once: an access token
+	// carries no tenant role, and ListMyTenants, ListTenantMembers and every
+	// call that needs an owner or admin read the membership as it stands.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	SetTenantMemberRole(context.Context, *connect.Request[v1.SetTenantMemberRoleRequest]) (*connect.Response[v1.SetTenantMemberRoleResponse], error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -2233,6 +2263,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("TransferTenantOwnership")),
 			connect.WithClientOptions(opts...),
 		),
+		setTenantMemberRole: connect.NewClient[v1.SetTenantMemberRoleRequest, v1.SetTenantMemberRoleResponse](
+			httpClient,
+			baseURL+IdentityServiceSetTenantMemberRoleProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SetTenantMemberRole")),
+			connect.WithClientOptions(opts...),
+		),
 		createTenant: connect.NewClient[v1.CreateTenantRequest, v1.CreateTenantResponse](
 			httpClient,
 			baseURL+IdentityServiceCreateTenantProcedure,
@@ -2696,6 +2732,7 @@ type identityServiceClient struct {
 	suspendTenantMember                    *connect.Client[v1.SuspendTenantMemberRequest, v1.SuspendTenantMemberResponse]
 	restoreTenantMember                    *connect.Client[v1.RestoreTenantMemberRequest, v1.RestoreTenantMemberResponse]
 	transferTenantOwnership                *connect.Client[v1.TransferTenantOwnershipRequest, v1.TransferTenantOwnershipResponse]
+	setTenantMemberRole                    *connect.Client[v1.SetTenantMemberRoleRequest, v1.SetTenantMemberRoleResponse]
 	createTenant                           *connect.Client[v1.CreateTenantRequest, v1.CreateTenantResponse]
 	listMyTenants                          *connect.Client[v1.ListMyTenantsRequest, v1.ListMyTenantsResponse]
 	listJoinableTenants                    *connect.Client[v1.ListJoinableTenantsRequest, v1.ListJoinableTenantsResponse]
@@ -3417,6 +3454,11 @@ func (c *identityServiceClient) TransferTenantOwnership(ctx context.Context, req
 	return c.transferTenantOwnership.CallUnary(ctx, req)
 }
 
+// SetTenantMemberRole calls identity.v1.IdentityService.SetTenantMemberRole.
+func (c *identityServiceClient) SetTenantMemberRole(ctx context.Context, req *connect.Request[v1.SetTenantMemberRoleRequest]) (*connect.Response[v1.SetTenantMemberRoleResponse], error) {
+	return c.setTenantMemberRole.CallUnary(ctx, req)
+}
+
 // CreateTenant calls identity.v1.IdentityService.CreateTenant.
 func (c *identityServiceClient) CreateTenant(ctx context.Context, req *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error) {
 	return c.createTenant.CallUnary(ctx, req)
@@ -4122,6 +4164,33 @@ type IdentityServiceHandler interface {
 	// see where ownership stands. Available only on the postgres
 	// control-plane driver.
 	TransferTenantOwnership(context.Context, *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error)
+	// SetTenantMemberRole sets user_id's role in tenant_id to "admin" or
+	// "member", so an owner or admin promotes a member to admin or makes an
+	// admin a member. The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended, and must still hold an active
+	// owner or admin membership when the change is written (PERMISSION_DENIED
+	// otherwise, and nothing changes). A missing tenant_id or user_id, or a
+	// role other than "admin" or "member", is INVALID_ARGUMENT; "owner" is
+	// refused too, as ownership moves only by TransferTenantOwnership. A
+	// user_id that is not an active or suspended member is NOT_FOUND, as is a
+	// member only through their email's domain once the tenant no longer
+	// verifies it. FAILED_PRECONDITION for an owner, whose role changes only by
+	// a transfer; for a promotion to admin of an account that is not an
+	// active, signed-up person's with a verified email, as an admin sends the
+	// tenant's invitations; and for a change that would leave the tenant with
+	// no active owner or admin, such as the last admin of a tenant with no
+	// owner stepping down. Naming the caller is allowed, so an admin can step
+	// down. A suspended member stays "suspended" with the new role. A member
+	// through their email's domain made an admin becomes an "added" member, as
+	// a transfer makes an owner, so the role does not end when the email
+	// leaves the domain. Setting the role a member already has returns the
+	// membership unchanged and records nothing; a change is audited with the
+	// previous and the new role. The role counts at once: an access token
+	// carries no tenant role, and ListMyTenants, ListTenantMembers and every
+	// call that needs an owner or admin read the membership as it stands.
+	// Available only on the postgres control-plane driver; the memory and
+	// SQLite drivers return Unimplemented.
+	SetTenantMemberRole(context.Context, *connect.Request[v1.SetTenantMemberRoleRequest]) (*connect.Response[v1.SetTenantMemberRoleResponse], error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -5313,6 +5382,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("TransferTenantOwnership")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceSetTenantMemberRoleHandler := connect.NewUnaryHandler(
+		IdentityServiceSetTenantMemberRoleProcedure,
+		svc.SetTenantMemberRole,
+		connect.WithSchema(identityServiceMethods.ByName("SetTenantMemberRole")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceCreateTenantHandler := connect.NewUnaryHandler(
 		IdentityServiceCreateTenantProcedure,
 		svc.CreateTenant,
@@ -5906,6 +5981,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceRestoreTenantMemberHandler.ServeHTTP(w, r)
 		case IdentityServiceTransferTenantOwnershipProcedure:
 			identityServiceTransferTenantOwnershipHandler.ServeHTTP(w, r)
+		case IdentityServiceSetTenantMemberRoleProcedure:
+			identityServiceSetTenantMemberRoleHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateTenantProcedure:
 			identityServiceCreateTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceListMyTenantsProcedure:
@@ -6553,6 +6630,10 @@ func (UnimplementedIdentityServiceHandler) RestoreTenantMember(context.Context, 
 
 func (UnimplementedIdentityServiceHandler) TransferTenantOwnership(context.Context, *connect.Request[v1.TransferTenantOwnershipRequest]) (*connect.Response[v1.TransferTenantOwnershipResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.TransferTenantOwnership is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) SetTenantMemberRole(context.Context, *connect.Request[v1.SetTenantMemberRoleRequest]) (*connect.Response[v1.SetTenantMemberRoleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SetTenantMemberRole is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) CreateTenant(context.Context, *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error) {
