@@ -72,6 +72,32 @@ func TestGetTenantInvitation_OverTheWireWithoutASession(t *testing.T) {
 	}
 }
 
+// The sign-up is gated as PasswordSignup is, before the service runs: the
+// password sign-up switch, then the assurance token. A request that passes
+// both reaches the service, which has no invitations on this harness.
+func TestSignUpWithTenantInvitation_GatedAsPasswordSignup(t *testing.T) {
+	t.Parallel()
+	req := func() *connect.Request[identitypb.SignUpWithTenantInvitationRequest] {
+		return withClientHeaders(connect.NewRequest(&identitypb.SignUpWithTenantInvitationRequest{
+			Token: invitationLinkToken, Name: "Ravi Kumar", Password: strongPW,
+		}))
+	}
+
+	off := newHarness(t)
+	off.cfg.PasswordSignupEnabled = false
+	_, err := off.client.SignUpWithTenantInvitation(context.Background(), req())
+	requireCode(t, err, connect.CodeFailedPrecondition)
+
+	assured := newHarnessWithWebAssurance(t, &fakeVerifier{}, enableAssurance)
+	_, err = assured.client.SignUpWithTenantInvitation(context.Background(), req())
+	requireCode(t, err, connect.CodePermissionDenied)
+	_, err = assured.client.SignUpWithTenantInvitation(context.Background(), assuredRequest(req(), exchangeWebToken(t, assured, "captcha-solution")))
+	requireCode(t, err, connect.CodeUnimplemented)
+	if n := len(assured.repo.users); n != 0 {
+		t.Fatalf("%d accounts created, want none", n)
+	}
+}
+
 func TestGetTenantInvitation_OverTheWireRefusals(t *testing.T) {
 	t.Parallel()
 	srv := invitationReadServer(t)

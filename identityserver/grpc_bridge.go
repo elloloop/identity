@@ -292,6 +292,10 @@ func (b *grpcBridge) UsernameSignup(ctx context.Context, in *identitypb.Username
 	return invoke(ctx, b, in, b.h.UsernameSignup)
 }
 
+func (b *grpcBridge) SignUpWithTenantInvitation(ctx context.Context, in *identitypb.SignUpWithTenantInvitationRequest) (*identitypb.SignUpWithTenantInvitationResponse, error) {
+	return invoke(ctx, b, in, b.h.SignUpWithTenantInvitation)
+}
+
 func (b *grpcBridge) PasswordLogin(ctx context.Context, in *identitypb.PasswordLoginRequest) (*identitypb.PasswordLoginResponse, error) {
 	return invoke(ctx, b, in, b.h.PasswordLogin)
 }

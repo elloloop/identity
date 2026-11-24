@@ -63,6 +63,8 @@ func TestToConnectError_SentinelMapping(t *testing.T) {
 		{"SignupDisabled", service.ErrSignupDisabled, connect.CodeFailedPrecondition},
 		{"InvitationUsed", service.ErrInvitationUsed, connect.CodeFailedPrecondition},
 		{"InvitationExpired", service.ErrInvitationExpired, connect.CodeFailedPrecondition},
+		{"InvitationRevoked", service.ErrInvitationRevoked, connect.CodeFailedPrecondition},
+		{"InvitationSignupUnavailable", service.ErrInvitationSignupUnavailable, connect.CodeFailedPrecondition},
 		{"QrLoginNotPending", service.ErrQrLoginNotPending, connect.CodeFailedPrecondition},
 		{"LocalAuthDisabled", service.ErrLocalAuthDisabled, connect.CodeUnavailable},
 		{"AgentSignIn", service.ErrAgentSignIn, connect.CodePermissionDenied},

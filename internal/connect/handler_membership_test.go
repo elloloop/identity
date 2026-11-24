@@ -83,6 +83,16 @@ func (s *connectInvitationStore) RevokeInvitation(_ context.Context, _, tenantID
 	return &cp, false, nil
 }
 
+// OpenInvitationForToken counts every pending, unexpired invitation open: the
+// store keeps no tenants or inviters to filter by.
+func (s *connectInvitationStore) OpenInvitationForToken(_ context.Context, _, tokenHash string, nowMs int64) (*service.TenantInvitation, error) {
+	if inv := s.byHash[tokenHash]; inv != nil && inv.Status == service.InvitationStatusPending &&
+		(inv.ExpiresAtMs == 0 || inv.ExpiresAtMs >= nowMs) {
+		return inv, nil
+	}
+	return nil, nil
+}
+
 func (s *connectInvitationStore) ListInvitationsForTenant(_ context.Context, _, _ string) ([]*service.TenantInvitation, error) {
 	return s.listResp, nil
 }

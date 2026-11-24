@@ -720,7 +720,8 @@ for an address a pending invitation from a tenant not made through
 self-service names, or, when it sets `access.admit_domain_join` (off by
 default), for an address on a domain such a tenant has verified and opened to
 joining, once its owner proves it (an OAuth provider that verified
-it, or a redeemed emailed code or link). It **fails DENY**: an unset, empty, or unrecognized mode denies
+it, or a redeemed emailed code or link; an invited address also by the
+invitation's own emailed link, `SignUpWithTenantInvitation`). It **fails DENY**: an unset, empty, or unrecognized mode denies
 everyone, so a project nobody has explicitly opened cannot authenticate
 anyone. `allowed_emails` / `allowed_domains` belong to `allowlist` mode and
 are rejected with any other mode, where they would be inert.
@@ -828,7 +829,11 @@ an operator, or a `tenant_operator` credential, creates a tenant and appoints
 its first owner; that owner can make others admins; and every active owner or
 admin of such a tenant can then bring new accounts into the project by
 inviting them. The account joins no tenant, not even its email
-domain's, until it accepts, and outlives a later revocation. Postgres only:
+domain's, until it accepts, and outlives a later revocation.
+`SignUpWithTenantInvitation` makes such an account from the invitation's
+own link, with a name and a password: the token's invitation must itself be
+open as above, and the call is refused outright on a server with no mail
+provider, which hands invitation tokens to their inviters. Postgres only:
 per-project `config_json` lives only in the Postgres control plane, and the
 default project's variable refuses to boot on memory or SQLite. See the
 multi-tenancy docs, "invited sign-up".

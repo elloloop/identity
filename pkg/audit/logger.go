@@ -391,10 +391,12 @@ const (
 
 	// EventSignupAdmittedByInvitation records an invite project having
 	// created an account because a pending tenant invitation names the address
-	// its owner proved (access.admit_tenant_invitations). It is written once
-	// the account exists: no actor, target the new account, the sign-in's IP
-	// address and user agent, and the project id, the invitation, tenant and
-	// inviter ids and the address's domain in the details.
+	// its owner proved (access.admit_tenant_invitations), by a provider, an
+	// emailed code or link, or the invitation's own emailed link
+	// (SignUpWithTenantInvitation). It is written once the account exists: no
+	// actor, target the new account, the sign-up's IP address and user agent,
+	// and the project id, the invitation, tenant and inviter ids and the
+	// address's domain in the details.
 	EventSignupAdmittedByInvitation EventType = "signup_admitted_by_invitation"
 
 	// EventSignupAdmittedByDomainJoin records an invite project having

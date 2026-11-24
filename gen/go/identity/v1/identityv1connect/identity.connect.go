@@ -407,6 +407,9 @@ const (
 	// IdentityServiceGetTenantInvitationProcedure is the fully-qualified name of the IdentityService's
 	// GetTenantInvitation RPC.
 	IdentityServiceGetTenantInvitationProcedure = "/identity.v1.IdentityService/GetTenantInvitation"
+	// IdentityServiceSignUpWithTenantInvitationProcedure is the fully-qualified name of the
+	// IdentityService's SignUpWithTenantInvitation RPC.
+	IdentityServiceSignUpWithTenantInvitationProcedure = "/identity.v1.IdentityService/SignUpWithTenantInvitation"
 	// IdentityServiceAcceptTenantInvitationProcedure is the fully-qualified name of the
 	// IdentityService's AcceptTenantInvitation RPC.
 	IdentityServiceAcceptTenantInvitationProcedure = "/identity.v1.IdentityService/AcceptTenantInvitation"
@@ -870,9 +873,9 @@ type IdentityServiceClient interface {
 	// for the value the domain has returns it unchanged and records nothing.
 	SetDomainJoin(context.Context, *connect.Request[v1.SetDomainJoinRequest]) (*connect.Response[v1.SetDomainJoinResponse], error)
 	// Tenant membership (redesign). Project-scoped, authenticated except for
-	// GetTenantInvitation, and — except for AcceptTenantInvitation and
-	// GetTenantInvitation — gated on the caller being an owner/admin
-	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
+	// GetTenantInvitation and SignUpWithTenantInvitation, and — except for
+	// those two and AcceptTenantInvitation — gated on the caller being an
+	// owner/admin member of the target tenant. AcceptTenantInvitation is the redeemer's own
 	// action: any authenticated caller may redeem a token, but only for an
 	// invitation addressed to their own account email (compared in the
 	// canonical form sign-in uses, so a "+tag" spelling of it matches;
@@ -912,6 +915,40 @@ type IdentityServiceClient interface {
 	// postgres control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.
 	GetTenantInvitation(context.Context, *connect.Request[v1.GetTenantInvitationRequest]) (*connect.Response[v1.GetTenantInvitationResponse], error)
+	// SignUpWithTenantInvitation creates the account a pending tenant
+	// invitation names, from the raw token its email carries, with a name and
+	// a password, and signs it in. It needs no session and is gated as
+	// PasswordSignup is: by GATEWAY_AUTH_ALLOW_LOCAL and
+	// GATEWAY_PASSWORD_SIGNUP_ENABLED, and by the X-Assurance-Token header
+	// while GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP is on. The account holds
+	// the invited address, verified (the emailed link proves it), is active,
+	// and belongs to no tenant: it skips domain auto-formation and joins the
+	// inviting tenant only by accepting, so the invitation stays pending for
+	// AcceptTenantInvitation. FAILED_PRECONDITION with the stable
+	// `invitation_signup_unavailable` token when the project does not let an
+	// invitation create an account (access.mode invite with
+	// access.admit_tenant_invitations, and accounts.email_signup self), or
+	// the server has no mail provider, which hands an invitation's token to
+	// its inviter; NOT_FOUND for a token no invitation of the project has;
+	// FAILED_PRECONDITION for an invitation that was accepted, was revoked or
+	// has expired; PERMISSION_DENIED for one that cannot create an account
+	// (its tenant was made through self-service CreateTenant or cannot take
+	// members, or its inviter is no longer an active owner or admin there who
+	// can sign in) and for an address the project's deny layer refuses;
+	// ALREADY_EXISTS when an account holds the address, as its email or as a
+	// recovery email; FAILED_PRECONDITION when the login policy governing the
+	// address requires single sign-on or two-factor authentication, and
+	// PERMISSION_DENIED when it does not allow passwords; INVALID_ARGUMENT for
+	// a blank token or password, a name that is blank, longer than 100
+	// characters or carries control or invisible formatting characters, or a
+	// password the password rules refuse, the address's tenant's included.
+	// Once the account exists its session is refused as any sign-in's is: for
+	// a missing required date of birth, FAILED_PRECONDITION with
+	// DOBRequiredDetails. Calls share PasswordSignup's per-IP budget
+	// (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS)
+	// on the HTTP handler only. Available only on the postgres control-plane
+	// driver; the memory and SQLite drivers return Unimplemented.
+	SignUpWithTenantInvitation(context.Context, *connect.Request[v1.SignUpWithTenantInvitationRequest]) (*connect.Response[v1.SignUpWithTenantInvitationResponse], error)
 	AcceptTenantInvitation(context.Context, *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error)
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
 	// RevokeTenantInvitation withdraws a pending invitation: it becomes
@@ -2131,6 +2168,12 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("GetTenantInvitation")),
 			connect.WithClientOptions(opts...),
 		),
+		signUpWithTenantInvitation: connect.NewClient[v1.SignUpWithTenantInvitationRequest, v1.SignUpWithTenantInvitationResponse](
+			httpClient,
+			baseURL+IdentityServiceSignUpWithTenantInvitationProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("SignUpWithTenantInvitation")),
+			connect.WithClientOptions(opts...),
+		),
 		acceptTenantInvitation: connect.NewClient[v1.AcceptTenantInvitationRequest, v1.AcceptTenantInvitationResponse](
 			httpClient,
 			baseURL+IdentityServiceAcceptTenantInvitationProcedure,
@@ -2633,6 +2676,7 @@ type identityServiceClient struct {
 	setDomainJoin                          *connect.Client[v1.SetDomainJoinRequest, v1.SetDomainJoinResponse]
 	createTenantInvitation                 *connect.Client[v1.CreateTenantInvitationRequest, v1.CreateTenantInvitationResponse]
 	getTenantInvitation                    *connect.Client[v1.GetTenantInvitationRequest, v1.GetTenantInvitationResponse]
+	signUpWithTenantInvitation             *connect.Client[v1.SignUpWithTenantInvitationRequest, v1.SignUpWithTenantInvitationResponse]
 	acceptTenantInvitation                 *connect.Client[v1.AcceptTenantInvitationRequest, v1.AcceptTenantInvitationResponse]
 	listTenantInvitations                  *connect.Client[v1.ListTenantInvitationsRequest, v1.ListTenantInvitationsResponse]
 	revokeTenantInvitation                 *connect.Client[v1.RevokeTenantInvitationRequest, v1.RevokeTenantInvitationResponse]
@@ -3317,6 +3361,11 @@ func (c *identityServiceClient) GetTenantInvitation(ctx context.Context, req *co
 	return c.getTenantInvitation.CallUnary(ctx, req)
 }
 
+// SignUpWithTenantInvitation calls identity.v1.IdentityService.SignUpWithTenantInvitation.
+func (c *identityServiceClient) SignUpWithTenantInvitation(ctx context.Context, req *connect.Request[v1.SignUpWithTenantInvitationRequest]) (*connect.Response[v1.SignUpWithTenantInvitationResponse], error) {
+	return c.signUpWithTenantInvitation.CallUnary(ctx, req)
+}
+
 // AcceptTenantInvitation calls identity.v1.IdentityService.AcceptTenantInvitation.
 func (c *identityServiceClient) AcceptTenantInvitation(ctx context.Context, req *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error) {
 	return c.acceptTenantInvitation.CallUnary(ctx, req)
@@ -3897,9 +3946,9 @@ type IdentityServiceHandler interface {
 	// for the value the domain has returns it unchanged and records nothing.
 	SetDomainJoin(context.Context, *connect.Request[v1.SetDomainJoinRequest]) (*connect.Response[v1.SetDomainJoinResponse], error)
 	// Tenant membership (redesign). Project-scoped, authenticated except for
-	// GetTenantInvitation, and — except for AcceptTenantInvitation and
-	// GetTenantInvitation — gated on the caller being an owner/admin
-	// member of the target tenant. AcceptTenantInvitation is the redeemer's own
+	// GetTenantInvitation and SignUpWithTenantInvitation, and — except for
+	// those two and AcceptTenantInvitation — gated on the caller being an
+	// owner/admin member of the target tenant. AcceptTenantInvitation is the redeemer's own
 	// action: any authenticated caller may redeem a token, but only for an
 	// invitation addressed to their own account email (compared in the
 	// canonical form sign-in uses, so a "+tag" spelling of it matches;
@@ -3939,6 +3988,40 @@ type IdentityServiceHandler interface {
 	// postgres control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.
 	GetTenantInvitation(context.Context, *connect.Request[v1.GetTenantInvitationRequest]) (*connect.Response[v1.GetTenantInvitationResponse], error)
+	// SignUpWithTenantInvitation creates the account a pending tenant
+	// invitation names, from the raw token its email carries, with a name and
+	// a password, and signs it in. It needs no session and is gated as
+	// PasswordSignup is: by GATEWAY_AUTH_ALLOW_LOCAL and
+	// GATEWAY_PASSWORD_SIGNUP_ENABLED, and by the X-Assurance-Token header
+	// while GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP is on. The account holds
+	// the invited address, verified (the emailed link proves it), is active,
+	// and belongs to no tenant: it skips domain auto-formation and joins the
+	// inviting tenant only by accepting, so the invitation stays pending for
+	// AcceptTenantInvitation. FAILED_PRECONDITION with the stable
+	// `invitation_signup_unavailable` token when the project does not let an
+	// invitation create an account (access.mode invite with
+	// access.admit_tenant_invitations, and accounts.email_signup self), or
+	// the server has no mail provider, which hands an invitation's token to
+	// its inviter; NOT_FOUND for a token no invitation of the project has;
+	// FAILED_PRECONDITION for an invitation that was accepted, was revoked or
+	// has expired; PERMISSION_DENIED for one that cannot create an account
+	// (its tenant was made through self-service CreateTenant or cannot take
+	// members, or its inviter is no longer an active owner or admin there who
+	// can sign in) and for an address the project's deny layer refuses;
+	// ALREADY_EXISTS when an account holds the address, as its email or as a
+	// recovery email; FAILED_PRECONDITION when the login policy governing the
+	// address requires single sign-on or two-factor authentication, and
+	// PERMISSION_DENIED when it does not allow passwords; INVALID_ARGUMENT for
+	// a blank token or password, a name that is blank, longer than 100
+	// characters or carries control or invisible formatting characters, or a
+	// password the password rules refuse, the address's tenant's included.
+	// Once the account exists its session is refused as any sign-in's is: for
+	// a missing required date of birth, FAILED_PRECONDITION with
+	// DOBRequiredDetails. Calls share PasswordSignup's per-IP budget
+	// (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS)
+	// on the HTTP handler only. Available only on the postgres control-plane
+	// driver; the memory and SQLite drivers return Unimplemented.
+	SignUpWithTenantInvitation(context.Context, *connect.Request[v1.SignUpWithTenantInvitationRequest]) (*connect.Response[v1.SignUpWithTenantInvitationResponse], error)
 	AcceptTenantInvitation(context.Context, *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error)
 	ListTenantInvitations(context.Context, *connect.Request[v1.ListTenantInvitationsRequest]) (*connect.Response[v1.ListTenantInvitationsResponse], error)
 	// RevokeTenantInvitation withdraws a pending invitation: it becomes
@@ -5154,6 +5237,12 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("GetTenantInvitation")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceSignUpWithTenantInvitationHandler := connect.NewUnaryHandler(
+		IdentityServiceSignUpWithTenantInvitationProcedure,
+		svc.SignUpWithTenantInvitation,
+		connect.WithSchema(identityServiceMethods.ByName("SignUpWithTenantInvitation")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAcceptTenantInvitationHandler := connect.NewUnaryHandler(
 		IdentityServiceAcceptTenantInvitationProcedure,
 		svc.AcceptTenantInvitation,
@@ -5777,6 +5866,8 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceCreateTenantInvitationHandler.ServeHTTP(w, r)
 		case IdentityServiceGetTenantInvitationProcedure:
 			identityServiceGetTenantInvitationHandler.ServeHTTP(w, r)
+		case IdentityServiceSignUpWithTenantInvitationProcedure:
+			identityServiceSignUpWithTenantInvitationHandler.ServeHTTP(w, r)
 		case IdentityServiceAcceptTenantInvitationProcedure:
 			identityServiceAcceptTenantInvitationHandler.ServeHTTP(w, r)
 		case IdentityServiceListTenantInvitationsProcedure:
@@ -6404,6 +6495,10 @@ func (UnimplementedIdentityServiceHandler) CreateTenantInvitation(context.Contex
 
 func (UnimplementedIdentityServiceHandler) GetTenantInvitation(context.Context, *connect.Request[v1.GetTenantInvitationRequest]) (*connect.Response[v1.GetTenantInvitationResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetTenantInvitation is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) SignUpWithTenantInvitation(context.Context, *connect.Request[v1.SignUpWithTenantInvitationRequest]) (*connect.Response[v1.SignUpWithTenantInvitationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SignUpWithTenantInvitation is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) AcceptTenantInvitation(context.Context, *connect.Request[v1.AcceptTenantInvitationRequest]) (*connect.Response[v1.AcceptTenantInvitationResponse], error) {

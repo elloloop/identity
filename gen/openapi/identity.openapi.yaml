@@ -2199,9 +2199,9 @@ paths:
       summary: CreateTenantInvitation
       description: |-
         Tenant membership (redesign). Project-scoped, authenticated except for
-         GetTenantInvitation, and — except for AcceptTenantInvitation and
-         GetTenantInvitation — gated on the caller being an owner/admin
-         member of the target tenant. AcceptTenantInvitation is the redeemer's own
+         GetTenantInvitation and SignUpWithTenantInvitation, and — except for
+         those two and AcceptTenantInvitation — gated on the caller being an
+         owner/admin member of the target tenant. AcceptTenantInvitation is the redeemer's own
          action: any authenticated caller may redeem a token, but only for an
          invitation addressed to their own account email (compared in the
          canonical form sign-in uses, so a "+tag" spelling of it matches;
@@ -6326,6 +6326,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.SignOutEverywhereResponse'
+  /identity.v1.IdentityService/SignUpWithTenantInvitation:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: SignUpWithTenantInvitation
+      description: |-
+        SignUpWithTenantInvitation creates the account a pending tenant
+         invitation names, from the raw token its email carries, with a name and
+         a password, and signs it in. It needs no session and is gated as
+         PasswordSignup is: by GATEWAY_AUTH_ALLOW_LOCAL and
+         GATEWAY_PASSWORD_SIGNUP_ENABLED, and by the X-Assurance-Token header
+         while GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP is on. The account holds
+         the invited address, verified (the emailed link proves it), is active,
+         and belongs to no tenant: it skips domain auto-formation and joins the
+         inviting tenant only by accepting, so the invitation stays pending for
+         AcceptTenantInvitation. FAILED_PRECONDITION with the stable
+         `invitation_signup_unavailable` token when the project does not let an
+         invitation create an account (access.mode invite with
+         access.admit_tenant_invitations, and accounts.email_signup self), or
+         the server has no mail provider, which hands an invitation's token to
+         its inviter; NOT_FOUND for a token no invitation of the project has;
+         FAILED_PRECONDITION for an invitation that was accepted, was revoked or
+         has expired; PERMISSION_DENIED for one that cannot create an account
+         (its tenant was made through self-service CreateTenant or cannot take
+         members, or its inviter is no longer an active owner or admin there who
+         can sign in) and for an address the project's deny layer refuses;
+         ALREADY_EXISTS when an account holds the address, as its email or as a
+         recovery email; FAILED_PRECONDITION when the login policy governing the
+         address requires single sign-on or two-factor authentication, and
+         PERMISSION_DENIED when it does not allow passwords; INVALID_ARGUMENT for
+         a blank token or password, a name that is blank, longer than 100
+         characters or carries control or invisible formatting characters, or a
+         password the password rules refuse, the address's tenant's included.
+         Once the account exists its session is refused as any sign-in's is: for
+         a missing required date of birth, FAILED_PRECONDITION with
+         DOBRequiredDetails. Calls share PasswordSignup's per-IP budget
+         (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS)
+         on the HTTP handler only. Available only on the postgres control-plane
+         driver; the memory and SQLite drivers return Unimplemented.
+      operationId: identity.v1.IdentityService.SignUpWithTenantInvitation
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.SignUpWithTenantInvitationRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.SignUpWithTenantInvitationResponse'
   /identity.v1.IdentityService/SubmitDateOfBirth:
     post:
       tags:
@@ -13485,6 +13554,46 @@ components:
           title: revoked_count
           format: int32
       title: SignOutEverywhereResponse
+      additionalProperties: false
+    identity.v1.SignUpWithTenantInvitationRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          title: token
+          description: token is the raw token the invitation email carries.
+        name:
+          type: string
+          title: name
+          description: |-
+            name is the account's display name: required, at most 100 characters,
+             with no control or invisible formatting characters.
+        password:
+          type: string
+          title: password
+      title: SignUpWithTenantInvitationRequest
+      additionalProperties: false
+      description: |-
+        SignUpWithTenantInvitationRequest creates the account a tenant invitation
+         names.
+    identity.v1.SignUpWithTenantInvitationResponse:
+      type: object
+      properties:
+        user:
+          title: user
+          $ref: '#/components/schemas/identity.v1.User'
+        accessToken:
+          type: string
+          title: access_token
+        refreshToken:
+          type: string
+          title: refresh_token
+        expiresIn:
+          type: integer
+          title: expires_in
+          format: int32
+          description: Access token lifetime in seconds
+      title: SignUpWithTenantInvitationResponse
       additionalProperties: false
     identity.v1.SubmitDateOfBirthRequest:
       type: object

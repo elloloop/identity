@@ -39,6 +39,10 @@ type fakeInvitationStore struct {
 	listErr    error
 	openErr    error
 	nextID     int
+	// unqualified holds the tenants whose invitations the open-invitation
+	// lookups pass over, as the postgres store passes over a self-service
+	// tenant's or one whose inviter is no longer an owner or admin.
+	unqualified map[string]bool
 }
 
 func newFakeInvitationStore() *fakeInvitationStore {
@@ -99,16 +103,15 @@ func (f *fakeInvitationStore) CreateInvitation(_ context.Context, inv *TenantInv
 }
 
 // OpenInvitationForEmail mirrors the postgres lookup except its tenant and
-// inviter filters: the fake keeps no tenants or memberships, so those are the
-// postgres store's, tested there.
+// inviter filters, which unqualified stands in for: the fake keeps no tenants
+// or memberships, so those are the postgres store's, tested there.
 func (f *fakeInvitationStore) OpenInvitationForEmail(_ context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error) {
 	if f.openErr != nil {
 		return nil, f.openErr
 	}
 	var newest *TenantInvitation
 	for _, inv := range f.byID {
-		if inv.ProjectID != projectID || FoldEmail(inv.Email) != FoldEmail(email) ||
-			inv.Status != InvitationStatusPending || (inv.ExpiresAtMs != 0 && inv.ExpiresAtMs < nowMs) {
+		if inv.ProjectID != projectID || FoldEmail(inv.Email) != FoldEmail(email) || !f.open(inv, nowMs) {
 			continue
 		}
 		if newest == nil || inv.CreatedAtMs > newest.CreatedAtMs ||
@@ -121,6 +124,26 @@ func (f *fakeInvitationStore) OpenInvitationForEmail(_ context.Context, projectI
 	}
 	out := *newest
 	return &out, nil
+}
+
+// OpenInvitationForToken is OpenInvitationForEmail's rule for the invitation
+// with tokenHash.
+func (f *fakeInvitationStore) OpenInvitationForToken(_ context.Context, projectID, tokenHash string, nowMs int64) (*TenantInvitation, error) {
+	if f.openErr != nil {
+		return nil, f.openErr
+	}
+	for _, inv := range f.byID {
+		if inv.ProjectID == projectID && inv.TokenHash == tokenHash && f.open(inv, nowMs) {
+			out := *inv
+			return &out, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeInvitationStore) open(inv *TenantInvitation, nowMs int64) bool {
+	return inv.Status == InvitationStatusPending && (inv.ExpiresAtMs == 0 || inv.ExpiresAtMs >= nowMs) &&
+		!f.unqualified[inv.TenantID]
 }
 
 func (f *fakeInvitationStore) GetInvitationByTokenHash(_ context.Context, projectID, tokenHash string) (*TenantInvitation, error) {

@@ -5,12 +5,14 @@ package integration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/internal/service"
 )
 
@@ -63,5 +65,157 @@ func TestRedesign_TenantInvitation_ReadByItsTokenWithoutASession(t *testing.T) {
 	_, err = h.Client.GetTenantInvitation(ctx, connect.NewRequest(&identitypb.GetTenantInvitationRequest{Token: "0123456789abcdef"}))
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("unknown token = %v, want NotFound", err)
+	}
+}
+
+// signUpFromInvitation creates the account token's invitation names on the
+// branded host, whose project config the control plane resolves.
+func signUpFromInvitation(h *RedesignHarness, token string) (*identitypb.SignUpWithTenantInvitationResponse, error) {
+	resp, err := h.ClientWithHost(h.BrandedAuthDomain, nil).SignUpWithTenantInvitation(context.Background(),
+		connect.NewRequest(&identitypb.SignUpWithTenantInvitationRequest{Token: token, Name: "Ravi Kumar", Password: validPassword}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// TestRedesign_TenantInvitation_SignUpFromTheLinkThenAccept drives the whole
+// link against a real Postgres: an invite-only project that lets invitations
+// create accounts, a tenant owner's invitation to an address with no account,
+// the account created from the mailed token with a name and a password,
+// verified and in no tenant, the invitation still pending until the new
+// account accepts it, and the address then refused a second account.
+func TestRedesign_TenantInvitation_SignUpFromTheLinkThenAccept(t *testing.T) {
+	h := startRedesignHarness(t)
+	ctx := context.Background()
+	owner := signupOwner(t, h, "invitation-signup-owner")
+	setProjectConfig(t, h, invitedSignupConfig)
+	invitee := fmt.Sprintf("signup-%d@example-corp.com", time.Now().UnixNano())
+	_, token := inviteFrom(t, h, owner, invitee)
+
+	signedUp, err := signUpFromInvitation(h, token)
+	if err != nil {
+		t.Fatalf("SignUpWithTenantInvitation: %v", err)
+	}
+	user := signedUp.GetUser()
+	if user.GetEmail() != invitee || user.GetName() != "Ravi Kumar" || !user.GetEmailVerified() ||
+		signedUp.GetAccessToken() == "" || signedUp.GetRefreshToken() == "" || signedUp.GetExpiresIn() <= 0 {
+		t.Fatalf("sign-up = %+v", signedUp)
+	}
+	requireNoMemberships(t, h, user.GetId())
+	if got := readInvitation(t, h, token); got.GetStatus() != service.InvitationStatusPending || !got.GetAccountExists() {
+		t.Fatalf("after signing up: %+v, want still pending and the address with an account", got)
+	}
+	if _, err := signUpFromInvitation(h, token); connect.CodeOf(err) != connect.CodeAlreadyExists {
+		t.Fatalf("a second sign-up = %v, want AlreadyExists", err)
+	}
+
+	accepted, err := h.AuthedClient(signedUp.GetAccessToken()).AcceptTenantInvitation(ctx, connect.NewRequest(&identitypb.AcceptTenantInvitationRequest{Token: token}))
+	if err != nil {
+		t.Fatalf("AcceptTenantInvitation with the new session: %v", err)
+	}
+	if got := accepted.Msg.GetMembership(); got.GetTenantId() != owner.tenantID || got.GetUserId() != user.GetId() {
+		t.Fatalf("membership = %+v, want the new account in the inviting tenant", got)
+	}
+	if _, err := signUpFromInvitation(h, token); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("sign-up from an accepted invitation = %v, want FailedPrecondition", err)
+	}
+	if _, err := h.ClientWithHost(h.BrandedAuthDomain, nil).PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
+		Email: invitee, Password: validPassword,
+	})); err != nil {
+		t.Fatalf("PasswordLogin with the password set at sign-up: %v", err)
+	}
+}
+
+// TestRedesign_TenantInvitation_RevokedLinkIsClosed: once an owner revokes an
+// invitation, its link reads "revoked" and creates no account.
+func TestRedesign_TenantInvitation_RevokedLinkIsClosed(t *testing.T) {
+	h := startRedesignHarness(t)
+	owner := signupOwner(t, h, "invitation-revoked-owner")
+	setProjectConfig(t, h, invitedSignupConfig)
+	invitee := fmt.Sprintf("revoked-%d@example-corp.com", time.Now().UnixNano())
+	invitationID, token := inviteFrom(t, h, owner, invitee)
+
+	if _, err := owner.client.RevokeTenantInvitation(context.Background(), connect.NewRequest(&identitypb.RevokeTenantInvitationRequest{
+		TenantId: owner.tenantID, InvitationId: invitationID,
+	})); err != nil {
+		t.Fatalf("RevokeTenantInvitation: %v", err)
+	}
+	if got := readInvitation(t, h, token); got.GetStatus() != service.InvitationStatusRevoked || got.GetAccountExists() {
+		t.Fatalf("a revoked invitation reads %+v, want revoked with no account", got)
+	}
+	_, err := signUpFromInvitation(h, token)
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), service.ErrInvitationRevoked.Error()) {
+		t.Fatalf("sign-up from a revoked invitation = %v, want FailedPrecondition %q", err, service.ErrInvitationRevoked)
+	}
+	requireNoAccount(t, h, invitee)
+}
+
+// TestRedesign_TenantInvitation_SignUpNeedsTheOptInAndAnOpenInvitation: a
+// project that has not opted in creates no account from an invitation, and
+// neither does an invitation from a tenant a person made through
+// self-service CreateTenant, though the project has.
+func TestRedesign_TenantInvitation_SignUpNeedsTheOptInAndAnOpenInvitation(t *testing.T) {
+	h := startRedesignHarnessWith(t, func(c *config.Config) { c.SelfServiceTenantsEnabled = true })
+	ctx := context.Background()
+	owner := signupOwner(t, h, "invitation-optin-owner")
+	invitee := fmt.Sprintf("optin-%d@example-corp.com", time.Now().UnixNano())
+	_, token := inviteFrom(t, h, owner, invitee)
+
+	if _, err := signUpFromInvitation(h, token); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("open project = %v, want FailedPrecondition", err)
+	}
+	requireNoAccount(t, h, invitee)
+
+	maker := signupVerifiedUser(t, h, fmt.Sprintf("maker-%d@example-corp.com", time.Now().UnixNano()))
+	made, err := maker.client.CreateTenant(ctx, connect.NewRequest(&identitypb.CreateTenantRequest{Name: "Made by a person"}))
+	if err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	friend := fmt.Sprintf("friend-%d@example-corp.com", time.Now().UnixNano())
+	if _, err := maker.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+		TenantId: made.Msg.GetTenantId(), Email: friend, Role: service.RoleMember,
+	})); err != nil {
+		t.Fatalf("CreateTenantInvitation: %v", err)
+	}
+	friendToken := extractMailedToken(t, h, friend)
+	setProjectConfig(t, h, `{"access":{"mode":"invite","admit_tenant_invitations":true},"tenants":{"self_service":true}}`)
+
+	if _, err := signUpFromInvitation(h, friendToken); connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("a self-service tenant's invitation = %v, want PermissionDenied", err)
+	}
+	requireNoAccount(t, h, friend)
+	if _, err := signUpFromInvitation(h, token); err != nil {
+		t.Fatalf("the operator tenant's invitation, once opted in: %v", err)
+	}
+}
+
+// TestRedesign_TenantInvitation_NoMailProvider: a server with no mail
+// settings hands the invitation's token to the inviter, so the token creates
+// no account and the read does not say whether the address has one.
+func TestRedesign_TenantInvitation_NoMailProvider(t *testing.T) {
+	h := startRedesignHarnessWithoutMail(t)
+	ctx := context.Background()
+	owner := signupOwner(t, h, "invitation-nomail-owner")
+	invitee := fmt.Sprintf("nomail-%d@example-corp.com", time.Now().UnixNano())
+	signupMembershipUser(t, h, invitee)
+	created, err := owner.client.CreateTenantInvitation(ctx, connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+		TenantId: owner.tenantID, Email: invitee, Role: service.RoleMember,
+	}))
+	if err != nil {
+		t.Fatalf("CreateTenantInvitation: %v", err)
+	}
+	token := created.Msg.GetRawToken()
+	if token == "" || created.Msg.GetEmailSendStatus() != identitypb.EmailSendStatus_EMAIL_SEND_STATUS_NOT_CONFIGURED {
+		t.Fatalf("without mail the inviter is handed the token: %+v", created.Msg)
+	}
+	setProjectConfig(t, h, invitedSignupConfig)
+
+	if got := readInvitation(t, h, token); got.GetAccountExists() || got.GetEmail() != invitee {
+		t.Fatalf("read without mail = %+v, want the invitation but not whether the address has an account", got)
+	}
+	_, err = signUpFromInvitation(h, token)
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "invitation_signup_unavailable") {
+		t.Fatalf("sign-up without mail = %v, want FailedPrecondition invitation_signup_unavailable, before the address's account is looked at", err)
 	}
 }

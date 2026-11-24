@@ -758,8 +758,8 @@ type Config struct {
 	// response is rejected; must be in [0,1].
 	AssuranceRecaptchaScoreThreshold float64
 	// AssuranceEnforcePasswordSignup requires an assurance token on every RPC
-	// that creates a password account: PasswordSignup, UsernameSignup and
-	// UpgradeAnonymousAccount.
+	// that creates a password account: PasswordSignup, UsernameSignup,
+	// SignUpWithTenantInvitation and UpgradeAnonymousAccount.
 	AssuranceEnforcePasswordSignup bool
 	// AssuranceEnforcePasswordLogin requires an assurance token on the PasswordLogin endpoint.
 	AssuranceEnforcePasswordLogin bool
@@ -908,9 +908,10 @@ type Config struct {
 	// Password.
 
 	// PasswordSignupEnabled gates every self-serve way to a password account:
-	// PasswordSignup, UsernameSignup and UpgradeAnonymousAccount with a
-	// password, and the hosted page's sign-up form. Set false to disable them
-	// all (admin-driven creation and invitations still work).
+	// PasswordSignup, UsernameSignup, SignUpWithTenantInvitation and
+	// UpgradeAnonymousAccount with a password, and the hosted page's sign-up
+	// form. Set false to disable them all (admin-driven creation, and a proven
+	// sign-in a tenant invitation admits, still work).
 	PasswordSignupEnabled bool
 
 	// AccountMergeEnabled turns on self-service MergeAccounts: a person
@@ -1325,10 +1326,10 @@ type Config struct {
 	// RateLimitWindowSeconds is the sliding window length (seconds) for the per-IP limiter.
 	RateLimitWindowSeconds int
 	// RateLimitSignupPerIP is the per-IP request cap per window on the
-	// account-creating RPCs. PasswordSignup and UsernameSignup share one
-	// budget; SignInAnonymously, UpgradeAnonymousAccount,
-	// CreateManagedChildAccount, BeginPasskeySignup and CreateAgent each get
-	// their own budget of the same size.
+	// account-creating RPCs. PasswordSignup, UsernameSignup and
+	// SignUpWithTenantInvitation share one budget; SignInAnonymously,
+	// UpgradeAnonymousAccount, CreateManagedChildAccount, BeginPasskeySignup
+	// and CreateAgent each get their own budget of the same size.
 	RateLimitSignupPerIP int
 	// RateLimitUsernameTakenPerIP caps how many "that username is taken"
 	// answers UsernameSignup gives one client IP per rate-limit window

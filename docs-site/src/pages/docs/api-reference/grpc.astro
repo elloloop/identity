@@ -153,6 +153,7 @@ import { Code } from "astro-expressive-code/components";
     <tr><th>RPC</th><th>Auth</th><th>Purpose</th></tr>
     <tr><td><code>CreateTenantInvitation</code></td><td>bearer (tenant owner or admin)</td><td>Invite an address to a tenant; the token travels in the email</td></tr>
     <tr><td><code>GetTenantInvitation</code></td><td>none (the token)</td><td>Describe the invitation a token names, for its link's page; changes nothing</td></tr>
+    <tr><td><code>SignUpWithTenantInvitation</code></td><td>none (the token; assurance as for <code>PasswordSignup</code>)</td><td>Create the invited address's account with a name and password, verified, and return its session; the invitation stays pending</td></tr>
     <tr><td><code>AcceptTenantInvitation</code></td><td>bearer (the invited address, verified)</td><td>Redeem the token and join the tenant</td></tr>
     <tr><td><code>ListTenantInvitations</code></td><td>bearer (tenant owner or admin)</td><td>List a tenant's invitations</td></tr>
   </table>

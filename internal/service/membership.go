@@ -270,9 +270,6 @@ type InvitationStore interface {
 	// tenant, inviter and recipient, so concurrent creates cannot both pass
 	// a limit only one of them fits under.
 	CreateInvitation(ctx context.Context, inv *TenantInvitation, limits InvitationLimits) (string, error)
-	// GetInvitationByTokenHash resolves an invitation by its hashed token
-	// within a project, or (nil, nil).
-	GetInvitationByTokenHash(ctx context.Context, projectID, tokenHash string) (*TenantInvitation, error)
 	// SetInvitationStatus transitions an invitation's status and, when
 	// accepting, stamps accepted_at_ms (0 defaults to now on accept).
 	// Unknown ids are a no-op.
@@ -291,9 +288,13 @@ type InvitationStore interface {
 	OpenInvitationReader
 }
 
-// OpenInvitationReader finds the invitation that lets an invite-only project
+// OpenInvitationReader reads the invitations sign-up consults: the one a
+// token names, and the open invitation that lets an invite-only project
 // create an account for an address.
 type OpenInvitationReader interface {
+	// GetInvitationByTokenHash resolves an invitation by its hashed token
+	// within a project, or (nil, nil).
+	GetInvitationByTokenHash(ctx context.Context, projectID, tokenHash string) (*TenantInvitation, error)
 	// OpenInvitationForEmail returns the newest invitation in the project
 	// still pending at nowMs (unexpired as AcceptTenantInvitation reads it),
 	// addressed to email (canonical form), in a tenant that can still take
@@ -301,6 +302,10 @@ type OpenInvitationReader interface {
 	// CreateTenant (its CreatedBy is empty), from an inviter who is still an
 	// active owner or admin of that tenant, or (nil, nil).
 	OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error)
+	// OpenInvitationForToken returns the invitation in the project whose
+	// hashed token is tokenHash when it is open as OpenInvitationForEmail
+	// counts one open, or (nil, nil).
+	OpenInvitationForToken(ctx context.Context, projectID, tokenHash string, nowMs int64) (*TenantInvitation, error)
 }
 
 // InvitationLimits bounds how many invitations InvitationStore.CreateInvitation

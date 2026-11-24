@@ -1,5 +1,63 @@
 # Upgrade guide
 
+## Next — sign up from a tenant invitation's link: `SignUpWithTenantInvitation` (additive RPC; no migration; off unless a project sets `access.admit_tenant_invitations`; spends the `GATEWAY_RATE_LIMIT_SIGNUP_PER_IP` budget; `OpenInvitationReader` gains `GetInvitationByTokenHash` and `OpenInvitationForToken`, `AuthService.WithMailDelivery`, `service.ErrInvitationSignupUnavailable`, `service.ErrInvitationRevoked` (Go API))
+
+An invite project that lets tenant invitations create accounts did so only
+after a sign-in that proves the address, through an OAuth provider or an
+emailed code or link, so an invitee with no account and no such provider had
+to wait for a code. The invitation's own emailed link proves the address as
+well, and can now create the account with a name and a password.
+
+- **`SignUpWithTenantInvitation(token, name, password)`** creates the account
+  the invitation names: the invited address, verified, active, with that name
+  and password, and returns `user`, `access_token`, `refresh_token` and
+  `expires_in` as `PasswordSignup` does. It does not accept the invitation:
+  the account joins no tenant, not even its email domain's (it skips domain
+  auto-formation), and the invitation stays pending until the account calls
+  `AcceptTenantInvitation`, which its new session can do at once.
+- **Where it works.** Only on a project with `access.mode: invite`,
+  `access.admit_tenant_invitations: true` and `accounts.email_signup: self`,
+  on a server whose mail settings name a provider (or an embedder's
+  `EmailTransport`), with `GATEWAY_AUTH_ALLOW_LOCAL` and
+  `GATEWAY_PASSWORD_SIGNUP_ENABLED` on; anywhere else it is
+  `FAILED_PRECONDITION` with the stable `invitation_signup_unavailable` token
+  (or, for the two switches, the refusals `PasswordSignup` gives), before the
+  token is looked up. A server with no mail settings hands an invitation's
+  token to its inviter (`raw_token`), so holding it proves nothing there.
+- **Which invitations.** The token's own invitation must be pending and
+  unexpired, from a claimed or latent tenant not made through self-service
+  `CreateTenant`, sent by someone still an active owner or admin there who can
+  sign in: the rule a proven sign-up applies, read for the one invitation.
+  Another open invitation to the address does not stand in for it.
+- **Refusals.** A token no invitation of the project has is `NOT_FOUND`; an
+  invitation that was accepted, revoked or has expired `FAILED_PRECONDITION`;
+  one that does not count, or an address the deny layer refuses,
+  `PERMISSION_DENIED`; an address an account holds, as its email or as a
+  recovery email, `ALREADY_EXISTS`. The password meets the deployment's rules
+  and the address's tenant's password policy (`INVALID_ARGUMENT`), the
+  address's login policy is applied before anything is written (single
+  sign-on or two-factor authentication required: `FAILED_PRECONDITION`;
+  passwords not allowed: `PERMISSION_DENIED`), and the name is required, at
+  most 100 characters, with no control or invisible formatting characters.
+- **Abuse limits.** The call is JWT-exempt and gated as `PasswordSignup` is:
+  the `X-Assurance-Token` header while
+  `GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP` is on, and the per-IP sign-up
+  budget it shares with `PasswordSignup` and `UsernameSignup` (HTTP only).
+- **Audit.** The admission records `signup_admitted_by_invitation` naming the
+  token's invitation, and the sign-in `login_success` with method
+  `tenant_invitation_signup`.
+- **Invitations made before mail was configured.** A server that had no mail
+  settings handed each invitation's token to its inviter. Once mail is
+  configured those invitations stay pending for their lifetime
+  (`GATEWAY_TENANT_INVITATION_EXPIRY_SECONDS`, 7 days by default), and their
+  tokens would create accounts. Revoke them, by inviting the address again,
+  or wait for them to expire before a project turns the opt-in on.
+- **Go API.** `OpenInvitationReader` gains `GetInvitationByTokenHash` (moved
+  from `InvitationStore`, which still has it) and `OpenInvitationForToken`;
+  an embedder with its own invitation store adds the latter. An embedder that
+  builds `AuthService` itself calls `WithMailDelivery(true)` when its mailer
+  delivers; without it the call is refused.
+
 ## Next — read a tenant invitation by its token: `GetTenantInvitation` (additive RPC; no migration; new per-IP budget sized by `GATEWAY_RATE_LIMIT_VERIFY_PER_IP`; `MembershipService.GetTenantInvitation` (Go API))
 
 The page a tenant invitation's email links to had no way to say who invites

@@ -2339,6 +2339,24 @@ message GetTenantInvitationResponse {
   bool account_exists = 9;
 }
 
+// SignUpWithTenantInvitationRequest creates the account a tenant invitation
+// names.
+message SignUpWithTenantInvitationRequest {
+  // token is the raw token the invitation email carries.
+  string token = 1;
+  // name is the account's display name: required, at most 100 characters,
+  // with no control or invisible formatting characters.
+  string name = 2;
+  string password = 3;
+}
+
+message SignUpWithTenantInvitationResponse {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int32 expires_in = 4; // Access token lifetime in seconds
+}
+
 message AcceptTenantInvitationRequest {
   string token = 1;
 }
@@ -4069,9 +4087,9 @@ service IdentityService {
   rpc SetDomainJoin(SetDomainJoinRequest) returns (SetDomainJoinResponse);
 
   // Tenant membership (redesign). Project-scoped, authenticated except for
-  // GetTenantInvitation, and — except for AcceptTenantInvitation and
-  // GetTenantInvitation — gated on the caller being an owner/admin
-  // member of the target tenant. AcceptTenantInvitation is the redeemer's own
+  // GetTenantInvitation and SignUpWithTenantInvitation, and — except for
+  // those two and AcceptTenantInvitation — gated on the caller being an
+  // owner/admin member of the target tenant. AcceptTenantInvitation is the redeemer's own
   // action: any authenticated caller may redeem a token, but only for an
   // invitation addressed to their own account email (compared in the
   // canonical form sign-in uses, so a "+tag" spelling of it matches;
@@ -4111,6 +4129,40 @@ service IdentityService {
   // postgres control-plane driver; the memory and SQLite drivers return
   // Unimplemented.
   rpc GetTenantInvitation(GetTenantInvitationRequest) returns (GetTenantInvitationResponse);
+  // SignUpWithTenantInvitation creates the account a pending tenant
+  // invitation names, from the raw token its email carries, with a name and
+  // a password, and signs it in. It needs no session and is gated as
+  // PasswordSignup is: by GATEWAY_AUTH_ALLOW_LOCAL and
+  // GATEWAY_PASSWORD_SIGNUP_ENABLED, and by the X-Assurance-Token header
+  // while GATEWAY_ASSURANCE_ENFORCE_PASSWORD_SIGNUP is on. The account holds
+  // the invited address, verified (the emailed link proves it), is active,
+  // and belongs to no tenant: it skips domain auto-formation and joins the
+  // inviting tenant only by accepting, so the invitation stays pending for
+  // AcceptTenantInvitation. FAILED_PRECONDITION with the stable
+  // `invitation_signup_unavailable` token when the project does not let an
+  // invitation create an account (access.mode invite with
+  // access.admit_tenant_invitations, and accounts.email_signup self), or
+  // the server has no mail provider, which hands an invitation's token to
+  // its inviter; NOT_FOUND for a token no invitation of the project has;
+  // FAILED_PRECONDITION for an invitation that was accepted, was revoked or
+  // has expired; PERMISSION_DENIED for one that cannot create an account
+  // (its tenant was made through self-service CreateTenant or cannot take
+  // members, or its inviter is no longer an active owner or admin there who
+  // can sign in) and for an address the project's deny layer refuses;
+  // ALREADY_EXISTS when an account holds the address, as its email or as a
+  // recovery email; FAILED_PRECONDITION when the login policy governing the
+  // address requires single sign-on or two-factor authentication, and
+  // PERMISSION_DENIED when it does not allow passwords; INVALID_ARGUMENT for
+  // a blank token or password, a name that is blank, longer than 100
+  // characters or carries control or invisible formatting characters, or a
+  // password the password rules refuse, the address's tenant's included.
+  // Once the account exists its session is refused as any sign-in's is: for
+  // a missing required date of birth, FAILED_PRECONDITION with
+  // DOBRequiredDetails. Calls share PasswordSignup's per-IP budget
+  // (GATEWAY_RATE_LIMIT_SIGNUP_PER_IP per GATEWAY_RATE_LIMIT_WINDOW_SECONDS)
+  // on the HTTP handler only. Available only on the postgres control-plane
+  // driver; the memory and SQLite drivers return Unimplemented.
+  rpc SignUpWithTenantInvitation(SignUpWithTenantInvitationRequest) returns (SignUpWithTenantInvitationResponse);
   rpc AcceptTenantInvitation(AcceptTenantInvitationRequest) returns (AcceptTenantInvitationResponse);
   rpc ListTenantInvitations(ListTenantInvitationsRequest) returns (ListTenantInvitationsResponse);
   // RevokeTenantInvitation withdraws a pending invitation: it becomes

@@ -470,6 +470,32 @@ func TestBuildRateLimits_UsernameSignupLimited(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, call("/identity.v1.IdentityService/PasswordSignup"), "shared budget spent")
 }
 
+// SignUpWithTenantInvitation creates an account and hashes a password, so it
+// spends the sign-up budget PasswordSignup and UsernameSignup share.
+func TestBuildRateLimits_InvitationSignupSharesTheSignupBudget(t *testing.T) {
+	const invited = "/identity.v1.IdentityService/SignUpWithTenantInvitation"
+	limits := buildRateLimits(&config.Config{RateLimitWindowSeconds: 60, RateLimitSignupPerIP: 2, RateLimitVerifyPerIP: 5})
+	pl, ok := middleware.MatchPathLimit(limits, invited)
+	require.True(t, ok, "SignUpWithTenantInvitation must carry a rate limit")
+	require.Equal(t, "signup", pl.Tag)
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	call := func(path string) int {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "198.51.100.12")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	assert.Equal(t, http.StatusOK, call(invited))
+	assert.Equal(t, http.StatusOK, call("/identity.v1.IdentityService/PasswordSignup"))
+	assert.Equal(t, http.StatusTooManyRequests, call(invited), "shared budget spent")
+	assert.Equal(t, http.StatusTooManyRequests, call("/identity.v1.IdentityService/UsernameSignup"), "shared budget spent")
+	assert.Equal(t, http.StatusOK, call("/identity.v1.IdentityService/GetTenantInvitation"), "reading the invitation spends its own budget")
+}
+
 // TestBuildRateLimits_MergeAccountsLimited asserts MergeAccounts, which
 // verifies another account's password, is on the per-IP login quota.
 func TestBuildRateLimits_MergeAccountsLimited(t *testing.T) {
