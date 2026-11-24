@@ -311,12 +311,14 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	// Unknown token is NotFound — but we don't distinguish it from a wrong
 	// project, so the redeemer learns nothing about other projects' tokens.
 	if inv == nil {
+		s.logAcceptRefused(ctx, projectID, callerID, nil, "not_found")
 		return nil, fmt.Errorf("%w: invitation", ErrNotFound)
 	}
 
 	if inv.Status != InvitationStatusPending {
 		// Already accepted / revoked / expired: not redeemable. Don't leak
 		// which — PermissionDenied for any non-pending state.
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "invitation_closed", zap.String("status", inv.Status))
 		return nil, fmt.Errorf("%w: invitation is not pending", ErrPermissionDenied)
 	}
 	if inv.ExpiresAtMs > 0 && inv.ExpiresAtMs < s.nowFunc().UnixMilli() {
@@ -324,6 +326,7 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 		if setErr := s.invitations.SetInvitationStatus(ctx, projectID, inv.ID, InvitationStatusExpired, 0); setErr != nil {
 			s.logger.Warn("invitation_mark_expired_failed", zap.String("invitation_id", inv.ID), zap.Error(setErr))
 		}
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "invitation_closed", zap.String("status", InvitationStatusExpired))
 		return nil, fmt.Errorf("%w: invitation expired", ErrPermissionDenied)
 	}
 
@@ -334,21 +337,27 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 		return nil, err
 	}
 	if caller == nil {
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "caller_not_found")
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
 	if !emailaddr.SameMailbox(caller.Email, inv.Email) {
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "email_mismatch")
 		return nil, fmt.Errorf("%w: invitation was issued to a different email", ErrPermissionDenied)
 	}
 	// Holding the token proves nothing about the address: without a mailer
 	// the inviter is handed it. The invitation stays pending meanwhile.
 	if !caller.EmailVerified {
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "email_unverified")
 		return nil, fmt.Errorf("%w: verify your email before accepting an invitation", ErrEmailVerificationRequired)
 	}
 	if err := requireGovernableTenant(ctx, s.tenants, projectID, inv.TenantID); err != nil {
+		if errors.Is(err, ErrPermissionDenied) {
+			s.logAcceptRefused(ctx, projectID, callerID, inv, "tenant_not_governable")
+		}
 		return nil, err
 	}
 
-	m, _, err := s.memberships.GrantMembership(ctx, &TenantMembership{
+	m, changed, err := s.memberships.GrantMembership(ctx, &TenantMembership{
 		ProjectID: projectID,
 		TenantID:  inv.TenantID,
 		UserID:    callerID,
@@ -357,12 +366,25 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 		Status:    MembershipStatusActive,
 	})
 	if err != nil {
+		if errors.Is(err, ErrMemberSuspended) {
+			s.logAcceptRefused(ctx, projectID, callerID, inv, "member_suspended")
+		}
 		return nil, err
 	}
 	if err := s.invitations.SetInvitationStatus(ctx, projectID, inv.ID, InvitationStatusAccepted, s.nowFunc().UnixMilli()); err != nil {
 		return nil, err
 	}
+	s.logger.Info("tenant_invitation_accepted", append(invitationDecisionLogFields(ctx, projectID, inv),
+		zap.String("user_id", callerID), zap.String("role", m.Role), zap.String("source", m.Source),
+		zap.Bool("changed", changed))...)
 	return m, nil
+}
+
+// logAcceptRefused records which rule refused callerID's acceptance of inv,
+// or of a token that named none (inv nil).
+func (s *MembershipService) logAcceptRefused(ctx context.Context, projectID, callerID string, inv *TenantInvitation, reason string, fields ...zap.Field) {
+	line := append(invitationDecisionLogFields(ctx, projectID, inv), zap.String("user_id", callerID), zap.String("reason", reason))
+	s.logger.Info("tenant_invitation_accept_refused", append(line, fields...)...)
 }
 
 // ListTenantInvitations returns every invitation in a tenant, newest first.

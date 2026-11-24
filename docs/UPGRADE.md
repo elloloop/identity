@@ -1,5 +1,32 @@
 # Upgrade guide
 
+## Next — tenant invitation decisions are logged (new info log lines; no API, schema or configuration change)
+
+Reading, signing up from and accepting a tenant invitation each log one info
+line for the decision they reach, so an operator can follow an invitation
+from its link to its membership. Each carries `project_id` and, once the token
+names an invitation, `tenant_id`, `invitation_id` and, when the request is
+traced, `trace_id`; never the address, the token, a password or a name.
+
+- **`GetTenantInvitation`** logs `tenant_invitation_read` with the `status`
+  it answered (`pending`, `expired`, `accepted` or `revoked`) and, where mail
+  is delivered and so it is answered, `account_exists`; or
+  `tenant_invitation_read_refused` with `reason` `not_found`.
+- **`SignUpWithTenantInvitation`** logs `tenant_invitation_signup_created`
+  with the new account's `user_id` (after which the admission line
+  `signup_admitted_by_tenant_invitation` follows, as for every account an
+  invitation admits), or `tenant_invitation_signup_refused` with the `reason`:
+  `not_opted_in`, `mail_not_delivered`, `not_found`, `invitation_closed` (with
+  its `status`), `deny_layer` (with the address's `email_domain`),
+  `invitation_not_open`, `account_exists`, `login_policy` or `password_rule`.
+- **`AcceptTenantInvitation`** logs `tenant_invitation_accepted` with the
+  caller's `user_id` and the membership's `role` and `source`, and `changed`
+  false when the caller already held that role or a higher one and was kept
+  as they were; or `tenant_invitation_accept_refused` with `user_id` and the
+  `reason`: `not_found`, `invitation_closed` (with its `status`),
+  `caller_not_found`, `email_mismatch`, `email_unverified`,
+  `tenant_not_governable` or `member_suspended`.
+
 ## Next — sign up from a tenant invitation's link: `SignUpWithTenantInvitation` (additive RPC; no migration; off unless a project sets `access.admit_tenant_invitations`; spends the `GATEWAY_RATE_LIMIT_SIGNUP_PER_IP` budget; `OpenInvitationReader` gains `GetInvitationByTokenHash` and `OpenInvitationForToken`, `AuthService.WithMailDelivery`, `service.ErrInvitationSignupUnavailable`, `service.ErrInvitationRevoked` (Go API))
 
 An invite project that lets tenant invitations create accounts did so only

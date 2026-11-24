@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // TenantInvitationView is what GetTenantInvitation tells the holder of an
@@ -53,6 +55,8 @@ func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken st
 		return nil, err
 	}
 	if inv == nil {
+		s.logger.Info("tenant_invitation_read_refused",
+			zap.String("project_id", projectID), zap.String("reason", "not_found"))
 		return nil, fmt.Errorf("%w: invitation", ErrNotFound)
 	}
 
@@ -77,6 +81,7 @@ func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken st
 			view.InviterName, view.InviterEmail = inviter.Name, inviter.Email
 		}
 	}
+	fields := append(invitationDecisionLogFields(ctx, projectID, inv), zap.String("status", view.Status))
 	if s.mailerDelivers {
 		if s.accounts == nil {
 			return nil, fmt.Errorf("%w: no account store", ErrUnavailable)
@@ -84,8 +89,22 @@ func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken st
 		if view.AccountExists, err = addressHasAccount(ctx, s.accounts.WithProject(projectID), inv.Email); err != nil {
 			return nil, err
 		}
+		fields = append(fields, zap.Bool("account_exists", view.AccountExists))
 	}
+	s.logger.Info("tenant_invitation_read", fields...)
 	return view, nil
+}
+
+// invitationDecisionLogFields are the ids the line recording a decision about
+// a tenant invitation carries: the project, and, unless the token named none,
+// the invitation's tenant and id with the request's trace. They never carry
+// the address, the token or a name.
+func invitationDecisionLogFields(ctx context.Context, projectID string, inv *TenantInvitation) []zap.Field {
+	fields := []zap.Field{zap.String("project_id", projectID)}
+	if inv == nil {
+		return fields
+	}
+	return append(append(fields, zap.String("tenant_id", inv.TenantID)), invitationLogFields(ctx, inv.ID)...)
 }
 
 // invitationStatusAt is inv's status at nowMs: a pending invitation whose

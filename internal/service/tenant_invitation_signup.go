@@ -93,14 +93,17 @@ func (s *AuthService) SignUpWithTenantInvitation(ctx context.Context, rawToken, 
 		return nil, err
 	}
 	if inv == nil {
+		s.logInvitationSignupRefused(ctx, nil, "not_found")
 		return nil, fmt.Errorf("%w: invitation", ErrNotFound)
 	}
-	if err := invitationClosedError(invitationStatusAt(inv, s.nowMs())); err != nil {
+	status := invitationStatusAt(inv, s.nowMs())
+	if err := invitationClosedError(status); err != nil {
+		s.logInvitationSignupRefused(ctx, inv, "invitation_closed", zap.String("status", status))
 		return nil, err
 	}
 	email := canonicalize(inv.Email)
 	if scope.Access.denies(s.cfg, email) {
-		s.logInvitationSignupRefused(ctx, inv, "deny_layer")
+		s.logInvitationSignupRefused(ctx, inv, "deny_layer", zap.String("email_domain", emailDomain(inv.Email)))
 		return nil, ErrAccessNotAllowed
 	}
 	admitted, err := s.openInvitations.OpenInvitationForToken(ctx, scope.ProjectID, inv.TokenHash, s.nowMs())
@@ -118,16 +121,19 @@ func (s *AuthService) SignUpWithTenantInvitation(ctx context.Context, rawToken, 
 		return nil, err
 	}
 	if held {
+		s.logInvitationSignupRefused(ctx, inv, "account_exists")
 		return nil, errInvitedAddressHasAccount
 	}
 	decision, err := s.enforceLoginPolicy(ctx, string(email), LoginMethodPassword)
+	if err == nil && decision.RequireSecondFactor {
+		err = fmt.Errorf("%w: your organization requires two-factor authentication, which a new account has not set up", ErrTotpRequired)
+	}
 	if err != nil {
+		s.logInvitationSignupRefused(ctx, inv, "login_policy")
 		return nil, err
 	}
-	if decision.RequireSecondFactor {
-		return nil, fmt.Errorf("%w: your organization requires two-factor authentication, which a new account has not set up", ErrTotpRequired)
-	}
 	if err := s.validatePasswordStrengthForEmail(ctx, string(email), password); err != nil {
+		s.logInvitationSignupRefused(ctx, inv, "password_rule")
 		return nil, err
 	}
 	pwHash, err := passwords.Hash(password)
@@ -151,12 +157,15 @@ func (s *AuthService) SignUpWithTenantInvitation(ctx context.Context, rawToken, 
 	if err != nil {
 		// Lost a race with another sign-up for the address.
 		if held, lookupErr := addressHasAccount(ctx, repo, string(email)); lookupErr == nil && held {
+			s.logInvitationSignupRefused(ctx, inv, "account_exists")
 			return nil, errInvitedAddressHasAccount
 		}
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
 	user.ID = id
 	user.PasswordHash = ""
+	s.logger.Info("tenant_invitation_signup_created",
+		append(invitationDecisionLogFields(ctx, s.projectID(ctx), inv), zap.String("user_id", id))...)
 	s.recordInvitedSignup(ctx, user, admitted, ipAddr, userAgent)
 	EmitUserEvent(ctx, s.publisher, s.logger, s.projectID(ctx), s.tenantID(ctx), events.EventUserCreated, user)
 
@@ -195,20 +204,16 @@ func (s *AuthService) invitationSignupAvailable(ctx context.Context, scope *Proj
 	default:
 		return nil
 	}
-	s.logger.Info("tenant_invitation_signup_unavailable",
-		zap.String("project_id", scope.ProjectID), zap.String("reason", reason))
+	s.logInvitationSignupRefused(ctx, nil, reason)
 	return ErrInvitationSignupUnavailable
 }
 
-// logInvitationSignupRefused records why the project refused the account an
-// open invitation names, for the operator who set the policy.
-func (s *AuthService) logInvitationSignupRefused(ctx context.Context, inv *TenantInvitation, reason string) {
-	s.logger.Info("tenant_invitation_signup_refused",
-		zap.String("project_id", s.projectID(ctx)),
-		zap.String("invitation_id", inv.ID),
-		zap.String("tenant_id", inv.TenantID),
-		zap.String("email_domain", emailDomain(inv.Email)),
-		zap.String("reason", reason))
+// logInvitationSignupRefused records which rule refused a sign-up from an
+// invitation: reason, with fields, about inv, or about none when the token
+// was not looked up or named no invitation.
+func (s *AuthService) logInvitationSignupRefused(ctx context.Context, inv *TenantInvitation, reason string, fields ...zap.Field) {
+	line := append(invitationDecisionLogFields(ctx, s.projectID(ctx), inv), zap.String("reason", reason))
+	s.logger.Info("tenant_invitation_signup_refused", append(line, fields...)...)
 }
 
 // invitationClosedError is the refusal of an invitation in status, or nil for
