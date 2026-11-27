@@ -234,8 +234,10 @@ type MembershipStore interface {
 	// leaves the tenant without an owner. In the same step it records the
 	// removal, which keeps the user from joining the tenant through their
 	// email's domain (JoinByDomain) until a membership from another source
-	// lets them back in. Returns the membership as it stood when removed;
-	// an unknown row is a no-op that returns (nil, nil) and records nothing.
+	// lets them back in, and revokes the user's pending managed-account
+	// set-up links, so no old link brings them back. Returns the membership as
+	// it stood when removed; an unknown row is a no-op that returns (nil, nil)
+	// and records nothing.
 	RemoveMembership(ctx context.Context, projectID, tenantID, userID string) (*TenantMembership, error)
 	// JoinByDomain makes userID an active member of the tenant through
 	// their email's domain, the verified domain domainID: role member,

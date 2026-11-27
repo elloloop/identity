@@ -263,7 +263,7 @@ func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.
 	if err := lockXact(ctx, tx, op, addressLockKey(setup.ProjectID, setup.Address)); err != nil {
 		return nil, err
 	}
-	account, err := lockAddressHolder(ctx, tx, setup)
+	account, holderRefusal, err := lockAddressHolder(ctx, tx, setup)
 	if err != nil {
 		return nil, err
 	}
@@ -281,6 +281,9 @@ func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.
 	inviter, err := governorOf(held, setup.InvitedBy)
 	if err != nil {
 		return nil, err
+	}
+	if holderRefusal != nil {
+		return nil, holderRefusal
 	}
 	now := nowMs()
 	created := account == nil
@@ -328,14 +331,16 @@ func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.
 
 // lockAddressHolder returns the managed account of setup.TenantID at
 // setup.Address that may be sent a new link, its row held FOR UPDATE, or nil
-// when nothing holds the address. Any other holder is refused:
+// when nothing holds the address. Any other holder is a refusal, returned
+// apart from err so the caller says it only once the domain and the inviter
+// have passed, and nobody learns who holds an address they could not use:
 // service.ErrManagedByThisTenant for one of the tenant's accounts past
 // set-up, service.ErrManagedAddressUnavailable for anything outside it. It
 // must run under the address's lock.
-func lockAddressHolder(ctx context.Context, tx pgx.Tx, setup service.ManagedSetup) (*service.User, error) {
+func lockAddressHolder(ctx context.Context, tx pgx.Tx, setup service.ManagedSetup) (account *service.User, refusal, err error) {
 	const op = "CreateManagedSetup(holder)"
 	fold := service.FoldEmail(setup.Address)
-	account, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+`
+	account, err = scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+`
 		FROM users WHERE project_id = $1 AND email <> '' AND email_fold = $2
 		FOR UPDATE`, setup.ProjectID, fold))
 	switch {
@@ -343,20 +348,20 @@ func lockAddressHolder(ctx context.Context, tx pgx.Tx, setup service.ManagedSetu
 		var recovery bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_recovery_emails WHERE project_id = $1 AND email_fold = $2)`,
 			setup.ProjectID, fold).Scan(&recovery); err != nil {
-			return nil, wrapPgErr(op, err)
+			return nil, nil, wrapPgErr(op, err)
 		}
 		if recovery {
-			return nil, service.ErrManagedAddressUnavailable
+			return nil, service.ErrManagedAddressUnavailable, nil
 		}
-		return nil, nil
+		return nil, nil, nil
 	case err != nil:
-		return nil, wrapPgErr(op, err)
+		return nil, nil, wrapPgErr(op, err)
 	case account.ManagedByTenantID != setup.TenantID:
-		return nil, service.ErrManagedAddressUnavailable
+		return nil, service.ErrManagedAddressUnavailable, nil
 	case account.Status != service.StatusInvited || account.SetUpAtMs != 0:
-		return nil, service.ErrManagedByThisTenant
+		return nil, service.ErrManagedByThisTenant, nil
 	}
-	return account, nil
+	return account, nil, nil
 }
 
 // createManagedAccount inserts setup's account: invited, never set up, at
@@ -425,11 +430,27 @@ func tenantGovernable(ctx context.Context, tx pgx.Tx, projectID, tenantID, userI
 	return governed, err
 }
 
+// issuerStillMayIssue refuses a set-up link whose issuer is no longer an
+// active owner or admin of its tenant, as an ordinary invitation's open read
+// refuses one, and an owner-role grant whose issuer is no longer an owner. A
+// grant is the link's role only where the account holds no membership yet.
+func issuerStillMayIssue(held map[string]*service.TenantMembership, link *service.TenantInvitation, accountID string) error {
+	issuer, err := governorOf(held, link.InvitedBy)
+	if err != nil {
+		return fmt.Errorf("%w: the link's issuer may no longer invite", service.ErrPermissionDenied)
+	}
+	grantsLinkRole := held[accountID] == nil
+	if grantsLinkRole && link.Role == service.RoleOwner && issuer.Role != service.RoleOwner {
+		return fmt.Errorf("%w: the link's issuer is no longer an owner", service.ErrPermissionDenied)
+	}
+	return nil
+}
+
 // CompleteManagedSetup implements service.ManagedSetupStore.
 func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.ManagedSetupCompletion) (*service.ManagedSetupCompleted, error) {
 	const op = "CompleteManagedSetup"
-	if c.ProjectID == "" || c.InvitationID == "" || c.PasswordHash == "" {
-		return nil, fmt.Errorf("%w: project, invitation and password hash are required", service.ErrInvalidArgument)
+	if c.ProjectID == "" || c.InvitationID == "" || c.TokenHash == "" || c.PasswordHash == "" {
+		return nil, fmt.Errorf("%w: project, invitation, token hash and password hash are required", service.ErrInvalidArgument)
 	}
 	now := c.NowMs
 	if now == 0 {
@@ -447,7 +468,7 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 	if err != nil {
 		return nil, wrapPgErr(op+"(read)", err)
 	}
-	if link == nil {
+	if link == nil || link.TokenHash != c.TokenHash {
 		return nil, fmt.Errorf("%w: set-up link", service.ErrNotFound)
 	}
 	if err := lockMembership(ctx, tx, op, c.ProjectID, link.TenantID, link.UserID); err != nil {
@@ -463,13 +484,17 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 			return nil, wrapPgErr(op+"(domain)", err)
 		}
 	}
-	held, err := lockGovernorsAnd(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
+	held, err := lockGovernorsAnd(ctx, tx, c.ProjectID, link.TenantID, link.UserID, link.InvitedBy)
 	if err != nil {
 		return nil, wrapPgErr(op+"(lock)", err)
 	}
 	governed, err := tenantGovernable(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
 	if err != nil {
 		return nil, wrapPgErr(op+"(tenant)", err)
+	}
+	removed, err := isRemoved(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
+	if err != nil {
+		return nil, wrapPgErr(op+"(removal)", err)
 	}
 	if link, err = lockInvitationRow(ctx, tx, c.ProjectID, link.ID); err != nil {
 		return nil, wrapPgErr(op+"(lock link)", err)
@@ -490,6 +515,11 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 		return nil, service.ErrManagedDomainUnverified
 	case !governed:
 		return nil, fmt.Errorf("%w: the tenant cannot take members", service.ErrPermissionDenied)
+	case removed:
+		return nil, service.ErrRemovedFromTenant
+	}
+	if err := issuerStillMayIssue(held, link, account.ID); err != nil {
+		return nil, err
 	}
 	firstSetUp := account.SetUpAtMs == 0
 	if account, err = scanUser(tx.QueryRow(ctx, `UPDATE users SET

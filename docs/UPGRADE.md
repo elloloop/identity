@@ -10,9 +10,10 @@ API creates one yet, and with the settings below off nothing changes.
 - **Settings.** `GATEWAY_MANAGED_ACCOUNTS_ENABLED` (default `false`) turns the
   writes on for the server. Boot refuses it unless `GATEWAY_REPO_DRIVER` is
   `postgres` and `GATEWAY_REVOCATION_MODE` is `session`, since suspending,
-  removing or resetting a managed account must end its sessions at once. Where
-  it is on, keep `GATEWAY_SESSION_CACHE_TTL_SECONDS` at `0` or small: a revoked
-  session is dropped from the cache of the replica that revoked it only.
+  removing or resetting a managed account must end its sessions at once, and
+  refuses it with `GATEWAY_SESSION_CACHE_TTL_SECONDS` above `60`: a revoked
+  session is dropped at once only from the cache of the replica that revoked
+  it, so the setting bounds how long another replica still serves it.
   A project opts in with `access.admit_managed_accounts`;
   `access.admit_managed_accounts_self_service` extends it to tenants made
   through self-service `CreateTenant`, and is refused without the first.
@@ -47,7 +48,9 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS tenant_invitations_pending_user_idx
   an ordinary invitation to the account's address.
 - **Set-up links are not invitations by email.** `OpenInvitationForEmail` and
   `OpenInvitationForToken` never return an invitation with a `user_id`, so a
-  set-up link admits no sign-up or acceptance by email.
+  set-up link admits no sign-up or acceptance by email. `RemoveMembership`
+  revokes the removed account's pending set-up links, so no old link brings a
+  removed member back.
 - **Go API.** `service.ManagedSetupStore` (`CreateManagedSetup`,
   `CompleteManagedSetup`, `RevokeManagedSetup`, `ManagedAddressHolders`) is
   implemented by the postgres `InvitationStore`, and `service.ManagedMemberStore`

@@ -749,3 +749,24 @@ func TestManagedAccountsNeedSessionRevocation(t *testing.T) {
 		t.Fatalf("managed accounts under session revocation: %v", err)
 	}
 }
+
+// A revoked session must stop on every replica soon: with managed accounts on,
+// the session cache may hold one for at most a minute.
+func TestManagedAccountsBoundTheSessionCache(t *testing.T) {
+	c := Load()
+	c.ManagedAccountsEnabled = true
+	c.RevocationMode = RevocationModeSession
+	c.SessionCacheTTLSeconds = MaxManagedAccountsSessionCacheTTLSeconds + 1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_SESSION_CACHE_TTL_SECONDS") {
+		t.Fatalf("a session cache past the bound must be refused, got %v", err)
+	}
+	c.SessionCacheTTLSeconds = MaxManagedAccountsSessionCacheTTLSeconds
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a session cache at the bound: %v", err)
+	}
+	c.ManagedAccountsEnabled = false
+	c.SessionCacheTTLSeconds = 3600
+	if err := c.Validate(); err != nil {
+		t.Fatalf("the bound applies only with managed accounts on: %v", err)
+	}
+}

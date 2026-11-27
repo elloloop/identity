@@ -871,7 +871,9 @@ accounts on a domain verified for the tenant, created before their first
 sign-in and belonging to that tenant only. The second extends the first to
 tenants made through self-service `CreateTenant`, and is refused without it.
 The server must also enable them with `GATEWAY_MANAGED_ACCOUNTS_ENABLED`, which
-needs the postgres driver and `GATEWAY_REVOCATION_MODE=session`. A managed
+needs the postgres driver, `GATEWAY_REVOCATION_MODE=session` and
+`GATEWAY_SESSION_CACHE_TTL_SECONDS` of at most `60`, the longest another replica
+may serve a session a suspension, removal or reset revoked. A managed
 account is a `users` row with `managed_by_tenant_id` set; its set-up link is a
 `tenant_invitations` row with its `user_id`, which never admits a sign-up or
 acceptance by email.

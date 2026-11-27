@@ -45,6 +45,11 @@ const (
 	// `RevocationModeSession`, where cache TTL bounds the revocation
 	// latency.
 	RevocationModeTTLAccessTokenCap = 900
+
+	// MaxManagedAccountsSessionCacheTTLSeconds bounds how long another
+	// replica may keep serving a session a managed-account suspension,
+	// removal or reset revoked, from its in-process session cache.
+	MaxManagedAccountsSessionCacheTTLSeconds = 60
 )
 
 // Web-assurance provider names accepted in GATEWAY_ASSURANCE_WEB_PROVIDER.
@@ -1568,8 +1573,9 @@ type Config struct {
 	// their tenant manages, on a domain verified for it. Default off; it gates
 	// new managed-account writes only, while the restrictions on managed
 	// accounts that already exist always apply. Postgres only, and only with
-	// GATEWAY_REVOCATION_MODE=session, as signing a managed account out must
-	// end its sessions at once. A project also opts in through its
+	// GATEWAY_REVOCATION_MODE=session and GATEWAY_SESSION_CACHE_TTL_SECONDS of
+	// at most MaxManagedAccountsSessionCacheTTLSeconds, as signing a managed
+	// account out must end its sessions on every replica within that bound. A project also opts in through its
 	// access.admit_managed_accounts config. Driven by
 	// GATEWAY_MANAGED_ACCOUNTS_ENABLED.
 	ManagedAccountsEnabled bool
@@ -3391,6 +3397,10 @@ func (c *Config) validateTenantGovernance() error {
 	}
 	if c.ManagedAccountsEnabled && c.RevocationMode != RevocationModeSession {
 		return fmt.Errorf("config: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs GATEWAY_REVOCATION_MODE=session (got %q)", c.RevocationMode)
+	}
+	if c.ManagedAccountsEnabled && c.SessionCacheTTLSeconds > MaxManagedAccountsSessionCacheTTLSeconds {
+		return fmt.Errorf("config: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs GATEWAY_SESSION_CACHE_TTL_SECONDS at most %d (got %d), so a revoked session stops on every replica within it",
+			MaxManagedAccountsSessionCacheTTLSeconds, c.SessionCacheTTLSeconds)
 	}
 	return nil
 }

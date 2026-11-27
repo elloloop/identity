@@ -95,6 +95,9 @@ type ManagedSetupIssued struct {
 type ManagedSetupCompletion struct {
 	ProjectID    string
 	InvitationID string
+	// TokenHash is the hash of the token the person presented; it must be
+	// the link's.
+	TokenHash string
 	// PasswordHash is the password the person chose, already hashed.
 	PasswordHash string
 	NowMs        int64
@@ -186,9 +189,11 @@ type ManagedSetupStore interface {
 	// inserts the new one. The address's holder is decided under the
 	// address's lock: one of the tenant's managed accounts that cannot be
 	// resent is ErrManagedByThisTenant, and any other holder, an account or a
-	// recovery email, ErrManagedAddressUnavailable. A domain not verified for
-	// the tenant is ErrManagedDomainUnverified; an inviter who is not an
-	// active owner or admin (or owner, where needed) is ErrPermissionDenied;
+	// recovery email, ErrManagedAddressUnavailable; both are said only after
+	// the domain and the inviter have passed, so they reveal nothing to a
+	// caller who could not use the address. A domain not verified for the
+	// tenant is ErrManagedDomainUnverified; an inviter who is not an active
+	// owner or admin (or owner, where needed) is ErrPermissionDenied;
 	// a role other than member, admin or owner is ErrInvalidArgument; limits
 	// refuse as CreateInvitation's do.
 	CreateManagedSetup(ctx context.Context, setup ManagedSetup) (*ManagedSetupIssued, error)
@@ -203,7 +208,12 @@ type ManagedSetupStore interface {
 	// ErrInvitationExpired, one revoked or replaced, or whose account is not
 	// waiting to be set up, ErrManagedSetupStale, a domain the tenant no
 	// longer verifies ErrManagedDomainUnverified, and a tenant that is not
-	// claimed or has no other active owner or admin ErrPermissionDenied.
+	// claimed or has no other active owner or admin ErrPermissionDenied. The
+	// link's issuer must still be an active owner or admin of the tenant, and
+	// an owner where the link grants the owner role (ErrPermissionDenied), as
+	// an ordinary invitation's must. An account removed from the tenant is
+	// ErrRemovedFromTenant: an old link never brings it back. A TokenHash
+	// that is not the link's is ErrNotFound.
 	CompleteManagedSetup(ctx context.Context, c ManagedSetupCompletion) (*ManagedSetupCompleted, error)
 	// RevokeManagedSetup revokes tenantID's managed set-up link
 	// invitationID, if pending, and, at any status of the link, deletes its

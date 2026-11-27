@@ -639,6 +639,9 @@ func (s *MembershipStore) RemoveMembership(ctx context.Context, projectID, tenan
 			removed_at_ms = EXCLUDED.removed_at_ms`, projectID, tenantID, userID, nowMs()); err != nil {
 		return nil, wrapPgErr("RemoveMembership(record)", err)
 	}
+	if err := revokePendingSetupLinks(ctx, tx, projectID, userID); err != nil {
+		return nil, wrapPgErr("RemoveMembership(set-up links)", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr("RemoveMembership(commit)", err)
 	}
