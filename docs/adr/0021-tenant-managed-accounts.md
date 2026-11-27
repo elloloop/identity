@@ -56,6 +56,17 @@ for the tenant.
   the deployment's tenant id, as every user event does; the managing tenant
   is the account's own attribute, not the event's.
 
+- **What a managed account may not do.** It adds no recovery email: its
+  tenant recovers it with a reset to a new set-up link, never through an
+  address of the person's own. It owns no agent until its tenant can govern
+  agents. The project's operator does not stop a single managed account
+  (AdminService deactivate, reactivate, delete, password reset and update all
+  refuse it): its tenant's owners and admins suspend or remove it.
+- **Purge order.** Purging a managed account revokes its pending set-up
+  links first, in their own transaction, and then runs the erasure cascade.
+  The order is intended: it fails safe, as a failure between the two leaves
+  the account in place with no live link, and a retry finishes the purge.
+
 ## Consequences
 
 - Rolling back past schema 68 once managed accounts exist turns them into

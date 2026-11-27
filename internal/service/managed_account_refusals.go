@@ -27,12 +27,19 @@ func refuseManagedAccountPath(ctx context.Context, logger *zap.Logger, projectID
 	return ErrManagedAccount
 }
 
-// managedAccountsMayMerge is the rule that keeps a managed account out of
-// every merge, on either side: a merge would move a tenant's account, or
-// its credentials, into or out of the tenant's hands. A later operation that
-// adopts a personal account into a tenant is the one way past it.
-func managedAccountsMayMerge(survivor, other *User) bool {
-	return survivor.ManagedByTenantID == "" && other.ManagedByTenantID == ""
+// refuseManagedMerge is the rule that keeps a managed account out of every
+// merge, on either side: a merge would move a tenant's account, or its
+// credentials, into or out of the tenant's hands. Each account a tenant
+// manages is refused through refuseManagedAccountPath with path "merge". A
+// later operation that adopts a personal account into a tenant is the one
+// way past it.
+func refuseManagedMerge(ctx context.Context, logger *zap.Logger, projectID string, accounts ...*User) error {
+	for _, u := range accounts {
+		if err := refuseManagedAccountPath(ctx, logger, projectID, u, "merge"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // tenantOwnsProvider reports whether a tenant owns the OAuth provider, so
@@ -82,7 +89,9 @@ func (s *MembershipService) refuseManagedLeave(ctx context.Context, projectID, c
 
 // endManagedSetupLinks revokes every pending set-up link of u when a tenant
 // manages it, as RevokeManagedSetup does when it deletes an account, before
-// u is purged. A managed account is not purged without the managed store
+// u is purged. It runs in a transaction of its own, ahead of the cascade, on
+// purpose: it fails safe, as a failure between the two leaves the account in
+// place with no live link, and a retry finishes the purge. A managed account is not purged without the managed store
 // (ErrUnavailable).
 func (s *AdminService) endManagedSetupLinks(ctx context.Context, u *User) error {
 	if u.ManagedByTenantID == "" {
@@ -95,4 +104,15 @@ func (s *AdminService) endManagedSetupLinks(ctx context.Context, u *User) error 
 		return fmt.Errorf("end set-up links: %w", err)
 	}
 	return nil
+}
+
+// refuseManagedRecoveryEmail refuses a managed account adding a recovery
+// email, with ErrManagedAccountsNotAdmitted (POLICY): its tenant recovers it
+// by resetting it to a set-up link, and an address of the person's own would
+// be a way into the tenant's account the tenant does not control.
+func (s *AuthService) refuseManagedRecoveryEmail(ctx context.Context, user *User) error {
+	if refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, "recovery_email") == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: a managed account has no recovery email; its owners and admins reset it", ErrManagedAccountsNotAdmitted)
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/pkg/passwords"
 )
@@ -41,6 +43,28 @@ func TestOAuthLogin_RefusesAManagedAccountByEmail(t *testing.T) {
 	links, err := repo.ListOAuthIdentitiesForUser(ctx, managed.ID)
 	require.NoError(t, err)
 	require.Empty(t, links, "no provider is linked to a managed account")
+}
+
+// A provider that did not prove the account's own address is refused as it
+// would be for any account, so it learns nothing about whether a tenant
+// manages the address.
+func TestOAuthLogin_UnprovenAddressLearnsNothingAboutManagement(t *testing.T) {
+	ctx := context.Background()
+	answer := func(managed bool) error {
+		repo := newFakeRepo()
+		svc := newTestAuthService(t, repo)
+		if managed {
+			seedManaged(repo, "ann@acme.example.com", StatusActive)
+		} else {
+			seedUser(repo, "ann@acme.example.com", "hash", StatusActive)
+		}
+		_, err := svc.OAuthLogin(ctx, OAuthLoginParams{Code: fakeOAuthCode("ann+x@acme.example.com", "Ann", "", "google"), Provider: "google", RedirectURI: "https://app/cb"})
+		return err
+	}
+	managedErr, personalErr := answer(true), answer(false)
+	require.ErrorIs(t, managedErr, ErrUnauthenticated)
+	require.NotErrorIs(t, managedErr, ErrManagedAccount, "no managed-address oracle")
+	require.Equal(t, personalErr.Error(), managedErr.Error(), "the same answer either way")
 }
 
 func TestOAuthLogin_RefusesAManagedAccountByItsLink(t *testing.T) {
@@ -106,15 +130,28 @@ func TestPasswordless_InvitedManagedAccountGetsNothing(t *testing.T) {
 }
 
 func TestMerge_RefusesAManagedAccountOnEitherSide(t *testing.T) {
-	repo := newFakeRepo()
 	ctx := context.Background()
-	managed := seedManaged(repo, "ann@acme.example.com", StatusActive)
-	personal := seedUser(repo, "bob@example.com", "hash", StatusActive)
-	require.ErrorIs(t, checkSurvivor(ctx, repo, managed), ErrManagedAccount)
-	require.ErrorIs(t, checkMergeable(ctx, repo, managed, personal), ErrManagedAccount)
-	require.ErrorIs(t, checkMergeable(ctx, repo, personal, managed), ErrManagedAccount)
-	require.False(t, managedAccountsMayMerge(personal, managed))
-	require.True(t, managedAccountsMayMerge(personal, &User{}))
+	core, logs := observer.New(zap.InfoLevel)
+	logger := zap.New(core)
+	managed := &User{ID: "m", ManagedByTenantID: mTestTenant}
+	personal := &User{ID: "p"}
+	require.ErrorIs(t, refuseManagedMerge(ctx, logger, mTestProject, managed, personal), ErrManagedAccount)
+	require.ErrorIs(t, refuseManagedMerge(ctx, logger, mTestProject, personal, managed), ErrManagedAccount)
+	require.NoError(t, refuseManagedMerge(ctx, logger, mTestProject, personal, &User{ID: "q"}))
+	entries := logs.FilterMessage("managed_account_refused").All()
+	require.Len(t, entries, 2)
+	require.Equal(t, "merge", entries[0].ContextMap()["path"])
+
+	db := newFakeDB()
+	db.addUser("admin-1", "admin@example.com", "Admin", "admin", "active")
+	repo := newFakeRepo()
+	repo.users["m"] = &User{ID: "m", Email: maAddress, Status: StatusActive, ManagedByTenantID: mTestTenant}
+	repo.users["p"] = &User{ID: "p", Email: "bob@example.com", Status: StatusActive}
+	admin := newTestAdminServiceWithRepo(db, repo)
+	_, err := admin.MergeUsers(ctx, "admin-1", SessionSignIn{}, "p", "m", false)
+	require.ErrorIs(t, err, ErrManagedAccount, "an admin merging a managed account away")
+	_, err = admin.MergeUsers(ctx, "admin-1", SessionSignIn{}, "m", "p", false)
+	require.ErrorIs(t, err, ErrManagedAccount, "an admin merging into a managed account")
 }
 
 func TestCreateAgent_RefusesAManagedOwner(t *testing.T) {
@@ -208,7 +245,7 @@ func TestMembership_RefusesAManagedAccountsSelfServicePaths(t *testing.T) {
 // manages, target-1.
 func managedAdminDB() *fakeDB {
 	db := newFakeDB()
-	db.addUser("admin-1", "admin@test.com", "Admin", "admin", "active")
+	db.addUser("admin-1", "admin@example.com", "Admin", "admin", "active")
 	db.addUser("target-1", maAddress, "Ann", "member", "active")
 	db.nodes["target-1"].Payload[ufManagedByTenantID] = mTestTenant
 	return db
@@ -382,4 +419,22 @@ func TestMergeAccounts_RefusesAManagedOtherBeforeTouchingIt(t *testing.T) {
 	got, err := repo.GetUser(context.Background(), other.ID)
 	require.NoError(t, err)
 	require.Equal(t, 2, got.FailedLoginCount, "the other account's failed-sign-in count is untouched")
+}
+
+// A managed account adds no recovery email: asking and verifying are both
+// refused with POLICY, and nothing is sent or stored.
+func TestRecoveryEmail_ManagedAccountAddsNone(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	managed := seedManaged(repo, "ann@acme.example.com", StatusActive)
+	ctx := WithProjectScope(context.Background(), &ProjectScope{ProjectID: mTestProject, Access: ProjectAccessConfig{Mode: AccessModeOpen}, RecoveryEmails: ProjectRecoveryEmailsConfig{Enabled: true}})
+	signIn := SessionSignIn{AuthTimeSec: svc.nowMs() / 1000}
+
+	err := svc.RequestRecoveryEmail(ctx, managed.ID, signIn, "ann@example.net")
+	require.ErrorIs(t, err, ErrManagedAccountsNotAdmitted)
+	_, err = svc.VerifyRecoveryEmail(ctx, managed.ID, signIn, "ann@example.net", "123456")
+	require.ErrorIs(t, err, ErrManagedAccountsNotAdmitted)
+	held, err := repo.ListRecoveryEmails(ctx, managed.ID)
+	require.NoError(t, err)
+	require.Empty(t, held)
 }

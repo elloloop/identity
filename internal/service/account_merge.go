@@ -248,6 +248,9 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, sign
 	if err := checkSurvivor(ctx, repo, survivor); err != nil {
 		return nil, err
 	}
+	if err := refuseManagedMerge(ctx, s.logger, s.projectID(ctx), survivor); err != nil {
+		return nil, err
+	}
 	if survivor.ExternalID != "" {
 		return nil, errIDPManaged
 	}
@@ -263,9 +266,9 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, sign
 		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "second_factor_required")
 		return nil, fmt.Errorf("%w: the other account requires a second factor; turn two-step verification off there first", ErrMergeRefused)
 	}
-	if !managedAccountsMayMerge(survivor, other) {
+	if err := refuseManagedMerge(ctx, s.logger, s.projectID(ctx), other); err != nil {
 		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "managed_account")
-		return nil, ErrManagedAccount
+		return nil, err
 	}
 	s.resetFailedLogin(ctx, other)
 	merged, retired, err := mergeAccounts(ctx, repo, survivor, other, takeAddress, s.nowMs())
@@ -322,6 +325,9 @@ func (s *AdminService) MergeUsers(ctx context.Context, actorID string, signIn Se
 	}
 	if survivor == nil || other == nil {
 		return nil, ErrNotFound
+	}
+	if err := refuseManagedMerge(ctx, s.logger, s.projectID(ctx), survivor, other); err != nil {
+		return nil, err
 	}
 	merged, retired, err := mergeAccounts(ctx, repo, survivor, other, takeAddress, nowMs())
 	if err != nil {
@@ -418,9 +424,6 @@ func checkMergeable(ctx context.Context, repo Repository, survivor, other *User)
 	if other.IsAgent() {
 		return errAgentMerge
 	}
-	if !managedAccountsMayMerge(survivor, other) {
-		return ErrManagedAccount
-	}
 	// A password an administrator issued would arrive on the survivor as an
 	// ordinary one, skipping the change its user still owes.
 	if other.PasswordChangeRequired {
@@ -454,9 +457,6 @@ func checkSurvivor(ctx context.Context, repo Repository, survivor *User) error {
 	}
 	if survivor.IsAgent() {
 		return errAgentMerge
-	}
-	if survivor.ManagedByTenantID != "" {
-		return ErrManagedAccount
 	}
 	return refuseManagedChild(ctx, repo, survivor)
 }

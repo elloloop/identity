@@ -833,11 +833,10 @@ func (f *teammateFixture) exchangeOnce(t *testing.T, keyID string, sign func([]b
 	return err
 }
 
-// TestTeammateKeys_ManagedLeadMustBeInStanding: a teammate whose lead is an
-// account a tenant manages gets tokens while the lead is an active member,
-// none while the lead is suspended in the tenant, and tokens again once the
-// lead is restored.
-func TestTeammateKeys_ManagedLeadMustBeInStanding(t *testing.T) {
+// TestTeammateKeys_ManagedLeadGetsNoToken: a teammate whose lead is an
+// account a tenant manages gets no token, whatever the lead's standing: a
+// tenant's account owns no agent.
+func TestTeammateKeys_ManagedLeadGetsNoToken(t *testing.T) {
 	f := newTeammateFixture(t)
 	private, public := p256Key(t)
 	claim := f.claim("claim-managed")
@@ -845,16 +844,8 @@ func TestTeammateKeys_ManagedLeadMustBeInStanding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterTeammateKey: %v", err)
 	}
-	tenantID := f.manageOwner(t)
-	if err := f.exchangeOnce(t, keyID, signP256(t, private)); err != nil {
-		t.Fatalf("exchange while the managed lead is active: %v", err)
-	}
-	f.setOwnerMembership(t, tenantID, service.MembershipStatusSuspended)
+	f.manageOwner(t)
 	if err := f.exchangeOnce(t, keyID, signP256(t, private)); connect.CodeOf(err) != connect.CodeUnauthenticated {
-		t.Fatalf("exchange while the managed lead is suspended = %v, want Unauthenticated", err)
-	}
-	f.setOwnerMembership(t, tenantID, service.MembershipStatusActive)
-	if err := f.exchangeOnce(t, keyID, signP256(t, private)); err != nil {
-		t.Fatalf("exchange once the lead is restored: %v", err)
+		t.Fatalf("exchange for a managed lead's teammate = %v, want Unauthenticated", err)
 	}
 }

@@ -1088,11 +1088,6 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	if err != nil {
 		return nil, false, err
 	}
-	if !isNew {
-		if err := refuseManagedProvider(ctx, s.logger, s.projectID(ctx), user, identity.Provider); err != nil {
-			return nil, false, err
-		}
-	}
 	// An existing account is the provider's only when the provider proved the
 	// account's own address. A tagged address outside Gmail canonicalizes to
 	// the account's but is not provably the same mailbox, so it neither signs
@@ -1105,6 +1100,13 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 			return linked, false, err
 		}
 		return nil, false, s.refuseProviderSignIn(ctx, user.ID, identity.Provider, "provider_address_does_not_prove_account")
+	}
+	// Only a provider that proved the account's own address learns that a
+	// tenant manages it; any other is refused above as for every account.
+	if !isNew {
+		if err := refuseManagedProvider(ctx, s.logger, s.projectID(ctx), user, identity.Provider); err != nil {
+			return nil, false, err
+		}
 	}
 	if !isNew {
 		if err := s.applyOAuthProfileUpdates(ctx, user, identity, emailStr, now); err != nil {
