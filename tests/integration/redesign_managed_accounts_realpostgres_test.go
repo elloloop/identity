@@ -472,3 +472,27 @@ func markSelfService(t *testing.T, h *RedesignHarness, tenantID, createdBy strin
 		t.Fatalf("mark self-service: %v", err)
 	}
 }
+
+// TestRedesign_ManagedAccounts_SetUpNeedsItsIssuer: a set-up link stops
+// working once the admin who issued it is no longer an owner or admin of the
+// tenant, and the set-up is refused, writing nothing.
+func TestRedesign_ManagedAccounts_SetUpNeedsItsIssuer(t *testing.T) {
+	h := startRedesignHarnessWith(t, enableManagedAccounts)
+	setProjectConfig(t, h, managedAccountsConfig)
+	ctx := context.Background()
+	mt := newManagedTenant(t, h, "managed-issuer")
+	delivery := fmt.Sprintf("quinn-%d@example.net", time.Now().UnixNano())
+	if _, err := createManaged(mt.admin, "quinn", mt.domain, "Quinn", delivery, service.RoleMember); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	token := extractMailedToken(t, h, delivery)
+	if _, err := mt.owner.client.RemoveTenantMember(ctx, connect.NewRequest(&identitypb.RemoveTenantMemberRequest{TenantId: mt.tenantID, UserId: mt.admin.userID})); err != nil {
+		t.Fatalf("RemoveTenantMember(admin): %v", err)
+	}
+	if _, err := setUp(h, token, validPassword); err == nil {
+		t.Fatal("a link whose issuer was removed set the account up")
+	}
+	if a := accountAt(t, h, "quinn@"+mt.domain); a != nil && a.Status != service.StatusInvited {
+		t.Fatalf("account after the refused set-up = %+v, want still waiting", a)
+	}
+}

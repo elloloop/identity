@@ -710,7 +710,9 @@ RestoreTenantMember(tenant_id, user_id)
     the link is accepted; then it signs in. A membership an owner suspended
     stays suspended: the password is set, nothing signs in, and the call is
     <code>PERMISSION_DENIED</code>. A replaced, revoked, used or expired link,
-    or a domain no longer verified, is <code>FAILED_PRECONDITION</code>. The
+    or a domain no longer verified, is <code>FAILED_PRECONDITION</code>; a
+    link whose issuer is no longer an owner or admin of the tenant, or an
+    account removed from it, is <code>PERMISSION_DENIED</code>. The
     first set-up emits <code>user.created</code>, and every set-up is audited
     as <code>managed_account_set_up</code>.
     <code>AcceptTenantInvitation</code> never redeems a set-up link: once it

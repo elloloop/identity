@@ -34,8 +34,11 @@ func (s *AuthService) WithManagedAccounts(setups ManagedSetupStore, tenants Tena
 // must meet the rules of the address's tenant and the sign-in its login
 // policy. Everything is checked before anything is written, then
 // CompleteManagedSetup activates the account, grants its membership and
-// accepts the link in one transaction, rechecking the account, the epoch and
-// the domain under its locks.
+// accepts the link in one transaction, rechecking under its locks the
+// presented token, the account, the epoch, the domain and the issuer, who
+// must still be an owner or admin of the tenant (ErrPermissionDenied); an
+// account removed from the tenant is never brought back by an old link
+// (ErrRemovedFromTenant).
 //
 // A membership that was suspended before the set-up stays suspended: the
 // account is set up but signs nothing in, and the person is told with
@@ -59,7 +62,7 @@ func (s *AuthService) setUpManagedAccount(ctx context.Context, rawToken, passwor
 	if inv == nil || !inv.IsManagedSetup() {
 		return nil, false, &invitationLookup{projectID: scope.ProjectID, inv: inv}, nil
 	}
-	res, err = s.completeManagedSetup(ctx, scope, inv, password, ipAddr, userAgent)
+	res, err = s.completeManagedSetup(ctx, scope, inv, sha256Hex(rawToken), password, ipAddr, userAgent)
 	return res, true, nil, err
 }
 
@@ -79,7 +82,7 @@ func (l *invitationLookup) invitation(ctx context.Context, store OpenInvitationR
 	return store.GetInvitationByTokenHash(ctx, projectID, sha256Hex(rawToken))
 }
 
-func (s *AuthService) completeManagedSetup(ctx context.Context, scope *ProjectScope, inv *TenantInvitation, password, ipAddr, userAgent string) (*LoginResult, error) {
+func (s *AuthService) completeManagedSetup(ctx context.Context, scope *ProjectScope, inv *TenantInvitation, tokenHash, password, ipAddr, userAgent string) (*LoginResult, error) {
 	refuse := func(reason string, err error) (*LoginResult, error) {
 		s.logger.Info("managed_account_setup_refused", append(invitationDecisionLogFields(ctx, scope.ProjectID, inv),
 			zap.String("user_id", inv.UserID), zap.String("reason", reason))...)
@@ -129,7 +132,7 @@ func (s *AuthService) completeManagedSetup(ctx context.Context, scope *ProjectSc
 	}
 
 	done, err := s.managedSetups.CompleteManagedSetup(ctx, ManagedSetupCompletion{
-		ProjectID: scope.ProjectID, InvitationID: inv.ID, PasswordHash: pwHash, NowMs: s.nowMs(),
+		ProjectID: scope.ProjectID, InvitationID: inv.ID, TokenHash: tokenHash, PasswordHash: pwHash, NowMs: s.nowMs(),
 	})
 	if err != nil {
 		return refuse(managedSetupRefusalReason(err), err)
@@ -180,6 +183,10 @@ func managedSetupRefusalReason(err error) string {
 		return "domain_unverified"
 	case errors.Is(err, ErrInvitationUsed), errors.Is(err, ErrInvitationExpired), errors.Is(err, ErrNotFound):
 		return "invitation_closed"
+	case errors.Is(err, ErrRemovedFromTenant):
+		return "removed_from_tenant"
+	case errors.Is(err, ErrPermissionDenied):
+		return "issuer_not_permitted"
 	default:
 		return "store_error"
 	}

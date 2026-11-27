@@ -94,6 +94,7 @@ func TestSignUpWithTenantInvitation_ManagedSetupSignsIn(t *testing.T) {
 	require.Equal(t, "Ann Lee", res.User.Name, "the name is the tenant's")
 	require.Empty(t, res.User.PasswordHash)
 	require.Equal(t, "inv-ann", got.InvitationID)
+	require.Equal(t, sha256Hex(managedSetupToken), got.TokenHash, "the presented token goes to the store")
 	require.Equal(t, mTestProject, got.ProjectID)
 	require.NotEmpty(t, got.PasswordHash)
 	require.Equal(t, 1, f.audit.countByEventTypeActorTarget(string(audit.EventManagedAccountSetUp), f.account.ID, f.account.ID))
@@ -138,14 +139,20 @@ func TestSignUpWithTenantInvitation_ManagedSetupRefusals(t *testing.T) {
 		"self-service tenant": {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) {
 			f.tenants.put(&Tenant{ID: mTestTenant, ProjectID: mTestProject, Status: TenantStatusClaimed, CreatedBy: "someone"})
 		}, want: ErrManagedAccountsNotAdmitted},
-		"replaced link":   {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.link().SetupEpoch = 0 }, want: ErrManagedSetupStale},
-		"account gone":    {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.link().UserID = "nobody" }, want: ErrManagedSetupStale},
-		"account lookup":  {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.repo.getUserErr = storeErr }, want: storeErr},
-		"denied domain":   {access: ProjectAccessConfig{AdmitManagedAccounts: true, BlockedDomains: []string{maDomain}}, password: signupPassword, want: ErrManagedAccountsNotAdmitted},
-		"weak password":   {access: admitted(), password: "short", want: ErrWeakPassword},
-		"link lookup":     {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.invitations.getErr = storeErr }, want: storeErr},
-		"store stale":     {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.store.complete = completeFails(ErrManagedSetupStale) }, want: ErrManagedSetupStale},
-		"store error":     {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.store.complete = completeFails(storeErr) }, want: storeErr},
+		"replaced link":  {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.link().SetupEpoch = 0 }, want: ErrManagedSetupStale},
+		"account gone":   {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.link().UserID = "nobody" }, want: ErrManagedSetupStale},
+		"account lookup": {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.repo.getUserErr = storeErr }, want: storeErr},
+		"denied domain":  {access: ProjectAccessConfig{AdmitManagedAccounts: true, BlockedDomains: []string{maDomain}}, password: signupPassword, want: ErrManagedAccountsNotAdmitted},
+		"weak password":  {access: admitted(), password: "short", want: ErrWeakPassword},
+		"link lookup":    {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.invitations.getErr = storeErr }, want: storeErr},
+		"store stale":    {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.store.complete = completeFails(ErrManagedSetupStale) }, want: ErrManagedSetupStale},
+		"store error":    {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.store.complete = completeFails(storeErr) }, want: storeErr},
+		"issuer gone": {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) {
+			f.store.complete = completeFails(ErrPermissionDenied)
+		}, want: ErrPermissionDenied},
+		"removed from the tenant": {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) {
+			f.store.complete = completeFails(ErrRemovedFromTenant)
+		}, want: ErrRemovedFromTenant},
 		"server flag off": {access: admitted(), password: signupPassword, mutate: func(f *managedSetupFixture) { f.svc.cfg.ManagedAccountsEnabled = false }, want: ErrInvalidArgument},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -185,6 +192,8 @@ func TestManagedSetupRefusalReason(t *testing.T) {
 		ErrInvitationUsed:          "invitation_closed",
 		ErrInvitationExpired:       "invitation_closed",
 		ErrNotFound:                "invitation_closed",
+		ErrRemovedFromTenant:       "removed_from_tenant",
+		ErrPermissionDenied:        "issuer_not_permitted",
 		errors.New("boom"):         "store_error",
 	} {
 		require.Equal(t, want, managedSetupRefusalReason(err))
