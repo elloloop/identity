@@ -427,6 +427,7 @@ func TestSignedInWithin(t *testing.T) {
 		assert.Equal(t, want, signedInWithin(now, authTime, 5*time.Minute), "auth_time %d", authTime)
 	}
 }
+
 func (f *managedFixture) membership(t *testing.T, userID string) *TenantMembership {
 	t.Helper()
 	m, err := f.members.GetMembership(context.Background(), ssProject, ownTenant, userID)
