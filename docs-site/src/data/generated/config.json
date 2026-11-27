@@ -941,8 +941,8 @@
     "default": "false",
     "required": false,
     "description": "lets tenant owners and admins create accounts their tenant manages, on a domain verified for it.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
   },
   {
     "name": "GATEWAY_METRICS_PORT",

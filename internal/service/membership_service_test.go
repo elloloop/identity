@@ -1212,3 +1212,22 @@ func TestAcceptTenantInvitation_UnverifiedEmailRefused(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, MembershipStatusActive, m.Status)
 }
+
+// A managed account's set-up link is not an invitation anyone accepts: it
+// reads as unknown, even to the account it sets up, and changes nothing.
+func TestAcceptTenantInvitation_SetUpLinkIsNotFound(t *testing.T) {
+	f := newMembershipFixtureNoMail()
+	rawToken := f.seedInvite(t)
+	require.Len(t, f.invitations.byID, 1)
+	for _, inv := range f.invitations.byID {
+		inv.UserID = mInviteeID
+		f.users.put(mTestProject, mInviteeID, inv.Email)
+	}
+
+	_, err := f.svc.AcceptTenantInvitation(withProject(mTestProject), mInviteeID, rawToken)
+	require.ErrorIs(t, err, ErrNotFound)
+	stored, _ := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, mInviteeID)
+	require.Nil(t, stored)
+	invs, _ := f.invitations.ListInvitationsForTenant(context.Background(), mTestProject, mTestTenant)
+	require.Equal(t, InvitationStatusPending, invs[0].Status)
+}

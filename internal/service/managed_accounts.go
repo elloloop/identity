@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // A managed account is an account a tenant owns: an owner or admin creates it
@@ -12,8 +13,14 @@ import (
 // order: the membership's advisory lock (membershipLockKey) where the write
 // touches a membership, then the account's users row FOR UPDATE, then the
 // tenant's memberships in one ordered pass (lockOwnersAnd / lockGovernorsAnd),
-// then the tenant_invitations rows. ManagedSetupStore and ManagedMemberStore
-// are those writes; only the postgres control-plane driver has them.
+// then the tenant_invitations rows. A write that reads the account's domain or
+// the tenant's status holds the domain row and then the tenants row FOR SHARE,
+// after the users rows and before the membership pass. ManagedSetupStore and
+// ManagedMemberStore are those writes; only the postgres control-plane driver
+// has them. A managed account belongs to its tenant only: every MembershipStore
+// write that would give it a membership elsewhere, TenantStore.CreateOwnedTenant
+// and auto-formation refuse with ErrManagedElsewhere, and ResetManaged refuses
+// an account that holds one.
 
 var (
 	// ErrManagedByThisTenant refuses an address that is already one of the
@@ -33,6 +40,10 @@ var (
 	// ErrManagedResetLimited refuses a reset past the per-delivery-address
 	// cap.
 	ErrManagedResetLimited = errors.New("too many set-up links sent to this address recently; try again later")
+	// ErrManagedElsewhere refuses a membership of a managed account in any
+	// tenant but the one that manages it, and a reset of a managed account
+	// that holds one. It is an ErrPermissionDenied.
+	ErrManagedElsewhere = fmt.Errorf("%w: this account belongs to another tenant", ErrPermissionDenied)
 )
 
 // Managed address holders, as ManagedSetupStore.ManagedAddressHolders reports
@@ -74,6 +85,9 @@ type ManagedSetup struct {
 	// Limits apply as InvitationStore.CreateInvitation applies them, with
 	// Address as the recipient.
 	Limits InvitationLimits
+	// MaxPerDeliveryEmail caps the set-up links sent to DeliveryEmail as
+	// ManagedReset.MaxPerDeliveryEmail does. Zero applies no cap.
+	MaxPerDeliveryEmail int
 }
 
 // ManagedSetupIssued is what CreateManagedSetup wrote.

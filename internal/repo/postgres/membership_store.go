@@ -59,6 +59,9 @@ func (s *MembershipStore) UpsertMembership(ctx context.Context, m *service.Tenan
 	if m.ProjectID == "" || m.TenantID == "" || m.UserID == "" {
 		return "", fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
 	}
+	if err := refuseManagedElsewhere(ctx, s.pool, "UpsertMembership", m.ProjectID, m.TenantID, m.UserID); err != nil {
+		return "", err
+	}
 	now := nowMs()
 	if m.CreatedAtMs == 0 {
 		m.CreatedAtMs = now
@@ -174,6 +177,9 @@ func (s *MembershipStore) GrantMembership(ctx context.Context, m *service.Tenant
 	if role == "" {
 		role = service.RoleMember
 	}
+	if err := refuseManagedElsewhere(ctx, s.pool, "GrantMembership", m.ProjectID, m.TenantID, m.UserID); err != nil {
+		return nil, false, err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, wrapPgErr("GrantMembership", err)
@@ -271,6 +277,9 @@ func (s *MembershipStore) JoinByDomain(ctx context.Context, projectID, tenantID,
 	if projectID == "" || tenantID == "" || userID == "" || domainID == "" {
 		return nil, false, fmt.Errorf("%w: project_id, tenant_id, user_id and domain_id are required", service.ErrInvalidArgument)
 	}
+	if err := refuseManagedElsewhere(ctx, s.pool, "JoinByDomain", projectID, tenantID, userID); err != nil {
+		return nil, false, err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, wrapPgErr("JoinByDomain", err)
@@ -335,6 +344,9 @@ const addMemberQuery = `
 func (s *MembershipStore) AddMember(ctx context.Context, projectID, tenantID, userID string) (*service.TenantMembership, bool, error) {
 	if projectID == "" || tenantID == "" || userID == "" {
 		return nil, false, fmt.Errorf("%w: project_id, tenant_id and user_id are required", service.ErrInvalidArgument)
+	}
+	if err := refuseManagedElsewhere(ctx, s.pool, "AddMember", projectID, tenantID, userID); err != nil {
+		return nil, false, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1382,7 +1394,7 @@ func (s *InvitationStore) RevokeInvitation(ctx context.Context, projectID, tenan
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	inv, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+`
-		FROM tenant_invitations WHERE project_id = $1 AND tenant_id = $2 AND id = $3
+		FROM tenant_invitations WHERE project_id = $1 AND tenant_id = $2 AND id = $3 AND user_id = ''
 		FOR UPDATE`, projectID, tenantID, invitationID))
 	if noRows(err) {
 		return nil, false, fmt.Errorf("%w: invitation", service.ErrNotFound)

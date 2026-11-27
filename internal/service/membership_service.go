@@ -313,7 +313,7 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	}
 	// Unknown token is NotFound — but we don't distinguish it from a wrong
 	// project, so the redeemer learns nothing about other projects' tokens.
-	if inv == nil {
+	if inv == nil || inv.IsManagedSetup() {
 		s.logAcceptRefused(ctx, projectID, callerID, nil, "not_found")
 		return nil, fmt.Errorf("%w: invitation", ErrNotFound)
 	}

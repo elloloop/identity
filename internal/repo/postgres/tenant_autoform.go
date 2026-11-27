@@ -43,6 +43,21 @@ func (s *AutoFormStore) EnsureTenantForDomain(ctx context.Context, projectID, do
 		return "", fmt.Errorf("%w: missing user_id", service.ErrInvalidArgument)
 	}
 
+	managedBy, err := managingTenant(ctx, s.pool, "EnsureTenantForDomain", projectID, userID)
+	if err != nil {
+		return "", err
+	}
+	if managedBy != "" {
+		// A managed account joins only the tenant that manages it, and never
+		// forms one.
+		existing, err := s.tenantIDForDomain(ctx, s.pool, projectID, domain)
+		if err != nil {
+			return "", err
+		}
+		if existing != managedBy {
+			return "", service.ErrManagedElsewhere
+		}
+	}
 	tenantID, err := s.findOrCreateTenant(ctx, projectID, domain)
 	if err != nil {
 		return "", err
