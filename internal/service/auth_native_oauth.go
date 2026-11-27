@@ -211,7 +211,7 @@ func (s *AuthService) NativeOAuthLogin(ctx context.Context, params NativeOAuthLo
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    s.accessTokenExpiresIn(user),
 	}, nil
 }
 

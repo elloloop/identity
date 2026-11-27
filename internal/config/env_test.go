@@ -824,3 +824,40 @@ func TestManagedHelpLimits(t *testing.T) {
 		t.Fatalf("env not read: %+v", c)
 	}
 }
+
+// An access token issued to a managed account lasts a minute at most where
+// managed accounts are on, and never longer than any other token.
+func TestManagedAccessTokenExpiry(t *testing.T) {
+	c := &Config{JWTExpirySeconds: 900}
+	if got := c.ManagedAccessTokenExpiry(); got != DefaultManagedAccessTokenExpirySeconds*time.Second {
+		t.Fatalf("unset = %v, want the default", got)
+	}
+	c.ManagedAccessTokenExpirySeconds = 30
+	if got := c.ManagedAccessTokenExpiry(); got != 30*time.Second {
+		t.Fatalf("set = %v, want 30s", got)
+	}
+	c.JWTExpirySeconds = 20
+	if got := c.ManagedAccessTokenExpiry(); got != 20*time.Second {
+		t.Fatalf("over the access-token expiry = %v, want it capped at 20s", got)
+	}
+
+	on := Load()
+	on.RepoDriver, on.ManagedAccountsEnabled, on.RevocationMode = "postgres", true, RevocationModeSession
+	on.ManagedAccessTokenExpirySeconds = MaxManagedAccessTokenExpirySeconds + 1
+	if err := on.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS") {
+		t.Fatalf("over a minute with managed accounts on = %v, want refused", err)
+	}
+	on.ManagedAccessTokenExpirySeconds = MaxManagedAccessTokenExpirySeconds
+	if err := on.Validate(); err != nil && strings.Contains(err.Error(), "GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS") {
+		t.Fatalf("a minute is allowed: %v", err)
+	}
+	off := Load()
+	off.ManagedAccessTokenExpirySeconds = -1
+	if err := off.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS") {
+		t.Fatalf("negative = %v, want refused", err)
+	}
+	t.Setenv("GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS", "45")
+	if got := Load().ManagedAccessTokenExpirySeconds; got != 45 {
+		t.Fatalf("env = %d, want 45", got)
+	}
+}

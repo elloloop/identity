@@ -29,7 +29,7 @@ func (h *IdentityHandler) CreateAgent(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 	agent, err := h.auth.CreateAgent(
-		ctx, callerID,
+		ctx, callerID, authenticatedSignIn(req.Header()),
 		req.Msg.GetName(), req.Msg.GetAvatarUrl(), req.Msg.GetOwnerUserId(),
 		clientIP(req.Header()), clientUserAgent(req.Header()), req.Msg.GetClientRequestId(),
 	)

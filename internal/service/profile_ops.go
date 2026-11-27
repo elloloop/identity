@@ -40,6 +40,9 @@ func (s *ProfileService) ChangePassword(ctx context.Context, userID string, sign
 	if userNode == nil {
 		return errors.New("user not found")
 	}
+	if err := fenceManagedSession(ctx, s.repo(ctx), s.logger, userFromNode(userNode), signIn, "change_password"); err != nil {
+		return err
+	}
 
 	// Enforce the owning tenant's password policy (an org may tighten the
 	// global minimum length) for the account's own email domain — the same

@@ -315,7 +315,7 @@ func TestListTenantMembers_MarksAccountKinds(t *testing.T) {
 		return map[string]bool{maUserID: true}, nil
 	}})
 	f.seedMember(mTestProject, mTestTenant, maUserID, RoleMember)
-	members, err := f.svc.ListTenantMembers(managedScope(admitted()), mAdminID, mTestTenant)
+	members, err := f.svc.ListTenantMembers(managedScope(admitted()), mAdminID, SessionSignIn{}, mTestTenant)
 	require.NoError(t, err)
 	kinds := map[string]string{}
 	for _, m := range members {
@@ -325,12 +325,12 @@ func TestListTenantMembers_MarksAccountKinds(t *testing.T) {
 
 	storeErr := errors.New("db down")
 	f, _ = managedMembershipFixture(&managedSetupsMock{among: func(string, string, []string) (map[string]bool, error) { return nil, storeErr }})
-	_, err = f.svc.ListTenantMembers(managedScope(admitted()), mAdminID, mTestTenant)
+	_, err = f.svc.ListTenantMembers(managedScope(admitted()), mAdminID, SessionSignIn{}, mTestTenant)
 	require.ErrorIs(t, err, storeErr)
 
 	plain := newMembershipFixture()
 	plain.seedAdmin(mTestProject, mTestTenant, mAdminID)
-	members, err = plain.svc.ListTenantMembers(managedScope(admitted()), mAdminID, mTestTenant)
+	members, err = plain.svc.ListTenantMembers(managedScope(admitted()), mAdminID, SessionSignIn{}, mTestTenant)
 	require.NoError(t, err)
 	require.Equal(t, AccountKindPersonal, members[0].AccountKind, "without the managed store every account is personal")
 }

@@ -357,7 +357,7 @@ func (s *AuthService) reissueAfterUpgrade(ctx context.Context, userID, ipAddr, u
 		User:         u,
 		AccessToken:  access,
 		RefreshToken: refresh,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    s.accessTokenExpiresIn(u),
 	}, nil
 }
 

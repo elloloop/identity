@@ -332,7 +332,7 @@ func withAuth[T any](msg *T, userID string) *connect.Request[T] {
 }
 
 func newDomainSvc(domains service.DomainStore, tenants service.TenantStore, members service.MembershipStore, resolver *connectFakeResolver) *service.DomainService {
-	return service.NewDomainService(domains, tenants, members, resolver, &config.Config{}, zap.NewNop())
+	return service.NewDomainService(domains, tenants, members, resolver, &config.Config{}, zap.NewNop()).WithAccounts(newFakeRepo())
 }
 
 // ── nil service → Unimplemented ─────────────────────────────────────────

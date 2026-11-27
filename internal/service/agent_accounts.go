@@ -132,13 +132,14 @@ func isActivePerson(u *User) bool {
 }
 
 // isEligibleAgentOwner reports whether u may own an agent: an active
-// permanent person whose account no tenant manages (a tenant's account owns
-// no agent until its tenant can govern them). The same rule backs creation,
-// transfer, an offer's acceptance, an orphan's reassignment, agent OAuth and
-// machine validity, and the standing check, so an agent can never be handed
-// to an account it would be unusable under.
+// permanent person. The same rule backs creation, transfer, an offer's
+// acceptance, an orphan's reassignment, agent OAuth and machine validity, and
+// the standing check, so an agent can never be handed to an account it would
+// be unusable under; an account a tenant manages must also stand in its
+// tenant (agentOwnerStanding), and its suspension, removal or reset
+// deactivates its agents.
 func isEligibleAgentOwner(u *User) bool {
-	return isActivePerson(u) && u.ManagedByTenantID == ""
+	return isActivePerson(u)
 }
 
 // checkAgentStanding returns nil when the agent may hold a session now. It
@@ -302,12 +303,20 @@ func (s *AuthService) emitAgentEvent(ctx context.Context, t events.EventType, ag
 // CreateAgent creates an agent account owned by ownerUserID, which defaults
 // to the caller. Naming another owner requires a project admin, and that
 // owner must be an active person in this project. An account a tenant
-// manages owns no agent (ErrManagedAccount).
+// manages may own agents while it stands in its tenant (agentOwnerStanding);
+// one creating its own agent must also
+// ask from a session that has not ended (fenceManagedSession), so a token
+// outliving a reset, suspension or removal makes none.
 func (s *AuthService) CreateAgent(
-	ctx context.Context, callerID, name, avatarURL, ownerUserID, ip, userAgent, clientRequestID string,
+	ctx context.Context, callerID string, signIn SessionSignIn, name, avatarURL, ownerUserID, ip, userAgent, clientRequestID string,
 ) (*User, error) {
 	caller, isAdmin, err := s.agentCaller(ctx, agentOpCreate, callerID, "", ip, userAgent)
 	if err != nil {
+		return nil, err
+	}
+	if err := fenceManagedSession(ctx, s.repo(ctx), s.logger, caller, signIn, "create_agent"); err != nil {
+		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
+			map[string]any{"step": "managed_session_fenced"})
 		return nil, err
 	}
 	name, avatarURL, err = normalizeAgentProfile(name, avatarURL)
@@ -325,11 +334,6 @@ func (s *AuthService) CreateAgent(
 		if owner, err = repo.GetUser(ctx, id); err != nil {
 			return nil, fmt.Errorf("fetch owner: %w", err)
 		}
-	}
-	if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), owner, "create_agent"); err != nil {
-		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
-			map[string]any{"step": "owner_managed", "owner_user_id": owner.ID})
-		return nil, err
 	}
 	if owner != caller {
 		if s.agentOwnerStanding(ctx, owner) != nil {

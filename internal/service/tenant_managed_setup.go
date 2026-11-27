@@ -90,7 +90,7 @@ func (s *MembershipService) CreateManagedSetupInvitation(ctx context.Context, ca
 	if err != nil {
 		return refuse("invalid_argument", err)
 	}
-	caller, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID)
+	caller, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn)
 	if err != nil {
 		return refuse("not_permitted", err)
 	}

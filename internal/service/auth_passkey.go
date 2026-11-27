@@ -32,6 +32,9 @@ func (s *AuthService) BeginPasskeyRegistration(ctx context.Context, userID strin
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return "", "", err
 	}
+	if err := s.fenceManagedCaller(ctx, userID, signIn, "passkey_registration"); err != nil {
+		return "", "", err
+	}
 	if !enrolment {
 		var err error
 		ctx, err = s.credentialEnrollmentContext(ctx, userID, signIn)
@@ -134,6 +137,9 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID st
 		return nil, nil, err
 	}
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return nil, nil, err
+	}
+	if err := s.fenceManagedCaller(ctx, userID, signIn, "passkey_registration"); err != nil {
 		return nil, nil, err
 	}
 	if !issueSession {
@@ -285,7 +291,7 @@ func (s *AuthService) CompletePasskeyRegistration(ctx context.Context, userID st
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    s.accessTokenExpiresIn(user),
 	}, nil
 }
 
@@ -489,7 +495,7 @@ func (s *AuthService) CompletePasskeyLogin(ctx context.Context, challengeID, cre
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    s.accessTokenExpiresIn(user),
 	}, nil
 }
 

@@ -596,7 +596,7 @@ func TestCreateTenantInvitation_OneOpenInviteRevokesPrior(t *testing.T) {
 	require.NotEqual(t, first.Invitation.ID, second.Invitation.ID)
 
 	// Only the second invite is pending; the first is revoked. List confirms.
-	invs, err := f.svc.ListTenantInvitations(ctx, mAdminID, mTestTenant)
+	invs, err := f.svc.ListTenantInvitations(ctx, mAdminID, SessionSignIn{}, mTestTenant)
 	require.NoError(t, err)
 	statusByID := map[string]string{}
 	for _, inv := range invs {
@@ -952,12 +952,12 @@ func TestListTenantInvitations_AdminGated(t *testing.T) {
 	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember)
 	require.NoError(t, err)
 
-	invs, err := f.svc.ListTenantInvitations(ctx, mAdminID, mTestTenant)
+	invs, err := f.svc.ListTenantInvitations(ctx, mAdminID, SessionSignIn{}, mTestTenant)
 	require.NoError(t, err)
 	require.Len(t, invs, 1)
 
 	// A non-admin caller is denied.
-	_, err = f.svc.ListTenantInvitations(ctx, "stranger", mTestTenant)
+	_, err = f.svc.ListTenantInvitations(ctx, "stranger", SessionSignIn{}, mTestTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -967,11 +967,11 @@ func TestListTenantMembers_AdminGated(t *testing.T) {
 	f.seedMember(mTestProject, mTestTenant, "user-bob", RoleMember)
 	ctx := withProject(mTestProject)
 
-	members, err := f.svc.ListTenantMembers(ctx, mAdminID, mTestTenant)
+	members, err := f.svc.ListTenantMembers(ctx, mAdminID, SessionSignIn{}, mTestTenant)
 	require.NoError(t, err)
 	require.Len(t, members, 2)
 
-	_, err = f.svc.ListTenantMembers(ctx, "stranger", mTestTenant)
+	_, err = f.svc.ListTenantMembers(ctx, "stranger", SessionSignIn{}, mTestTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -1146,7 +1146,7 @@ func TestTenantAdmin_OnlyAClaimedOrLatentTenantIsAdministered(t *testing.T) {
 		} else {
 			f.tenants.byID[key].Status = status
 		}
-		_, err := f.svc.ListTenantMembers(withProject(mTestProject), mAdminID, mTestTenant)
+		_, err := f.svc.ListTenantMembers(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant)
 		if refused {
 			require.ErrorIs(t, err, ErrPermissionDenied, "status %q", status)
 		} else {
@@ -1157,7 +1157,7 @@ func TestTenantAdmin_OnlyAClaimedOrLatentTenantIsAdministered(t *testing.T) {
 	f := newMembershipFixture()
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	f.tenants.getErr = errBoom
-	_, err := f.svc.ListTenantMembers(withProject(mTestProject), mAdminID, mTestTenant)
+	_, err := f.svc.ListTenantMembers(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant)
 	require.ErrorIs(t, err, errBoom, "a failed status read is not a verdict")
 }
 
@@ -1173,9 +1173,9 @@ func TestTenantAdmin_SuspendedTenantRefusesEveryAdminAction(t *testing.T) {
 
 	_, err := f.svc.CreateTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, "colleague@acme.com", RoleMember)
 	require.ErrorIs(t, err, ErrPermissionDenied, "invite")
-	_, err = f.svc.ListTenantInvitations(ctx, mAdminID, mTestTenant)
+	_, err = f.svc.ListTenantInvitations(ctx, mAdminID, SessionSignIn{}, mTestTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied, "list invitations")
-	_, err = f.svc.ListTenantMembers(ctx, mAdminID, mTestTenant)
+	_, err = f.svc.ListTenantMembers(ctx, mAdminID, SessionSignIn{}, mTestTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied, "list members")
 	require.ErrorIs(t, f.svc.RemoveTenantMember(ctx, mAdminID, SessionSignIn{}, mTestTenant, "user-bob", "", ""), ErrPermissionDenied, "remove")
 	_, err = f.svc.AcceptTenantInvitation(ctx, mInviteeID, rawToken)

@@ -854,7 +854,7 @@ func newDomainFixture() *domainFixture {
 	t := newFakeTenantStore()
 	m := newFakeMembershipStore()
 	r := &fakeDNSResolver{records: map[string][]string{}}
-	svc := NewDomainService(d, t, m, r, &config.Config{}, nil)
+	svc := NewDomainService(d, t, m, r, &config.Config{}, nil).WithAccounts(newFakeRepo())
 	return &domainFixture{svc: svc, domains: d, tenants: t, members: m, resolver: r}
 }
 
@@ -1183,7 +1183,7 @@ func TestListTenantDomains_ReturnsTenantDomains(t *testing.T) {
 	// A domain in another tenant must not leak.
 	f.seedPendingDomain(t, testProject, "other-tenant", "evil.com")
 
-	got, err := f.svc.ListTenantDomains(withProject(testProject), testCaller, testTenant)
+	got, err := f.svc.ListTenantDomains(withProject(testProject), testCaller, SessionSignIn{}, testTenant)
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	names := []string{got[0].Domain, got[1].Domain}
@@ -1192,7 +1192,7 @@ func TestListTenantDomains_ReturnsTenantDomains(t *testing.T) {
 
 func TestListTenantDomains_RejectsNonAdmin(t *testing.T) {
 	f := newDomainFixture()
-	_, err := f.svc.ListTenantDomains(withProject(testProject), testCaller, testTenant)
+	_, err := f.svc.ListTenantDomains(withProject(testProject), testCaller, SessionSignIn{}, testTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 }
 
@@ -1325,19 +1325,19 @@ func TestListTenantDomains_PropagatesStoreError(t *testing.T) {
 	f.seedAdmin(testProject, testTenant, testCaller)
 	f.domains.listErr = errBoom
 
-	_, err := f.svc.ListTenantDomains(withProject(testProject), testCaller, testTenant)
+	_, err := f.svc.ListTenantDomains(withProject(testProject), testCaller, SessionSignIn{}, testTenant)
 	require.ErrorIs(t, err, errBoom)
 }
 
 func TestListTenantDomains_RejectsMissingProjectAndCaller(t *testing.T) {
 	f := newDomainFixture()
-	_, err := f.svc.ListTenantDomains(context.Background(), testCaller, testTenant)
+	_, err := f.svc.ListTenantDomains(context.Background(), testCaller, SessionSignIn{}, testTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 
-	_, err = f.svc.ListTenantDomains(withProject(testProject), "", testTenant)
+	_, err = f.svc.ListTenantDomains(withProject(testProject), "", SessionSignIn{}, testTenant)
 	require.ErrorIs(t, err, ErrUnauthenticated)
 
-	_, err = f.svc.ListTenantDomains(withProject(testProject), testCaller, "")
+	_, err = f.svc.ListTenantDomains(withProject(testProject), testCaller, SessionSignIn{}, "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
 }
 
@@ -1503,7 +1503,7 @@ func TestDomainRPCs_SuspendedTenantRefusesItsAdmins(t *testing.T) {
 
 	_, err := f.svc.CreateDomain(ctx, testCaller, SessionSignIn{}, testTenant, testDomain, DomainVerificationDNSTXT)
 	require.ErrorIs(t, err, ErrPermissionDenied)
-	_, err = f.svc.ListTenantDomains(ctx, testCaller, testTenant)
+	_, err = f.svc.ListTenantDomains(ctx, testCaller, SessionSignIn{}, testTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	require.Empty(t, f.domains.attempts)
 	require.Zero(t, f.domains.writes)

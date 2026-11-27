@@ -132,7 +132,7 @@ func (s *DomainService) CreateDomain(ctx context.Context, callerID string, signI
 		return nil, err
 	}
 
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	if err := s.recordAttempt(ctx, projectID, tenantID); err != nil {
@@ -207,7 +207,7 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID string, signI
 		return nil, fmt.Errorf("%w: tenant", ErrNotFound)
 	}
 
-	if err := s.authorizeVerify(ctx, projectID, t, callerID); err != nil {
+	if err := s.authorizeVerify(ctx, projectID, t, callerID, signIn); err != nil {
 		return nil, err
 	}
 
@@ -268,7 +268,7 @@ func (s *DomainService) VerifyDomain(ctx context.Context, callerID string, signI
 
 // ListTenantDomains returns every domain bound to a tenant. callerID must
 // be an owner/admin member of the tenant.
-func (s *DomainService) ListTenantDomains(ctx context.Context, callerID, tenantID string) ([]*Domain, error) {
+func (s *DomainService) ListTenantDomains(ctx context.Context, callerID string, signIn SessionSignIn, tenantID string) ([]*Domain, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
@@ -280,7 +280,7 @@ func (s *DomainService) ListTenantDomains(ctx context.Context, callerID, tenantI
 	if tenantID == "" {
 		return nil, fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
 	}
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	return s.domains.ListDomainsByTenant(ctx, projectID, tenantID)
@@ -291,8 +291,8 @@ func (s *DomainService) ListTenantDomains(ctx context.Context, callerID, tenantI
 // members yet (the bootstrap case that makes the verifier its first owner).
 // A suspended tenant verifies nothing, since verifying would claim it and
 // lift the suspension: requireTenantAdmin refuses it, and it is not latent.
-func (s *DomainService) authorizeVerify(ctx context.Context, projectID string, t *Tenant, callerID string) error {
-	_, err := s.requireTenantAdmin(ctx, projectID, t.ID, callerID)
+func (s *DomainService) authorizeVerify(ctx context.Context, projectID string, t *Tenant, callerID string, signIn SessionSignIn) error {
+	_, err := s.requireTenantAdmin(ctx, projectID, t.ID, callerID, signIn)
 	if err == nil {
 		return nil
 	}
@@ -346,9 +346,14 @@ func (s *DomainService) refuseHeldSession(ctx context.Context, projectID, caller
 	return refuseHeldSessionInProject(ctx, s.accounts, s.logger, projectID, callerID, signIn, s.nowFunc().UnixMilli())
 }
 
-// requireTenantAdmin is authorizeTenantAdmin over this service's stores.
-func (s *DomainService) requireTenantAdmin(ctx context.Context, projectID, tenantID, callerID string) (*TenantMembership, error) {
-	return authorizeTenantAdmin(ctx, s.memberships, s.tenants, projectID, tenantID, callerID)
+// requireTenantAdmin is authorizeTenantAdmin over this service's stores,
+// reading the caller's account from the account store (WithAccounts).
+func (s *DomainService) requireTenantAdmin(ctx context.Context, projectID, tenantID, callerID string, signIn SessionSignIn) (*TenantMembership, error) {
+	c := tenantAdminCheck{memberships: s.memberships, tenants: s.tenants, accounts: s.accounts, logger: s.logger}
+	if s.accounts != nil {
+		c.users = RepositoryUserDirectory(s.accounts)
+	}
+	return authorizeTenantAdmin(ctx, c, projectID, tenantID, callerID, signIn)
 }
 
 // checkDNSTXT resolves the domain's TXT records and confirms the

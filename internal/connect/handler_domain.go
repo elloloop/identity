@@ -71,7 +71,7 @@ func (h *IdentityHandler) ListTenantDomains(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	domains, err := h.domains.ListTenantDomains(ctx, userID, req.Msg.TenantId)
+	domains, err := h.domains.ListTenantDomains(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}

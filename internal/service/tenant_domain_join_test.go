@@ -162,7 +162,7 @@ func TestSetDomainJoin_ADomainRemovedMeanwhile(t *testing.T) {
 	f, w := newDomainJoinFixture()
 	store := &vanishingDomainStore{fakeDomainStore: f.domains}
 	svc := NewDomainService(store, f.tenants, f.members, f.resolver, &config.Config{}, nil).
-		WithAudit(audit.NewLogger(w, "test-tenant", nil))
+		WithAudit(audit.NewLogger(w, "test-tenant", nil)).WithAccounts(newFakeRepo())
 
 	got, err := svc.SetDomainJoin(withProject(testProject), testCaller, SessionSignIn{}, joinDomainID, true, "", "")
 	require.ErrorIs(t, err, ErrNotFound)

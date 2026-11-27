@@ -58,8 +58,8 @@ for the tenant.
 
 - **What a managed account may not do.** It adds no recovery email: its
   tenant recovers it with a reset to a new set-up link, never through an
-  address of the person's own. It owns no agent until its tenant can govern
-  agents. The project's operator does not stop a single managed account
+  address of the person's own. It owns agents only while it stands in its
+  tenant, and its suspension, removal or reset deactivates them. The project's operator does not stop a single managed account
   (AdminService deactivate, reactivate, delete, password reset and update all
   refuse it): its tenant's owners and admins suspend or remove it.
 - **One tenant only.** A managed account, and an agent it owns, holds a
@@ -87,6 +87,18 @@ for the tenant.
   links first, in their own transaction, and then runs the erasure cascade.
   The order is intended: it fails safe, as a failure between the two leaves
   the account in place with no live link, and a retry finishes the purge.
+- **Taking an account back reaches every verifier within a minute.**
+  Suspending, removing or resetting a managed account ends its sessions and
+  refresh tokens in the same transaction, and the replica that wrote it drops
+  them from its session cache. Other replicas, and services that verify
+  access tokens themselves, would otherwise honour a token until it expires,
+  so a managed account's access tokens (`managed: true`) last
+  `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS`, 60 by default and at most 60
+  while managed accounts are enabled, and its refresh rechecks its standing.
+  Calls that attach a credential (a passkey, two-step, a
+  phone, a provider link, a password, an agent) or administer a tenant read
+  the account and the session from the store, so a token cached as live does
+  nothing there.
 
 ## Consequences
 

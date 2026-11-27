@@ -269,6 +269,9 @@ func (s *AuthService) RequestPhoneVerification(ctx context.Context, userID strin
 	if err := s.refuseCredentialAttach(ctx, userID); err != nil {
 		return err
 	}
+	if err := s.fenceManagedCaller(ctx, userID, signIn, "phone_verification"); err != nil {
+		return err
+	}
 	phone, ok := normalizePhone(phoneNumber)
 	if !ok {
 		return fmt.Errorf("%w: phone number must be E.164 (e.g. +14155550123)", ErrInvalidArgument)
@@ -375,6 +378,9 @@ func (s *AuthService) VerifyPhoneCode(ctx context.Context, userID string, signIn
 	}
 	// A code requested before a hold began must not move the number during it.
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return nil, err
+	}
+	if err := s.fenceManagedCaller(ctx, userID, signIn, "phone_verification"); err != nil {
 		return nil, err
 	}
 

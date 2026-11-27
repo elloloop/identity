@@ -55,7 +55,7 @@ func TestSuspendTenantMember_SuspendsAndRestoresAndAudits(t *testing.T) {
 	mine, err := f.svc.ListMyTenants(ctx, joinerID, SessionSignIn{})
 	require.NoError(t, err)
 	assert.Empty(t, mine, "a suspended member's tenant is not theirs to choose")
-	members, err := f.svc.ListTenantMembers(ctx, ssOwnerID, ownTenant)
+	members, err := f.svc.ListTenantMembers(ctx, ssOwnerID, SessionSignIn{}, ownTenant)
 	require.NoError(t, err)
 	assert.Len(t, members, 2, "the member list still shows them")
 
@@ -120,7 +120,7 @@ func TestSuspendTenantMember_KeepsTheMemberOut(t *testing.T) {
 	f.seed(ssOtherID, MembershipSourceInvited, RoleAdmin, MembershipStatusActive)
 	_, err = f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.NoError(t, err)
-	_, err = f.svc.ListTenantMembers(ctx, ssOtherID, ownTenant)
+	_, err = f.svc.ListTenantMembers(ctx, ssOtherID, SessionSignIn{}, ownTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	_, err = f.svc.RestoreTenantMember(ctx, ssOtherID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.ErrorIs(t, err, ErrPermissionDenied, "nobody restores themselves")

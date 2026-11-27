@@ -20,9 +20,9 @@ func TestCreateAgentRetryNormalizesAndEmitsOnce(t *testing.T) {
 	f := newAgentFixture(t)
 	f.svc.cfg.AgentsMaxPerOwner = 1
 	ctx := context.Background()
-	first, err := f.svc.CreateAgent(ctx, f.owner.ID, " Helper ", " https://example.com/avatar.png ", "", "", "", "stable-create")
+	first, err := f.svc.CreateAgent(ctx, f.owner.ID, SessionSignIn{}, " Helper ", " https://example.com/avatar.png ", "", "", "", "stable-create")
 	require.NoError(t, err)
-	replay, err := f.svc.CreateAgent(ctx, f.owner.ID, "Helper", "https://example.com/avatar.png", f.owner.ID, "", "", "stable-create")
+	replay, err := f.svc.CreateAgent(ctx, f.owner.ID, SessionSignIn{}, "Helper", "https://example.com/avatar.png", f.owner.ID, "", "", "stable-create")
 	require.NoError(t, err)
 	require.Equal(t, first.ID, replay.ID)
 	count := 0
@@ -32,10 +32,10 @@ func TestCreateAgentRetryNormalizesAndEmitsOnce(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, count)
-	_, err = f.svc.CreateAgent(ctx, f.owner.ID, "Different", "https://example.com/avatar.png", "", "", "", "stable-create")
+	_, err = f.svc.CreateAgent(ctx, f.owner.ID, SessionSignIn{}, "Different", "https://example.com/avatar.png", "", "", "", "stable-create")
 	require.ErrorIs(t, err, ErrAlreadyExists)
 	f.setStatus(f.owner.ID, StatusDeactivated)
-	_, err = f.svc.CreateAgent(ctx, f.owner.ID, "Helper", "https://example.com/avatar.png", "", "", "", "stable-create")
+	_, err = f.svc.CreateAgent(ctx, f.owner.ID, SessionSignIn{}, "Helper", "https://example.com/avatar.png", "", "", "", "stable-create")
 	require.ErrorIs(t, err, ErrAccountNotActive)
 }
 
@@ -87,13 +87,13 @@ func TestAgentCreationSharedMemoryOperation(t *testing.T) {
 func TestCreateAgentAuditsStoreRefusals(t *testing.T) {
 	f := newAgentFixture(t)
 	ctx := context.Background()
-	_, err := f.svc.CreateAgent(ctx, f.owner.ID, "Helper", "", "", "", "", "same-key")
+	_, err := f.svc.CreateAgent(ctx, f.owner.ID, SessionSignIn{}, "Helper", "", "", "", "", "same-key")
 	require.NoError(t, err)
-	_, err = f.svc.CreateAgent(ctx, f.owner.ID, "Other", "", "", "", "", "same-key")
+	_, err = f.svc.CreateAgent(ctx, f.owner.ID, SessionSignIn{}, "Other", "", "", "", "", "same-key")
 	require.ErrorIs(t, err, ErrAlreadyExists)
 	require.Equal(t, 1, f.writer.countByEventTypeAndDetail(string(audit.EventAgentCreated), "step", "request_id_conflict"))
 	f.repo.afterGetUserHook = func(stored *User) { f.repo.afterGetUserHook = nil; stored.Status = StatusDeactivated }
-	_, err = f.svc.CreateAgent(ctx, f.owner.ID, "Helper", "", "", "", "", "same-key")
+	_, err = f.svc.CreateAgent(ctx, f.owner.ID, SessionSignIn{}, "Helper", "", "", "", "", "same-key")
 	require.ErrorIs(t, err, ErrPermissionDenied)
 	require.Equal(t, 1, f.writer.countByEventTypeAndDetail(string(audit.EventAgentCreated), "step", "authority_revoked"))
 }

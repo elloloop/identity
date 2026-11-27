@@ -38,6 +38,9 @@ func (s *AuthService) LinkIdentity(
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return nil, err
 	}
+	if err := s.fenceManagedCaller(ctx, userID, signIn, "link_identity"); err != nil {
+		return nil, err
+	}
 	// An anonymous caller must not gain a permanent credential here. The
 	// retention sweep keys on is_anonymous, so a link that leaves the flag
 	// set produces an account with a working provider login that the sweep

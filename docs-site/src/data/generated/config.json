@@ -954,6 +954,15 @@
     "anchor": "password-and-lockout"
   },
   {
+    "name": "GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS",
+    "type": "integer",
+    "default": "60",
+    "required": false,
+    "description": "is the lifetime of an access token issued to an account a tenant manages (its managed claim true), from 0 to 60 where managed accounts are enabled (0 selects the default, 60), and never longer than .",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_MANAGED_ACCOUNTS_ENABLED",
     "type": "boolean",
     "default": "false",

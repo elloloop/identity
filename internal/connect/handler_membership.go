@@ -94,7 +94,7 @@ func (h *IdentityHandler) ListTenantInvitations(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	invs, err := h.members.ListTenantInvitations(ctx, userID, req.Msg.TenantId)
+	invs, err := h.members.ListTenantInvitations(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -141,7 +141,7 @@ func (h *IdentityHandler) ListTenantMembers(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	mems, err := h.members.ListTenantMembers(ctx, userID, req.Msg.TenantId)
+	mems, err := h.members.ListTenantMembers(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -434,7 +434,7 @@ func (h *IdentityHandler) CheckManagedAddresses(
 	for _, a := range req.Msg.GetAddresses() {
 		queries = append(queries, service.ManagedAddressQuery{Username: a.GetUsername(), Domain: a.GetDomain()})
 	}
-	checks, err := h.members.CheckManagedAddresses(ctx, userID, req.Msg.GetTenantId(), queries)
+	checks, err := h.members.CheckManagedAddresses(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), queries)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
