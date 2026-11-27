@@ -941,9 +941,6 @@ func New(deps Deps) (*Built, error) {
 	domainSvc := buildDomainService(deps, repo, auditLog, logger)
 	users := service.RepositoryUserDirectory(repo)
 	membershipSvc := buildMembershipService(deps, repo, users, mailer, senders.mailDelivers, auditLog, logger)
-	if membershipSvc != nil {
-		membershipSvc = membershipSvc.WithEventPublisher(eventPublisher)
-	}
 	controlAdminSvc := buildControlPlaneAdminService(deps, users, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)

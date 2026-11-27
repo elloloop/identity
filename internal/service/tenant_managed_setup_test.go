@@ -3,14 +3,16 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
-	"github.com/elloloop/identity/pkg/events"
 )
 
 // managedSetupsMock is a ManagedSetupStore whose every method is the
@@ -254,23 +256,22 @@ func TestCreateTenantInvitation_RefusesTheTenantsManagedAddress(t *testing.T) {
 	require.NoError(t, err, "an address held outside the tenant is invited as any other")
 }
 
-func TestRevokeTenantInvitation_ManagedSetupDeletesAndAnnounces(t *testing.T) {
-	pub := &capturePublisher{}
+// Revoking a set-up link deletes its never-set-up account, audited, and
+// announces nothing: the account was never announced as created.
+func TestRevokeTenantInvitation_ManagedSetupDeletesWithoutAnnouncing(t *testing.T) {
 	deleted := &User{ID: maUserID, Email: maAddress}
-	f, w := managedMembershipFixture(&managedSetupsMock{revoke: func(_, _, id, _ string) (*ManagedSetupRevoked, error) {
+	var by string
+	f, w := managedMembershipFixture(&managedSetupsMock{revoke: func(_, _, id, caller string) (*ManagedSetupRevoked, error) {
+		by = caller
 		return &ManagedSetupRevoked{Invitation: &TenantInvitation{ID: id, TenantID: mTestTenant, Status: InvitationStatusRevoked}, Changed: true, DeletedUser: deleted}, nil
 	}})
-	f.svc.WithEventPublisher(pub)
 
 	inv, err := f.svc.RevokeTenantInvitation(managedScope(admitted()), mAdminID, SessionSignIn{}, mTestTenant, "inv-ann", "", "")
 	require.NoError(t, err)
 	require.Equal(t, InvitationStatusRevoked, inv.Status)
+	require.Equal(t, mAdminID, by, "the store judges the caller under its locks")
 	require.Equal(t, 1, w.countByEventTypeActorTarget(string(audit.EventManagedAccountDeleted), mAdminID, maUserID))
 	require.Equal(t, 1, w.countByEventType(string(audit.EventTenantInvitationRevoked)))
-	got := pub.all()
-	require.Len(t, got, 1)
-	require.Equal(t, events.EventUserDeleted, got[0].Type)
-	require.Equal(t, maUserID, got[0].User.ID)
 }
 
 func TestRevokeTenantInvitation_ManagedPaths(t *testing.T) {
@@ -289,16 +290,15 @@ func TestRevokeTenantInvitation_ManagedPaths(t *testing.T) {
 	require.NoError(t, err, "an ordinary invitation is revoked as before")
 	require.Equal(t, InvitationStatusRevoked, inv.Status)
 
-	f, _ = managedMembershipFixture(&managedSetupsMock{})
-	f.invitations.byID[f.invitations.key(mTestProject, "inv-1")] = &TenantInvitation{ID: "inv-1", ProjectID: mTestProject, TenantID: mTestTenant, Status: InvitationStatusPending}
-	_, err = f.svc.RevokeTenantInvitation(managedScope(ProjectAccessConfig{}), mAdminID, SessionSignIn{}, mTestTenant, "inv-1", "", "")
-	require.NoError(t, err, "where managed accounts are not admitted, revoking never reaches the managed store")
-
-	f, _ = managedMembershipFixture(&managedSetupsMock{})
-	f.tenants.getErr = storeErr
-	admitted, err := f.svc.managedWritesAdmitted(managedScope(admitted()), mTestTenant)
-	require.ErrorIs(t, err, storeErr)
-	require.False(t, admitted)
+	reached := false
+	f, _ = managedMembershipFixture(&managedSetupsMock{revoke: func(_, _, id, _ string) (*ManagedSetupRevoked, error) {
+		reached = true
+		return &ManagedSetupRevoked{Invitation: &TenantInvitation{ID: id, TenantID: mTestTenant, Status: InvitationStatusRevoked}, Changed: true}, nil
+	}})
+	f.svc.cfg.ManagedAccountsEnabled = false
+	_, err = f.svc.RevokeTenantInvitation(managedScope(ProjectAccessConfig{}), mAdminID, SessionSignIn{}, mTestTenant, "inv-ann", "", "")
+	require.NoError(t, err)
+	require.True(t, reached, "a set-up link is revoked through the managed store whatever the switches say")
 }
 
 func TestListTenantMembers_MarksAccountKinds(t *testing.T) {
@@ -394,4 +394,92 @@ func TestGetTenantInvitation_ManagedSetupLink(t *testing.T) {
 	f.users.getErr = storeErr
 	_, err = f.svc.GetTenantInvitation(managedScope(admitted()), raw)
 	require.ErrorIs(t, err, storeErr)
+}
+
+// The delivery address is held to the per-recipient cap across the project.
+func TestCreateManagedSetupInvitation_CapsTheDeliveryAddress(t *testing.T) {
+	var got ManagedSetup
+	f, _ := managedMembershipFixture(&managedSetupsMock{create: func(s ManagedSetup) (*ManagedSetupIssued, error) {
+		got = s
+		return issuedFor(s, true, ""), nil
+	}})
+	_, err := f.svc.CreateManagedSetupInvitation(managedScope(admitted()), mAdminID, SessionSignIn{}, annRequest(), "", "")
+	require.NoError(t, err)
+	require.Equal(t, f.svc.config().TenantInvitationRecipientLimit(), got.MaxPerDeliveryEmail)
+	require.Positive(t, got.MaxPerDeliveryEmail)
+	require.Positive(t, got.Limits.ResendCooldownStartMs, "the cooldown the store applies to the delivery address too")
+}
+
+// A refusal is logged with its reason only: never the address, the username
+// or the error text that may carry them.
+func TestCreateManagedSetupInvitation_RefusalLogCarriesNoAddress(t *testing.T) {
+	f, _ := managedMembershipFixture(&managedSetupsMock{})
+	core, logs := observer.New(zap.InfoLevel)
+	f.svc.logger = zap.New(core)
+	req := annRequest()
+	req.Username = "secret..name"
+	_, err := f.svc.CreateManagedSetupInvitation(managedScope(admitted()), mAdminID, SessionSignIn{}, req, "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	entries := logs.FilterMessage("managed_account_create_refused").All()
+	require.Len(t, entries, 1)
+	require.Equal(t, "invalid_argument", entries[0].ContextMap()["reason"])
+	for k, v := range entries[0].ContextMap() {
+		require.NotContains(t, fmt.Sprint(v), "secret", k)
+		require.NotContains(t, fmt.Sprint(v), maDelivery, k)
+	}
+}
+
+// A self-service tenant's set-up email greets by the address's local part,
+// never by the name its admin typed, and names no tenant.
+func TestCreateManagedSetupInvitation_SelfServiceGreetingIsTheLocalPart(t *testing.T) {
+	f, _ := managedMembershipFixture(&managedSetupsMock{create: func(s ManagedSetup) (*ManagedSetupIssued, error) {
+		return issuedFor(s, true, ""), nil
+	}})
+	access := ProjectAccessConfig{AdmitManagedAccounts: true, AdmitManagedAccountsSelfService: true}
+	f.tenants.put(&Tenant{ID: mTestTenant, ProjectID: mTestProject, Status: TenantStatusClaimed, CreatedBy: mAdminID, Name: "Typed Name Inc"})
+	req := annRequest()
+	req.DisplayName = "Admin Typed"
+	_, err := f.svc.CreateManagedSetupInvitation(managedScope(access), mAdminID, SessionSignIn{}, req, "", "")
+	require.NoError(t, err)
+	text := f.mailer.last().Text
+	require.Contains(t, text, "Hi ann,")
+	require.NotContains(t, text, "Admin Typed")
+	require.NotContains(t, text, "Typed Name Inc")
+
+	g, _ := managedMembershipFixture(&managedSetupsMock{create: func(s ManagedSetup) (*ManagedSetupIssued, error) {
+		return issuedFor(s, true, ""), nil
+	}})
+	g.tenants.put(&Tenant{ID: mTestTenant, ProjectID: mTestProject, Status: TenantStatusClaimed, Name: "Acme"})
+	_, err = g.svc.CreateManagedSetupInvitation(managedScope(admitted()), mAdminID, SessionSignIn{}, annRequest(), "", "")
+	require.NoError(t, err)
+	require.Contains(t, g.mailer.last().Text, "Hi Ann Lee,", "an operator's tenant greets by the name it gave")
+	require.Contains(t, g.mailer.last().Text, "Acme")
+}
+
+// countingTenants counts the tenant reads a request makes.
+type countingTenants struct {
+	*fakeTenantStore
+	reads int
+}
+
+func (c *countingTenants) GetTenant(ctx context.Context, projectID, tenantID string) (*Tenant, error) {
+	c.reads++
+	return c.fakeTenantStore.GetTenant(ctx, projectID, tenantID)
+}
+
+func TestGetTenantInvitation_ManagedSetupReadsTheTenantOnce(t *testing.T) {
+	f, _ := managedMembershipFixture(&managedSetupsMock{})
+	counted := &countingTenants{fakeTenantStore: f.tenants}
+	f.svc.tenants = counted
+	raw := "set-up-token"
+	f.invitations.byID[f.invitations.key(mTestProject, "inv-ann")] = &TenantInvitation{
+		ID: "inv-ann", ProjectID: mTestProject, TenantID: mTestTenant, TokenHash: sha256Hex(raw),
+		Email: maAddress, Status: InvitationStatusPending, UserID: maUserID, DeliveryEmail: maDelivery, SetupEpoch: 1,
+		ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli(), TokenOnlyInEmail: true,
+	}
+	f.users.set(mTestProject, &User{ID: maUserID, Email: maAddress, Name: "Ann Lee", Status: StatusInvited, ManagedByTenantID: mTestTenant, SetupEpoch: 1})
+	view, err := f.svc.GetTenantInvitation(managedScope(admitted()), raw)
+	require.NoError(t, err)
+	require.Equal(t, "Ann Lee", view.DisplayName)
+	require.Equal(t, 1, counted.reads)
 }

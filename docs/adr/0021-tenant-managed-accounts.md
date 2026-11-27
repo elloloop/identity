@@ -49,6 +49,13 @@ for the tenant.
   account domain (`accounts.domain`), and the project's deny layer applies to
   it at creation and set-up.
 
+- **Lifecycle events.** `user.created` is emitted when a managed account is
+  first set up, not when it is created waiting: until then nobody can sign
+  in to it. Revoking the link of an account never set up deletes it without
+  `user.deleted`, since its creation was never announced. Both events carry
+  the deployment's tenant id, as every user event does; the managing tenant
+  is the account's own attribute, not the event's.
+
 ## Consequences
 
 - Rolling back past schema 68 once managed accounts exist turns them into

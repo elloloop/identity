@@ -136,6 +136,10 @@ type setupLink struct {
 	// not.
 	limits          service.InvitationLimits
 	recipientLimits bool
+	// deliveryCooldown applies limits.ResendCooldownStartMs to
+	// inv.DeliveryEmail too: no two links go to one delivery address, across
+	// the project, inside the cooldown.
+	deliveryCooldown bool
 	// maxPerDeliveryEmail caps the links sent to inv.DeliveryEmail across the
 	// project in the limits' window; zero applies no cap.
 	maxPerDeliveryEmail int
@@ -161,6 +165,17 @@ func issueSetupLink(ctx context.Context, tx pgx.Tx, op string, link setupLink) (
 	}
 	if err := checkInvitationLimits(ctx, tx, op, inv.ProjectID, inv.TenantID, inv.InvitedBy, recipientKey, link.limits); err != nil {
 		return nil, "", err
+	}
+	if link.deliveryCooldown && link.limits.ResendCooldownStartMs > 0 {
+		var recent bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tenant_invitations
+			WHERE project_id = $1 AND user_id <> '' AND lower(delivery_email COLLATE "C") = $2 AND created_at_ms >= $3)`,
+			inv.ProjectID, service.FoldEmail(inv.DeliveryEmail), link.limits.ResendCooldownStartMs).Scan(&recent); err != nil {
+			return nil, "", wrapPgErr(op+"(delivery cooldown)", err)
+		}
+		if recent {
+			return nil, "", service.ErrInvitationResendTooSoon
+		}
 	}
 	if link.maxPerDeliveryEmail > 0 {
 		var sent int
@@ -317,8 +332,10 @@ func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.
 			TokenOnlyInEmail: true, UserID: account.ID, DeliveryEmail: setup.DeliveryEmail,
 			SetupEpoch: account.SetupEpoch,
 		},
-		limits:          setup.Limits,
-		recipientLimits: true,
+		limits:              setup.Limits,
+		recipientLimits:     true,
+		deliveryCooldown:    true,
+		maxPerDeliveryEmail: setup.MaxPerDeliveryEmail,
 	})
 	if err != nil {
 		return nil, err
@@ -618,11 +635,23 @@ func (s *InvitationStore) RevokeManagedSetup(ctx context.Context, projectID, ten
 	if err != nil {
 		return nil, wrapPgErr(op+"(lock)", err)
 	}
-	if _, err := governorOf(held, by); err != nil {
+	governor, err := governorOf(held, by)
+	if err != nil {
 		return nil, err
 	}
 	if link, err = lockInvitationRow(ctx, tx, projectID, link.ID); err != nil {
 		return nil, wrapPgErr(op+"(lock link)", err)
+	}
+	ownersLink := link.Role == service.RoleOwner
+	if !ownersLink {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tenant_invitations
+			WHERE project_id = $1 AND user_id = $2 AND status = 'pending' AND role = 'owner')`,
+			projectID, link.UserID).Scan(&ownersLink); err != nil {
+			return nil, wrapPgErr(op+"(pending role)", err)
+		}
+	}
+	if ownersLink && governor.Role != service.RoleOwner {
+		return nil, fmt.Errorf("%w: only an owner may revoke an owner's set-up link", service.ErrPermissionDenied)
 	}
 	out := &service.ManagedSetupRevoked{Invitation: link}
 	switch link.Status {

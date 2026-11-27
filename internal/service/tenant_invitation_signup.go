@@ -78,11 +78,13 @@ func (s *AuthService) SignUpWithTenantInvitation(ctx context.Context, rawToken, 
 	if rawToken == "" {
 		return nil, fmt.Errorf("%w: missing token", ErrInvalidArgument)
 	}
+	var looked *invitationLookup
 	if s.cfg.ManagedAccountsEnabled && s.managedSetups != nil {
-		res, handled, err := s.setUpManagedAccount(ctx, rawToken, password, ipAddr, userAgent)
+		res, handled, lookup, err := s.setUpManagedAccount(ctx, rawToken, password, ipAddr, userAgent)
 		if handled {
 			return res, err
 		}
+		looked = lookup
 	}
 	if !s.cfg.PasswordSignupEnabled {
 		return nil, ErrSignupDisabled
@@ -102,7 +104,7 @@ func (s *AuthService) SignUpWithTenantInvitation(ctx context.Context, rawToken, 
 		return nil, err
 	}
 
-	inv, err := s.openInvitations.GetInvitationByTokenHash(ctx, scope.ProjectID, sha256Hex(rawToken))
+	inv, err := looked.invitation(ctx, s.openInvitations, scope.ProjectID, rawToken)
 	if err != nil {
 		return nil, err
 	}

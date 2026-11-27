@@ -682,7 +682,9 @@ RestoreTenantMember(tenant_id, user_id)
     been set up sends a new link, to the new <code>email</code> if it changed,
     and the earlier link stops working; the name stays as it was. The
     invitation limits and the resend cooldown apply, with the account's
-    address as the recipient. An ordinary invitation to one of the tenant's
+    address as the recipient; the address the link is sent to is held to the
+    cooldown and to the per-recipient cap too, counted across the project.
+    An ordinary invitation to one of the tenant's
     managed addresses is refused with <code>MANAGED_BY_THIS_TENANT</code>; one
     to another tenant's managed address is sent as any invitation, so no tenant
     learns which addresses others manage, and acceptance refuses it. Creation
@@ -717,8 +719,11 @@ RestoreTenantMember(tenant_id, user_id)
   <p>
     <code>RevokeTenantInvitation</code> on a set-up link also deletes its
     account while that account has never been set up, whatever the link's
-    status, which frees the address, emits <code>user.deleted</code> and is
-    audited as <code>managed_account_deleted</code>. A used link is
+    status and whatever the managed-account switches say, which frees the
+    address and is audited as <code>managed_account_deleted</code>. It emits
+    no <code>user.deleted</code>: an account never set up was never announced
+    with <code>user.created</code>, which comes at its first set-up. Only an
+    owner may revoke an owner's link. A used link is
     <code>FAILED_PRECONDITION</code>: remove the member instead.
     <code>ListTenantInvitations</code> shows each link's
     <code>is_managed_setup</code>, <code>account_address</code> and

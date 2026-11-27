@@ -14,7 +14,6 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/emailaddr"
-	"github.com/elloloop/identity/pkg/events"
 )
 
 // MembershipService implements the redesign's tenant-membership and
@@ -123,10 +122,7 @@ type MembershipService struct {
 	// managedSetups writes managed accounts' set-up links
 	// (WithManagedSetups); nil creates none.
 	managedSetups ManagedSetupStore
-	// publisher announces user-lifecycle events (WithEventPublisher); nil
-	// announces none.
-	publisher events.Publisher
-	nowFunc   func() time.Time
+	nowFunc       func() time.Time
 }
 
 // NewMembershipService wires a MembershipService. mailerDelivers tells the
@@ -445,11 +441,13 @@ func (s *MembershipService) ListTenantInvitations(ctx context.Context, callerID,
 // tenant_invitation_revoked, tenant_invitation_revoke_unchanged, or
 // tenant_invitation_revoke_refused with the reason.
 //
-// Where the tenant admits managed accounts, a managed account's set-up link
-// is revoked through ManagedSetupStore.RevokeManagedSetup: at any status of
-// the link, its account is deleted while it is still waiting for its first
-// set-up, which is logged, audited as EventManagedAccountDeleted and
-// announced as user.deleted.
+// A managed account's set-up link is always revoked through
+// ManagedSetupStore.RevokeManagedSetup, whatever the managed-account
+// switches say: at any status of the link, its account is deleted while it
+// is still waiting for its first set-up, which is logged and audited as
+// EventManagedAccountDeleted. Only an owner may revoke an owner's link. No
+// user.deleted is announced: an account never set up was never announced as
+// created.
 func (s *MembershipService) RevokeTenantInvitation(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, invitationID, ip, userAgent string) (*TenantInvitation, error) {
 	tenantID, invitationID = strings.TrimSpace(tenantID), strings.TrimSpace(invitationID)
 	projectID, err := s.requireProject(ctx)
@@ -479,13 +477,9 @@ func (s *MembershipService) RevokeTenantInvitation(ctx context.Context, callerID
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
 		return refuse("not_permitted", err)
 	}
-	admitted, err := s.managedWritesAdmitted(ctx, tenantID)
-	if err != nil {
-		return refuse("store_error", err)
-	}
 	var inv *TenantInvitation
 	var changed, handled bool
-	if admitted {
+	if s.managedSetups != nil {
 		inv, changed, handled, err = s.revokeManagedSetup(ctx, projectID, tenantID, invitationID, callerID, ip, userAgent)
 	}
 	if !handled {
@@ -778,10 +772,16 @@ func (s *MembershipService) tenantDisplayName(ctx context.Context, projectID, te
 	if err != nil || t == nil || t.CreatedBy != "" {
 		return "", err
 	}
+	return tenantNameOf(t), nil
+}
+
+// tenantNameOf is the name an operator-made or auto-formed tenant t shows:
+// its name, else its primary domain.
+func tenantNameOf(t *Tenant) string {
 	if n := strings.TrimSpace(t.Name); n != "" {
-		return n, nil
+		return n
 	}
-	return strings.TrimSpace(t.PrimaryDomain), nil
+	return strings.TrimSpace(t.PrimaryDomain)
 }
 
 // invitationTTL returns the configured invitation validity window, defaulting

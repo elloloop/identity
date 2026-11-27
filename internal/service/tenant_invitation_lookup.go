@@ -74,9 +74,14 @@ func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken st
 		return nil, fmt.Errorf("%w: invitation", ErrNotFound)
 	}
 
-	tenantName, err := s.tenantDisplayName(ctx, projectID, inv.TenantID)
+	t, err := s.tenants.GetTenant(ctx, projectID, inv.TenantID)
 	if err != nil {
 		return nil, err
+	}
+	vetted := t != nil && t.CreatedBy == ""
+	tenantName := ""
+	if vetted {
+		tenantName = tenantNameOf(t)
 	}
 	view := &TenantInvitationView{
 		TenantID:    inv.TenantID,
@@ -97,7 +102,7 @@ func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken st
 	}
 	fields := append(invitationDecisionLogFields(ctx, projectID, inv), zap.String("status", view.Status))
 	if inv.IsManagedSetup() {
-		if err := s.describeManagedSetup(ctx, projectID, inv, view); err != nil {
+		if err := s.describeManagedSetup(ctx, projectID, inv, vetted, view); err != nil {
 			return nil, err
 		}
 		s.logger.Info("tenant_invitation_read", append(fields, zap.Bool("managed_setup", true), zap.Bool("live", view.AccountAddress != ""))...)
@@ -160,9 +165,9 @@ func addressHasAccount(ctx context.Context, repo Repository, email string) (bool
 // is pending and its epoch is the account's current one, so a revoked,
 // replaced or used link no longer describes the account. The address the
 // link was delivered to is never answered, nor the account's id: the read is
-// public to whoever holds the token. The name is withheld for a self-service
-// tenant, whose names are unvetted.
-func (s *MembershipService) describeManagedSetup(ctx context.Context, projectID string, inv *TenantInvitation, view *TenantInvitationView) error {
+// public to whoever holds the token. The name is withheld unless vetted: a
+// tenant made through self-service has unvetted names.
+func (s *MembershipService) describeManagedSetup(ctx context.Context, projectID string, inv *TenantInvitation, vetted bool, view *TenantInvitationView) error {
 	view.IsManagedSetup = true
 	if view.Status != InvitationStatusPending {
 		return nil
@@ -175,11 +180,7 @@ func (s *MembershipService) describeManagedSetup(ctx context.Context, projectID 
 		return nil
 	}
 	view.AccountAddress = account.Email
-	t, err := s.tenants.GetTenant(ctx, projectID, inv.TenantID)
-	if err != nil {
-		return err
-	}
-	if t != nil && t.CreatedBy == "" {
+	if vetted {
 		view.DisplayName = account.Name
 	}
 	return nil

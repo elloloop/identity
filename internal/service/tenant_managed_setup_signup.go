@@ -43,30 +43,46 @@ func (s *AuthService) WithManagedAccounts(setups ManagedSetupStore, tenants Tena
 // announces user.created. Each refusal is logged as
 // managed_account_setup_refused with its reason; a set-up as
 // managed_account_set_up, and audited.
-func (s *AuthService) setUpManagedAccount(ctx context.Context, rawToken, password, ipAddr, userAgent string) (res *LoginResult, handled bool, err error) {
+func (s *AuthService) setUpManagedAccount(ctx context.Context, rawToken, password, ipAddr, userAgent string) (res *LoginResult, handled bool, looked *invitationLookup, err error) {
 	ctx, err = s.activeProjectPolicyContext(ctx)
 	if err != nil {
-		return nil, true, err
+		return nil, true, nil, err
 	}
 	scope := ProjectScopeFromContext(ctx)
 	if scope == nil || scope.ProjectID == "" {
-		return nil, false, nil
+		return nil, false, nil, nil
 	}
 	inv, err := s.openInvitations.GetInvitationByTokenHash(ctx, scope.ProjectID, sha256Hex(rawToken))
 	if err != nil {
-		return nil, true, err
+		return nil, true, nil, err
 	}
 	if inv == nil || !inv.IsManagedSetup() {
-		return nil, false, nil
+		return nil, false, &invitationLookup{projectID: scope.ProjectID, inv: inv}, nil
 	}
 	res, err = s.completeManagedSetup(ctx, scope, inv, password, ipAddr, userAgent)
-	return res, true, err
+	return res, true, nil, err
+}
+
+// invitationLookup is the invitation a request already read by its token
+// in projectID (inv nil for none), so the sign-up does not read it again.
+type invitationLookup struct {
+	projectID string
+	inv       *TenantInvitation
+}
+
+// invitation is the invitation rawToken names in projectID: the one l read,
+// when l read it in that project, else read now.
+func (l *invitationLookup) invitation(ctx context.Context, store OpenInvitationReader, projectID, rawToken string) (*TenantInvitation, error) {
+	if l != nil && l.projectID == projectID {
+		return l.inv, nil
+	}
+	return store.GetInvitationByTokenHash(ctx, projectID, sha256Hex(rawToken))
 }
 
 func (s *AuthService) completeManagedSetup(ctx context.Context, scope *ProjectScope, inv *TenantInvitation, password, ipAddr, userAgent string) (*LoginResult, error) {
 	refuse := func(reason string, err error) (*LoginResult, error) {
 		s.logger.Info("managed_account_setup_refused", append(invitationDecisionLogFields(ctx, scope.ProjectID, inv),
-			zap.String("user_id", inv.UserID), zap.String("reason", reason), zap.Error(err))...)
+			zap.String("user_id", inv.UserID), zap.String("reason", reason))...)
 		return nil, err
 	}
 	if password == "" {

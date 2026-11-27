@@ -11,7 +11,6 @@ import (
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 	"github.com/elloloop/identity/pkg/emailaddr"
-	"github.com/elloloop/identity/pkg/events"
 )
 
 // ManagedAccountRequest asks CreateManagedSetupInvitation for a managed
@@ -35,13 +34,6 @@ func (s *MembershipService) WithManagedSetups(store ManagedSetupStore) *Membersh
 	return s
 }
 
-// WithEventPublisher wires the user-lifecycle publisher that announces a
-// managed account deleted with its set-up link; nil emits nothing.
-func (s *MembershipService) WithEventPublisher(p events.Publisher) *MembershipService {
-	s.publisher = p
-	return s
-}
-
 // CreateManagedSetupInvitation creates a managed account of req.TenantID, or,
 // for one of its managed accounts never set up, issues a new set-up link that
 // replaces the pending one, and mails the link to req.DeliveryEmail. callerID
@@ -52,7 +44,10 @@ func (s *MembershipService) WithEventPublisher(p events.Publisher) *MembershipSe
 // (ErrManagedAccountsNotAdmitted); the address's domain must be verified for
 // the tenant (ErrManagedDomainUnverified); the address must be free or one
 // of the tenant's own accounts waiting to be set up (ErrManagedByThisTenant,
-// ErrManagedAddressUnavailable). The link's token goes only into its email,
+// ErrManagedAddressUnavailable). The invitation limits apply with the
+// account's address as the recipient, and the delivery address is held to
+// the resend cooldown and to the per-recipient cap, counted across the
+// project. The link's token goes only into its email,
 // so a server whose mailer does not deliver refuses with
 // ErrEmailDeliveryDisabled. Every refusal is logged with its reason; the
 // creation or resend is logged and audited.
@@ -61,7 +56,7 @@ func (s *MembershipService) CreateManagedSetupInvitation(ctx context.Context, ca
 	tenantID := strings.TrimSpace(req.TenantID)
 	fields := []zap.Field{zap.String("project_id", projectID), zap.String("tenant_id", tenantID), zap.String("inviter_id", callerID)}
 	refuse := func(reason string, err error) (*CreatedInvitation, error) {
-		s.logger.Info("managed_account_create_refused", append(fields, zap.String("reason", reason), zap.Error(err))...)
+		s.logger.Info("managed_account_create_refused", append(fields, zap.String("reason", reason))...)
 		return nil, err
 	}
 	if err != nil {
@@ -122,7 +117,8 @@ func (s *MembershipService) CreateManagedSetupInvitation(ctx context.Context, ca
 		ProjectID: projectID, TenantID: tenantID, Address: address, Domain: domain,
 		DisplayName: displayName, DeliveryEmail: delivery, Role: role, InvitedBy: callerID,
 		TokenHash: sha256Hex(rawToken), ExpiresAtMs: now.Add(s.invitationTTL()).UnixMilli(),
-		Limits: s.invitationLimits(now),
+		Limits:              s.invitationLimits(now),
+		MaxPerDeliveryEmail: s.config().TenantInvitationRecipientLimit(),
 	})
 	if err != nil {
 		return refuse(managedCreateRefusalReason(err), err)
@@ -196,20 +192,6 @@ func (s *MembershipService) refuseManagedAddress(ctx context.Context, projectID,
 	return nil
 }
 
-// managedWritesAdmitted reports whether managed-account writes are admitted
-// for tenantID in the request's project, reading the tenant only when the
-// server and the project admit them at all.
-func (s *MembershipService) managedWritesAdmitted(ctx context.Context, tenantID string) (bool, error) {
-	if s.managedSetups == nil {
-		return false, nil
-	}
-	err := requireManagedAccountsAdmitted(ctx, s.cfg, s.tenants, ProjectScopeFromContext(ctx), tenantID)
-	if errors.Is(err, ErrManagedAccountsNotAdmitted) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
 // revokeManagedSetup revokes tenantID's managed set-up link invitationID
 // through RevokeManagedSetup, deleting its account when it was never set up.
 // handled is false when invitationID is not one of the tenant's managed
@@ -236,7 +218,6 @@ func (s *MembershipService) revokeManagedSetup(ctx context.Context, projectID, t
 				}),
 			)
 		}
-		EmitUserEvent(ctx, s.publisher, s.logger, projectID, tenantID, events.EventUserDeleted, deleted)
 	}
 	return revoked.Invitation, revoked.Changed, true, nil
 }
@@ -275,12 +256,21 @@ func (s *MembershipService) sendManagedSetupEmail(ctx context.Context, issued *M
 	if s.cfg != nil {
 		brand = resolveBranding(ctx, s.cfg, "")
 	}
-	tenantName, err := s.tenantDisplayName(ctx, inv.ProjectID, inv.TenantID)
-	if err != nil {
+	// The tenant is read once, for its name and for whose words the
+	// greeting may use: a self-service tenant's names are unvetted, so its
+	// email greets by the address's local part instead of the name its
+	// admin typed. A tenant that cannot be read greets that way too.
+	greeting := invitationGreeting(issued.User.Email)
+	tenantName := ""
+	t, err := s.tenants.GetTenant(ctx, inv.ProjectID, inv.TenantID)
+	switch {
+	case err != nil:
 		logger.Warn("managed_account_setup_tenant_lookup_failed", zap.Error(err))
+	case t != nil && t.CreatedBy == "":
+		tenantName, greeting = tenantNameOf(t), issued.User.Name
 	}
 	html, text, err := email.Render(email.TemplateManagedAccountSetup, brand.templateData(map[string]any{
-		"UserName":       issued.User.Name,
+		"UserName":       greeting,
 		"TenantName":     tenantName,
 		"AccountAddress": issued.User.Email,
 		"Role":           inv.Role,

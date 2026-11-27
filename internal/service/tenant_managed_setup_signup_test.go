@@ -200,3 +200,29 @@ func TestManagedAccountsAdmitted(t *testing.T) {
 	require.False(t, managedAccountsAdmitted(on, admitted(), &Tenant{CreatedBy: "u"}))
 	require.True(t, managedAccountsAdmitted(on, ProjectAccessConfig{AdmitManagedAccounts: true, AdmitManagedAccountsSelfService: true}, &Tenant{CreatedBy: "u"}))
 }
+
+// countingInvitations counts the reads of an invitation by its token.
+type countingInvitations struct {
+	*fakeInvitationStore
+	reads int
+}
+
+func (c *countingInvitations) GetInvitationByTokenHash(ctx context.Context, projectID, tokenHash string) (*TenantInvitation, error) {
+	c.reads++
+	return c.fakeInvitationStore.GetInvitationByTokenHash(ctx, projectID, tokenHash)
+}
+
+// With managed accounts on, an ordinary invitation's sign-up reads the
+// invitation once: the set-up branch's read is reused.
+func TestSignUpWithTenantInvitation_OrdinaryTokenIsReadOnce(t *testing.T) {
+	f := newInvitationSignupFixture(t)
+	counted := &countingInvitations{fakeInvitationStore: f.invitations}
+	f.svc.WithOpenInvitations(counted).WithManagedAccounts(&managedSetupsMock{}, newFakeTenantStore())
+	f.svc.cfg.ManagedAccountsEnabled = true
+	token := f.pendingInvitation()
+
+	res, err := f.signUp(inviteOnlyScope(t), token, signupName, signupPassword)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.AccessToken)
+	require.Equal(t, 1, counted.reads)
+}
