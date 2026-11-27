@@ -985,6 +985,14 @@ func (b *grpcBridge) SetTenantMemberRole(ctx context.Context, in *identitypb.Set
 	return invoke(ctx, b, in, b.h.SetTenantMemberRole)
 }
 
+func (b *grpcBridge) CheckManagedAddresses(ctx context.Context, in *identitypb.CheckManagedAddressesRequest) (*identitypb.CheckManagedAddressesResponse, error) {
+	return invoke(ctx, b, in, b.h.CheckManagedAddresses)
+}
+
+func (b *grpcBridge) ResetManagedAccount(ctx context.Context, in *identitypb.ResetManagedAccountRequest) (*identitypb.ResetManagedAccountResponse, error) {
+	return invoke(ctx, b, in, b.h.ResetManagedAccount)
+}
+
 func (b *grpcBridge) CreateTenant(ctx context.Context, in *identitypb.CreateTenantRequest) (*identitypb.CreateTenantResponse, error) {
 	return invoke(ctx, b, in, b.h.CreateTenant)
 }

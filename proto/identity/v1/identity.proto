@@ -2251,6 +2251,20 @@ message TenantMembership {
   string status = 6; // "active" | "pending" | "inactive" | "suspended"
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
+  // account_kind says whether the member's account is the person's own or
+  // one the tenant manages. Set by ListTenantMembers; UNSPECIFIED elsewhere.
+  AccountKind account_kind = 9;
+}
+
+// AccountKind says who controls an account.
+enum AccountKind {
+  ACCOUNT_KIND_UNSPECIFIED = 0;
+  // The person's own account: they created it, or accepted an invitation
+  // with an address they hold.
+  ACCOUNT_KIND_PERSONAL = 1;
+  // An account a tenant manages: an owner or admin created it on a domain
+  // the tenant has verified, and it belongs to that tenant only.
+  ACCOUNT_KIND_MANAGED = 2;
 }
 
 // TenantInvitation is a pending offer to join a Tenant, addressed to an
@@ -2266,12 +2280,115 @@ message TenantInvitation {
   google.protobuf.Timestamp expires_at = 7;
   google.protobuf.Timestamp accepted_at = 8;
   google.protobuf.Timestamp created_at = 9;
+  // is_managed_setup marks the set-up link of an account the tenant
+  // manages: redeeming it sets the account's password rather than joining
+  // an existing account.
+  bool is_managed_setup = 10;
+  // account_address is the managed account's address, on a domain the
+  // tenant has verified; email is then where the link was sent. Empty
+  // unless is_managed_setup.
+  string account_address = 11;
+  // user_id is the managed account the set-up link is for. Empty unless
+  // is_managed_setup.
+  string user_id = 12;
 }
 
 message CreateTenantInvitationRequest {
   string tenant_id = 1;
+  // email is the address the invitation is sent to. For an ordinary
+  // invitation it is also the account that may accept it; with
+  // account_username it is only where the set-up link goes.
   string email = 2;
   string role = 3; // "member" (default) | "admin" | "owner"
+  // account_username and account_domain, given together, ask for an account
+  // the tenant manages, <account_username>@<account_domain>, on a domain
+  // verified for tenant_id. A new account is created before its first
+  // sign-in; for one of this tenant's managed accounts that has not been set
+  // up yet, the set-up link is sent again and the earlier one stops working.
+  // The project must admit managed accounts (access.admit_managed_accounts,
+  // and access.admit_managed_accounts_self_service for a tenant made through
+  // self-service CreateTenant), and the server must enable them
+  // (GATEWAY_MANAGED_ACCOUNTS_ENABLED). A refusal carries
+  // ManagedAccountRefusedDetails.
+  string account_username = 4;
+  string account_domain = 5;
+  // display_name is the managed account's name: required with
+  // account_username, plain text, at most 100 characters, with no control or
+  // invisible formatting characters.
+  string display_name = 6;
+}
+
+// ManagedAccountRefusedDetails is the error detail on a refused request for
+// an account a tenant manages (CreateTenantInvitation with account_username).
+// It says only what the caller may know: a holder outside the caller's tenant
+// is never named.
+message ManagedAccountRefusedDetails {
+  ManagedAccountRefusal reason = 1;
+}
+
+// ManagedAccountRefusal says why a managed account was refused.
+enum ManagedAccountRefusal {
+  MANAGED_ACCOUNT_REFUSAL_UNSPECIFIED = 0;
+  // The address is already an account this tenant manages. The code is
+  // ALREADY_EXISTS. An ordinary invitation to such an address is refused
+  // with this reason too.
+  MANAGED_ACCOUNT_REFUSAL_MANAGED_BY_THIS_TENANT = 1;
+  // Something outside this tenant holds the address: a person's account,
+  // a recovery email or another tenant's managed account. Which one is not
+  // said. The code is ALREADY_EXISTS.
+  MANAGED_ACCOUNT_REFUSAL_ADDRESS_UNAVAILABLE = 2;
+  // The domain is not verified for this tenant. The code is
+  // FAILED_PRECONDITION.
+  MANAGED_ACCOUNT_REFUSAL_DOMAIN_UNVERIFIED = 3;
+  // The project or the server does not admit managed accounts for this
+  // tenant. The code is FAILED_PRECONDITION.
+  MANAGED_ACCOUNT_REFUSAL_POLICY = 4;
+}
+
+// CheckManagedAddressesRequest names addresses an owner or admin of
+// tenant_id may want to create as managed accounts.
+message CheckManagedAddressesRequest {
+  string tenant_id = 1;
+  // addresses are checked in order, at most 100 of them.
+  repeated ManagedAddress addresses = 2;
+}
+
+// ManagedAddress is a managed account's address, as its username and
+// domain.
+message ManagedAddress {
+  string username = 1;
+  string domain = 2;
+}
+
+message CheckManagedAddressesResponse {
+  // results holds one entry per requested address, in the same order.
+  repeated ManagedAddressCheck results = 1;
+}
+
+// ManagedAddressCheck is what CheckManagedAddresses found for one address.
+message ManagedAddressCheck {
+  ManagedAddress address = 1;
+  ManagedAddressStatus status = 2;
+}
+
+// ManagedAddressStatus is whether a managed account could be created at an
+// address now. It is a point-in-time answer: CreateTenantInvitation checks
+// again.
+enum ManagedAddressStatus {
+  MANAGED_ADDRESS_STATUS_UNSPECIFIED = 0;
+  // No account or recovery email holds the address.
+  MANAGED_ADDRESS_STATUS_FREE = 1;
+  // The address is already an account this tenant manages.
+  MANAGED_ADDRESS_STATUS_MANAGED_BY_THIS_TENANT = 2;
+  // Something outside this tenant holds the address; which one is not said.
+  MANAGED_ADDRESS_STATUS_ADDRESS_UNAVAILABLE = 3;
+  // The domain is not verified for this tenant. Nothing else is looked up
+  // for it, so a tenant learns nothing about addresses on domains it has
+  // not verified.
+  MANAGED_ADDRESS_STATUS_DOMAIN_UNVERIFIED = 4;
+  // The username is not a valid username, or the address is not a valid
+  // email address.
+  MANAGED_ADDRESS_STATUS_INVALID = 5;
 }
 
 message CreateTenantInvitationResponse {
@@ -2283,7 +2400,10 @@ message CreateTenantInvitationResponse {
   // response. The invitation records that its token was handed out, so it
   // never creates an account (SignUpWithTenantInvitation), even once the
   // server has mail settings; the invitee still accepts it after a sign-in
-  // that proves the address.
+  // that proves the address. It is always empty for a managed account's
+  // set-up link: such a link is created only where a mail provider delivers
+  // it, goes only to its delivery address, and its token only sets the
+  // account up (SignUpWithTenantInvitation), never accepts an invitation.
   string raw_token = 2;
   // email_send_status is what became of the one attempt this call made,
   // synchronously, to send the invitation's email. It is reported here only
@@ -2342,7 +2462,18 @@ message GetTenantInvitationResponse {
   // server recorded where an invitation's token went: CreateTenantInvitation
   // then handed the token to the inviter, or may have, so holding it does
   // not show that the caller owns the address.
+  // It is false for a managed account's set-up link.
   bool account_exists = 9;
+  // is_managed_setup marks the set-up link of an account the tenant
+  // manages: the page shows a form that sets the account's password
+  // (SignUpWithTenantInvitation) instead of a sign-up or sign-in.
+  bool is_managed_setup = 10;
+  // account_address and display_name describe the managed account the link
+  // sets up. They are set only while the invitation is pending and is the
+  // account's current set-up link; display_name is also withheld for a
+  // tenant made through self-service CreateTenant, as tenant_name is.
+  string account_address = 11;
+  string display_name = 12;
 }
 
 // SignUpWithTenantInvitationRequest creates the account a tenant invitation
@@ -2394,6 +2525,23 @@ message RevokeTenantInvitationResponse {
 
 message ListTenantMembersRequest {
   string tenant_id = 1;
+}
+
+// ResetManagedAccountRequest names the managed account an owner or admin of
+// its managing tenant resets, and where its new set-up link goes.
+message ResetManagedAccountRequest {
+  string tenant_id = 1;
+  string user_id = 2;
+  // delivery_address is the email address the set-up link is sent to.
+  string delivery_address = 3;
+}
+
+message ResetManagedAccountResponse {
+  // invitation is the account's new set-up link.
+  TenantInvitation invitation = 1;
+  // email_send_status is what became of the one attempt to send the set-up
+  // link.
+  EmailSendStatus email_send_status = 2;
 }
 
 message ListTenantMembersResponse {
@@ -4298,6 +4446,39 @@ service IdentityService {
   // Available only on the postgres control-plane driver; the memory and
   // SQLite drivers return Unimplemented.
   rpc SetTenantMemberRole(SetTenantMemberRoleRequest) returns (SetTenantMemberRoleResponse);
+  // CheckManagedAddresses says, for each address, whether a managed account
+  // of tenant_id could be created there now (ManagedAddressStatus). It
+  // changes nothing. The caller must be an active owner or admin of
+  // tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+  // Only addresses on domains verified for tenant_id are looked up; any
+  // other reads DOMAIN_UNVERIFIED, so no tenant can probe addresses on
+  // another tenant's domain. A missing tenant_id, no addresses or more than
+  // 100 is INVALID_ARGUMENT. FAILED_PRECONDITION with
+  // ManagedAccountRefusedDetails reason POLICY when the project or the
+  // server does not admit managed accounts for the tenant. Available only on
+  // the postgres control-plane driver; the memory and SQLite drivers return
+  // Unimplemented.
+  rpc CheckManagedAddresses(CheckManagedAddressesRequest) returns (CheckManagedAddressesResponse);
+  // ResetManagedAccount takes back a managed account its tenant can no
+  // longer trust: it signs the account out everywhere, ends its outstanding
+  // reset, sign-in and verification links, clears its password, passkeys,
+  // linked providers, recovery emails, two-step methods, backup codes and
+  // phone, deactivates its agents, and sends a new set-up link to
+  // delivery_address with the member's current role. The membership is
+  // unchanged. Notices go to every address the account had. The caller must
+  // be an active owner or admin of the managing tenant, a tenant that is not
+  // suspended, with a recent sign-in (PERMISSION_DENIED otherwise); only an
+  // owner may reset an owner, an admin may reset another admin's account, and
+  // naming the caller is INVALID_ARGUMENT. Every reset is audited. As with
+  // CreateTenantInvitation for a managed account, the new link's token goes
+  // only into its email and is never returned, so the call needs a mail
+  // provider (FAILED_PRECONDITION without one). A
+  // user_id that is not a managed account of tenant_id with an active or
+  // suspended membership is NOT_FOUND. Resets are limited per delivery
+  // address (RESOURCE_EXHAUSTED). Available only on the postgres
+  // control-plane driver; the memory and SQLite drivers return
+  // Unimplemented.
+  rpc ResetManagedAccount(ResetManagedAccountRequest) returns (ResetManagedAccountResponse);
 
   // Self-service tenants. Authenticated and project-scoped. CreateTenant
   // makes a claimed tenant with the caller as its owner, in one transaction;

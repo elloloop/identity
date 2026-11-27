@@ -2,6 +2,7 @@ package connect
 
 import (
 	"context"
+	"errors"
 
 	"connectrpc.com/connect"
 
@@ -23,6 +24,9 @@ func (h *IdentityHandler) CreateTenantInvitation(
 	if userID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
+	if err := refuseManagedAccountRequest(req.Msg); err != nil {
+		return nil, err
+	}
 
 	created, err := h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId, req.Msg.Email, req.Msg.Role)
 	if err != nil {
@@ -33,6 +37,22 @@ func (h *IdentityHandler) CreateTenantInvitation(
 		RawToken:        created.RawToken,
 		EmailSendStatus: emailSendStatusToProto(created.EmailStatus),
 	}), nil
+}
+
+// refuseManagedAccountRequest refuses a request for a tenant-managed
+// account, which this server does not create yet, so that the request never
+// falls through to an ordinary invitation sent to its delivery address.
+func refuseManagedAccountRequest(msg *identitypb.CreateTenantInvitationRequest) error {
+	if msg.GetAccountUsername() == "" && msg.GetAccountDomain() == "" && msg.GetDisplayName() == "" {
+		return nil
+	}
+	refused := connect.NewError(connect.CodeFailedPrecondition, errors.New("managed accounts are not available on this server"))
+	detail, err := connect.NewErrorDetail(&identitypb.ManagedAccountRefusedDetails{Reason: identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_POLICY})
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	refused.AddDetail(detail)
+	return refused
 }
 
 func emailSendStatusToProto(s service.EmailSendStatus) identitypb.EmailSendStatus {
@@ -384,4 +404,18 @@ func (h *IdentityHandler) JoinTenantByDomain(
 	return connect.NewResponse(&identitypb.JoinTenantByDomainResponse{
 		Membership: membershipToProto(m),
 	}), nil
+}
+
+func (h *IdentityHandler) CheckManagedAddresses(
+	context.Context,
+	*connect.Request[identitypb.CheckManagedAddressesRequest],
+) (*connect.Response[identitypb.CheckManagedAddressesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+}
+
+func (h *IdentityHandler) ResetManagedAccount(
+	context.Context,
+	*connect.Request[identitypb.ResetManagedAccountRequest],
+) (*connect.Response[identitypb.ResetManagedAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 }

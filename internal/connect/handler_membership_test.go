@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
@@ -736,5 +737,54 @@ func TestListMyTenants_Handler(t *testing.T) {
 	if len(got) != 2 || got[0].GetTenantId() != "t-a" || got[0].GetName() != "Alpha" || got[0].GetRole() != service.RoleAdmin ||
 		got[1].GetTenantId() != "t-b" || got[1].GetRole() != service.RoleMember {
 		t.Fatalf("tenants = %+v", got)
+	}
+}
+
+func TestManagedAccountRPCs_ReturnUnimplemented(t *testing.T) {
+	t.Parallel()
+	for _, svc := range []*service.MembershipService{nil, newMembershipSvc(nil, nil, nil, nil)} {
+		srv := startMembershipServer(t, svc)
+		ctx := context.Background()
+
+		_, err := srv.client.CheckManagedAddresses(ctx,
+			withAuth(&identitypb.CheckManagedAddressesRequest{TenantId: "t", Addresses: []*identitypb.ManagedAddress{{Username: "ann", Domain: "acme.example.com"}}}, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+
+		_, err = srv.client.ResetManagedAccount(ctx,
+			withAuth(&identitypb.ResetManagedAccountRequest{TenantId: "t", UserId: "u2", DeliveryAddress: "ann@example.com"}, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+	}
+}
+
+// A request for a tenant-managed account is refused with POLICY, so it never
+// becomes an ordinary invitation to its delivery address; with no membership
+// service the call is Unimplemented, as every membership call is.
+func TestCreateTenantInvitation_ManagedAccountFieldsRefused(t *testing.T) {
+	t.Parallel()
+	_, err := startMembershipServer(t, nil).client.CreateTenantInvitation(context.Background(),
+		withAuth(&identitypb.CreateTenantInvitationRequest{TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+	{
+		srv := startMembershipServer(t, newMembershipSvc(nil, nil, nil, nil))
+		for name, req := range map[string]*identitypb.CreateTenantInvitationRequest{
+			"all":              {TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann", AccountDomain: "acme.example.com", DisplayName: "Ann"},
+			"account_username": {TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann"},
+			"account_domain":   {TenantId: "t", Email: "ann.home@example.com", AccountDomain: "acme.example.com"},
+			"display_name":     {TenantId: "t", Email: "ann.home@example.com", DisplayName: "Ann"},
+		} {
+			_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(req, "u1"))
+			requireCode(t, err, connect.CodeFailedPrecondition)
+			var cerr *connect.Error
+			require.ErrorAs(t, err, &cerr, name)
+			var reasons []identitypb.ManagedAccountRefusal
+			for _, d := range cerr.Details() {
+				v, derr := d.Value()
+				require.NoError(t, derr, name)
+				if refused, ok := v.(*identitypb.ManagedAccountRefusedDetails); ok {
+					reasons = append(reasons, refused.GetReason())
+				}
+			}
+			require.Equal(t, []identitypb.ManagedAccountRefusal{identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_POLICY}, reasons, name)
+		}
 	}
 }
