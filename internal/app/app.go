@@ -92,6 +92,11 @@ type Deps struct {
 	// not constructed and the membership RPCs return Unimplemented.
 	InvitationStore service.InvitationStore
 
+	// ManagedSetups writes managed accounts' set-up links: creating, resending
+	// and revoking them, and setting an account up from one. Non-nil ONLY for
+	// the postgres driver; when nil no managed account is created or set up.
+	ManagedSetups service.ManagedSetupStore
+
 	// ControlPlaneStore is the project write-store backing the control-plane
 	// admin RPCs (AdminCreateProject and friends). Non-nil ONLY for the
 	// postgres driver; when nil (together with the tenant/membership stores)
@@ -866,6 +871,7 @@ func New(deps Deps) (*Built, error) {
 		// or the driver has no governance stores (memory, SQLite).
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
+		WithManagedAccounts(deps.ManagedSetups, deps.TenantStore).
 		WithDomainJoin(deps.DomainStore, deps.TenantStore).
 		WithMailDelivery(senders.mailDelivers).
 		WithTemplateMessages(senders.templates).
@@ -935,6 +941,9 @@ func New(deps Deps) (*Built, error) {
 	domainSvc := buildDomainService(deps, repo, auditLog, logger)
 	users := service.RepositoryUserDirectory(repo)
 	membershipSvc := buildMembershipService(deps, repo, users, mailer, senders.mailDelivers, auditLog, logger)
+	if membershipSvc != nil {
+		membershipSvc = membershipSvc.WithEventPublisher(eventPublisher)
+	}
 	controlAdminSvc := buildControlPlaneAdminService(deps, users, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
@@ -1465,7 +1474,8 @@ func buildMembershipService(deps Deps, accounts service.Repository, users servic
 		mailDelivers,
 		deps.Config,
 		logger,
-	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts).WithActiveProjects(deps.ActiveProjects)
+	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts).WithActiveProjects(deps.ActiveProjects).
+		WithManagedSetups(deps.ManagedSetups)
 }
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService

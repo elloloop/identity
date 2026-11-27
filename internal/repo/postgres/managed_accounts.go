@@ -996,3 +996,32 @@ func (s *MembershipStore) ResetManaged(ctx context.Context, reset service.Manage
 		RevokedSessionIDs: change.RevokedSessionIDs, DeactivatedAgentIDs: change.DeactivatedAgentIDs,
 	}, nil
 }
+
+// ManagedAccountsAmong implements service.ManagedSetupStore.
+func (s *InvitationStore) ManagedAccountsAmong(ctx context.Context, projectID, tenantID string, userIDs []string) (map[string]bool, error) {
+	const op = "ManagedAccountsAmong"
+	if projectID == "" || tenantID == "" {
+		return nil, fmt.Errorf("%w: project_id and tenant_id are required", service.ErrInvalidArgument)
+	}
+	out := map[string]bool{}
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.forProject(projectID).Query(ctx, `SELECT id FROM users
+		WHERE project_id = $1 AND id = ANY($2::text[]) AND managed_by_tenant_id = $3`, projectID, userIDs, tenantID)
+	if err != nil {
+		return nil, wrapPgErr(op, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, wrapPgErr(op+"(scan)", err)
+		}
+		out[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapPgErr(op+"(rows)", err)
+	}
+	return out, nil
+}

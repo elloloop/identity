@@ -231,6 +231,9 @@ type ManagedSetupStore interface {
 	// who holds addresses on another's domain. It locks nothing; the answer
 	// may be stale by the time it is read.
 	ManagedAddressHolders(ctx context.Context, projectID, tenantID string, addresses []string) (map[string]string, error)
+	// ManagedAccountsAmong reports which of userIDs are accounts tenantID
+	// manages: the returned set holds exactly those. It locks nothing.
+	ManagedAccountsAmong(ctx context.Context, projectID, tenantID string, userIDs []string) (map[string]bool, error)
 }
 
 // ManagedMemberStore changes the membership and the account of a managed

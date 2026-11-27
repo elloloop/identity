@@ -362,3 +362,34 @@ func TestToConnectErrorTenantSelectionRefused(t *testing.T) {
 		}
 	}
 }
+
+// A refused managed-account write carries its reason as
+// ManagedAccountRefusedDetails, with the code the proto documents.
+func TestToConnectErrorManagedAccountRefusals(t *testing.T) {
+	for err, want := range map[error]struct {
+		code   connect.Code
+		reason identitypb.ManagedAccountRefusal
+	}{
+		service.ErrManagedByThisTenant:                             {connect.CodeAlreadyExists, identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_MANAGED_BY_THIS_TENANT},
+		service.ErrManagedAddressUnavailable:                       {connect.CodeAlreadyExists, identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_ADDRESS_UNAVAILABLE},
+		service.ErrManagedDomainUnverified:                         {connect.CodeFailedPrecondition, identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_DOMAIN_UNVERIFIED},
+		fmt.Errorf("%w: x", service.ErrManagedAccountsNotAdmitted): {connect.CodeFailedPrecondition, identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_POLICY},
+	} {
+		cerr := toConnectError(err)
+		if cerr.Code() != want.code {
+			t.Fatalf("%v: code = %v, want %v", err, cerr.Code(), want.code)
+		}
+		details := cerr.Details()
+		if len(details) != 1 {
+			t.Fatalf("%v: %d details, want 1", err, len(details))
+		}
+		msg, derr := details[0].Value()
+		got, ok := msg.(*identitypb.ManagedAccountRefusedDetails)
+		if derr != nil || !ok || got.GetReason() != want.reason {
+			t.Fatalf("%v: detail = %v %v, want %v", err, msg, derr, want.reason)
+		}
+	}
+	if cerr := toConnectError(service.ErrManagedSetupStale); cerr.Code() != connect.CodeFailedPrecondition || len(cerr.Details()) != 0 {
+		t.Fatalf("stale set-up link = %v", cerr)
+	}
+}

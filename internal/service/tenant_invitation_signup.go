@@ -63,12 +63,13 @@ func (s *AuthService) WithMailDelivery(delivers bool) *AuthService {
 // an address an account holds ErrAlreadyExists. The password is held to the
 // rules of the address's tenant, and the sign-in to its login policy, before
 // anything is written.
+//
+// Where the server enables managed accounts, a managed account's set-up link
+// is redeemed first, before every check above but the local-auth switch
+// (setUpManagedAccount).
 func (s *AuthService) SignUpWithTenantInvitation(ctx context.Context, rawToken, name, password, ipAddr, userAgent string) (*LoginResult, error) {
 	if !s.cfg.AuthAllowLocal {
 		return nil, ErrLocalAuthDisabled
-	}
-	if !s.cfg.PasswordSignupEnabled {
-		return nil, ErrSignupDisabled
 	}
 	if s.openInvitations == nil {
 		return nil, ErrUnimplemented
@@ -76,6 +77,15 @@ func (s *AuthService) SignUpWithTenantInvitation(ctx context.Context, rawToken, 
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {
 		return nil, fmt.Errorf("%w: missing token", ErrInvalidArgument)
+	}
+	if s.cfg.ManagedAccountsEnabled && s.managedSetups != nil {
+		res, handled, err := s.setUpManagedAccount(ctx, rawToken, password, ipAddr, userAgent)
+		if handled {
+			return res, err
+		}
+	}
+	if !s.cfg.PasswordSignupEnabled {
+		return nil, ErrSignupDisabled
 	}
 	name, err := normalizeText("name", name, accountNameMaxRunes)
 	if err != nil {
