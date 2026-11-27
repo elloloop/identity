@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -28,10 +29,6 @@ const (
 // CodeFailedPrecondition.
 var ErrInvitationNoteNotAllowed = errors.New("this invitation cannot carry a note")
 
-// noteURLSchemes are the schemes a mail client turns into a link without a
-// "//" after the colon. A scheme followed by "//" is refused whatever it is.
-var noteURLSchemes = []string{"mailto", "tel", "sms", "callto", "javascript", "vbscript", "data", "file"}
-
 // normalizeInvitationNote returns the note an invitation email shows, or ""
 // for none. It trims the note and each of its lines, writes a CRLF line break
 // as LF, and refuses (ErrInvalidArgument) a note that is not valid UTF-8,
@@ -39,7 +36,7 @@ var noteURLSchemes = []string{"mailto", "tel", "sms", "callto", "javascript", "v
 // maxInvitationNoteLines lines, that has a blank line, that carries a
 // character normalizeText refuses (a control other than the line break, a
 // bidirectional control or another invisible formatting character), or that
-// reads as a link (noteLinkLike).
+// refuseLinkLikeNote refuses.
 func normalizeInvitationNote(note string) (string, error) {
 	if !utf8.ValidString(note) {
 		return "", fmt.Errorf("%w: note is not valid UTF-8", ErrInvalidArgument)
@@ -65,66 +62,66 @@ func normalizeInvitationNote(note string) (string, error) {
 	if utf8.RuneCountInString(note) > maxInvitationNoteRunes {
 		return "", fmt.Errorf("%w: note is longer than %d characters", ErrInvalidArgument, maxInvitationNoteRunes)
 	}
-	if noteLinkLike(note) {
-		return "", fmt.Errorf("%w: note may not contain a link, a web address or markup; an email address is allowed", ErrInvalidArgument)
+	if err := refuseLinkLikeNote(note); err != nil {
+		return "", err
 	}
 	return note, nil
 }
 
-// noteLinkLike reports whether note reads as, or would be turned by a mail
-// client into, a link. It judges the note as foldNote spells it, so a
-// lookalike spelling (fullwidth letters, an ideographic full stop for a dot)
-// is judged as the text it imitates; a letter of another script that only
-// looks Latin is still a letter, so "example.com" spelled with a Cyrillic
-// small letter a in place of the Latin one reads as a domain like any
-// other. Refused:
+// refuseLinkLikeNote refuses a note a mail client could turn into a link, or
+// that could pass for one, with ErrInvalidArgument. It judges the note as
+// foldNote spells it, by classes of character rather than by what a link
+// looks like, so a lookalike spelling (fullwidth letters, a fullwidth or
+// ideographic full stop) is judged as the text it imitates, and a letter of
+// any script counts as a letter. Refused:
 //
-//   - "<" or ">", which HTML markup and autolinks need, and "](", which a
-//     markdown link needs;
-//   - "://" anywhere, a scheme of noteURLSchemes directly followed by ":"
-//     and a non-space, and any word directly followed by ":" and an address,
-//     such as "sip:jane@example.com";
-//   - a word holding "@" that is not, as the note spells it before folding, a
-//     plain ASCII email address (noteEmailAddress);
-//   - any other word of at least two dot-separated labels ending in a label of
-//     two or more letters, or in a punycode label, such as "www.example",
-//     "example.com" or "пример.рф", and a dotted IPv4 address.
+//   - "<", ">", "](" or "://", which markup, autolinks and links need;
+//   - "@" anywhere outside a plain ASCII email address as the note spells it
+//     before folding (noteEmailAddress);
+//   - an ASCII letter followed by any ASCII letters, digits, "+", "." or "-"
+//     and then ":" directly followed by a character other than a space: the
+//     shape of every URL scheme, listed anywhere or not;
+//   - outside such an email address, a "." with a letter, mark or number on
+//     both sides, which every domain and dotted IPv4 address has; so are
+//     "e.g", "v1.2" and "Node.js", and two sentences with no space between;
+//   - seven or more digits with only spaces, "-", ".", "(", ")" or "+"
+//     between them, the shape of a phone number; so is a date such as
+//     "2026-11-27".
 //
-// The email address is the one thing allowed that folding could forge: a
-// fullwidth or small at sign, or a fullwidth dot, folds into one, while the
-// email shows the unfolded note, whose ASCII remainder a mail client links.
-// So an address is recognised only in the note as sent, and blanked out
-// before the rest is folded and judged; whatever still holds "@" after
-// folding was not typed as a plain address and is refused.
-//
-// A word is a run of letters, marks, digits and "-", ".", "_", "+", "@", with
-// any leading or trailing "-", ".", "_" or "+" dropped, so "e.g." and "v1.2"
-// pass and so does a full stop ending a sentence; one without the space after
-// it ("done.see") reads as a domain.
-func noteLinkLike(note string) bool {
+// The email address is the one exemption, and the one thing folding could
+// forge: a fullwidth or small at sign, or a fullwidth dot, folds into one,
+// while the email shows the unfolded note. So an address is recognised only
+// in the note as sent and blanked out before the rest is folded and judged.
+func refuseLinkLikeNote(note string) error {
 	folded := foldNote(note)
 	if strings.ContainsAny(folded, "<>") || strings.Contains(folded, "](") || strings.Contains(folded, "://") {
-		return true
+		return fmt.Errorf("%w: note may not contain a link or markup", ErrInvalidArgument)
 	}
-	for _, scheme := range noteURLSchemes {
-		if hasSchemePrefix(folded, scheme) {
-			return true
-		}
+	rest := foldNote(withoutEmailAddresses(note))
+	if strings.Contains(rest, "@") {
+		return fmt.Errorf("%w: note may hold an email address only in plain ASCII, with no dot before the at sign", ErrInvalidArgument)
 	}
-	if hasSchemeBeforeAddress(folded) {
-		return true
+	if hasSchemeBeforeText(folded) {
+		return fmt.Errorf("%w: note may not contain a link: a word directly followed by a colon and text", ErrInvalidArgument)
 	}
-	for _, word := range strings.FieldsFunc(foldNote(withoutEmailAddresses(note)), func(r rune) bool { return !isNoteWordRune(r) }) {
-		word = strings.Trim(word, "-._+")
-		if strings.Contains(word, "@") || noteDomainLike(word) {
-			return true
-		}
+	if hasDottedWord(rest) {
+		return fmt.Errorf("%w: note may hold no web addresses or dotted words", ErrInvalidArgument)
 	}
-	return false
+	if hasPhoneNumber(folded) {
+		return fmt.Errorf("%w: note may not contain a phone number or another run of %d or more digits", ErrInvalidArgument, notePhoneDigits)
+	}
+	return nil
 }
 
+// notePhoneDigits is how many digits, with only phone punctuation between
+// them, read as a phone number.
+const notePhoneDigits = 7
+
 // withoutEmailAddresses is note with each word that is a plain ASCII email
-// address (noteEmailAddress) replaced by a space.
+// address (noteEmailAddress) replaced by a space. A word is a run of letters,
+// marks, numbers and "-", ".", "_", "+", "@", judged without its leading and
+// trailing "-", ".", "_" and "+", so a full stop ending a sentence does not
+// stop an address ending it from counting.
 func withoutEmailAddresses(note string) string {
 	var b strings.Builder
 	word := 0
@@ -136,7 +133,7 @@ func withoutEmailAddresses(note string) string {
 		}
 	}
 	for i, r := range note {
-		if isNoteWordRune(r) {
+		if isNoteLabelRune(r) || strings.ContainsRune("-._+@", r) {
 			continue
 		}
 		blank(i)
@@ -147,129 +144,93 @@ func withoutEmailAddresses(note string) string {
 	return b.String()
 }
 
-// foldNote is note in the form noteLinkLike judges: without the zero-width
-// joiner and non-joiner, which normalizeText admits but which would split a
-// domain without showing it; compatibility-normalized (NFKC, which writes
-// fullwidth, circled and mathematical letters as the letters they imitate);
-// lower-cased; and with an ideographic full stop, which IDNA reads as a dot,
-// written as one between two word characters of a script other than Chinese,
-// Japanese or Korean, where it ends a sentence instead.
-func foldNote(note string) string {
-	note = strings.NewReplacer("\u200c", "", "\u200d", "").Replace(note)
-	runes := []rune(strings.ToLower(norm.NFKC.String(note)))
-	for i, r := range runes {
-		if r == ideographicFullStop && i > 0 && i < len(runes)-1 && readsAsLabel(runes[i-1]) && readsAsLabel(runes[i+1]) {
-			runes[i] = '.'
-		}
+// noteEmailAddress reports whether word is a plain ASCII email address: one
+// "@" between a local part of ASCII letters, digits, "_", "+" and "-" only (no
+// dot, so "www.example.com@example.org" is not one) and a domain of two or
+// more dot-separated labels of ASCII letters, digits and "-", the last of two
+// or more letters.
+func noteEmailAddress(word string) bool {
+	local, domain, ok := strings.Cut(word, "@")
+	if !ok || local == "" || strings.ContainsFunc(local, func(r rune) bool { return !isASCIIAlnum(r) && !strings.ContainsRune("_+-", r) }) {
+		return false
 	}
-	return string(runes)
-}
-
-// ideographicFullStop is U+3002, which NFKC also makes of the halfwidth one.
-const ideographicFullStop = '\u3002'
-
-func readsAsLabel(r rune) bool {
-	return isNoteWordRune(r) && !unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul, unicode.Bopomofo)
-}
-
-// hasSchemePrefix reports whether scheme+":" starts a word of s and is
-// directly followed by a character other than a space.
-func hasSchemePrefix(s, scheme string) bool {
-	prefix := scheme + ":"
-	for offset := 0; ; {
-		i := strings.Index(s[offset:], prefix)
-		if i < 0 {
+	labels := strings.Split(domain, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if label == "" || strings.ContainsFunc(label, func(r rune) bool { return !isASCIIAlnum(r) && r != '-' }) {
 			return false
 		}
-		i += offset
-		rest := s[i+len(prefix):]
-		if (i == 0 || !isNoteWordRune(lastRune(s[:i]))) && rest != "" && !unicode.IsSpace(firstRune(rest)) {
-			return true
-		}
-		offset = i + len(prefix)
 	}
+	last := labels[len(labels)-1]
+	return len(last) >= 2 && !strings.ContainsFunc(last, func(r rune) bool { return !isASCIIAlnum(r) || r >= '0' && r <= '9' })
 }
 
-// hasSchemeBeforeAddress reports whether a word of s is directly followed by
-// ":" and a word holding "@", the shape of a link to an address under any
-// scheme, listed in noteURLSchemes or not.
-func hasSchemeBeforeAddress(s string) bool {
-	for i, r := range s {
-		if r != ':' || i == 0 || !isNoteWordRune(lastRune(s[:i])) {
-			continue
-		}
-		rest := s[i+1:]
-		if end := strings.IndexFunc(rest, func(r rune) bool { return !isNoteWordRune(r) }); end >= 0 {
-			rest = rest[:end]
-		}
-		if strings.Contains(rest, "@") {
+// foldNote is note in the form refuseLinkLikeNote judges: without the
+// zero-width joiner and non-joiner, which normalizeText admits but which would
+// split a word without showing it; compatibility-normalized (NFKC, which
+// writes fullwidth, circled and mathematical characters as the ones they
+// imitate, a fullwidth full stop as "." and a halfwidth ideographic one as
+// the ideographic full stop); lower-cased; and with the ideographic full
+// stop, which IDNA reads as a dot, written as one.
+func foldNote(note string) string {
+	note = strings.NewReplacer("\u200c", "", "\u200d", "").Replace(note)
+	return strings.ReplaceAll(strings.ToLower(norm.NFKC.String(note)), "\u3002", ".")
+}
+
+// noteSchemeRE matches the shape of a URL scheme and its colon.
+var noteSchemeRE = regexp.MustCompile(`[a-z][a-z0-9+.\-]*:`)
+
+// hasSchemeBeforeText reports whether folded holds a scheme's shape
+// (noteSchemeRE) directly followed by a character other than a space.
+func hasSchemeBeforeText(folded string) bool {
+	for _, m := range noteSchemeRE.FindAllStringIndex(folded, -1) {
+		if r, size := utf8.DecodeRuneInString(folded[m[1]:]); size > 0 && !unicode.IsSpace(r) {
 			return true
 		}
 	}
 	return false
 }
 
-func isNoteWordRune(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsDigit(r) || strings.ContainsRune("-._+@", r)
-}
-
-// noteEmailAddress reports whether word is a plain ASCII email address: one
-// "@", a local part of letters, digits and ".", "_", "+", "-" that neither
-// starts nor ends with a dot nor holds two in a row, and a domain that
-// noteDomainLike recognises, made of ASCII letters, digits and "-" only.
-func noteEmailAddress(word string) bool {
-	local, domain, ok := strings.Cut(word, "@")
-	if !ok || local == "" || strings.Contains(domain, "@") {
-		return false
-	}
-	if strings.HasPrefix(local, ".") || strings.HasSuffix(local, ".") || strings.Contains(local, "..") {
-		return false
-	}
-	if strings.ContainsFunc(local, func(r rune) bool { return !isASCIIAlnum(r) && !strings.ContainsRune("._+-", r) }) {
-		return false
-	}
-	if strings.ContainsFunc(domain, func(r rune) bool { return !isASCIIAlnum(r) && !strings.ContainsRune(".-", r) }) {
-		return false
-	}
-	return noteDomainLike(domain)
-}
-
-// noteDomainLike reports whether word is at least two non-empty
-// dot-separated labels whose last is two or more letters or a punycode
-// ("xn--") label, or a dotted IPv4 address. A letter's combining marks count
-// as letters, as a top-level domain in an Indic script needs them.
-func noteDomainLike(word string) bool {
-	labels := strings.Split(word, ".")
-	if len(labels) < 2 {
-		return false
-	}
-	numeric := true
-	for _, label := range labels {
-		if label == "" {
-			return false
+// hasDottedWord reports whether folded holds a "." with a letter, mark or
+// number directly on each side.
+func hasDottedWord(folded string) bool {
+	runes := []rune(folded)
+	for i := 1; i < len(runes)-1; i++ {
+		if runes[i] == '.' && isNoteLabelRune(runes[i-1]) && isNoteLabelRune(runes[i+1]) {
+			return true
 		}
-		numeric = numeric && !strings.ContainsFunc(label, func(r rune) bool { return r < '0' || r > '9' })
 	}
-	if numeric {
-		return len(labels) == 4
+	return false
+}
+
+// hasPhoneNumber reports whether folded holds notePhoneDigits or more digits
+// with nothing but spaces, "-", ".", "(", ")" and "+" between them.
+func hasPhoneNumber(folded string) bool {
+	digits := 0
+	for _, r := range folded {
+		switch {
+		case unicode.IsDigit(r):
+			digits++
+			if digits >= notePhoneDigits {
+				return true
+			}
+		case unicode.IsSpace(r) || strings.ContainsRune("-.()+", r):
+		default:
+			digits = 0
+		}
 	}
-	last := labels[len(labels)-1]
-	if strings.HasPrefix(last, "xn--") {
-		return true
-	}
-	return utf8.RuneCountInString(last) >= 2 && !strings.ContainsFunc(last, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsMark(r) })
+	return false
+}
+
+// isNoteLabelRune reports whether r is a letter, a mark or a number, of any
+// script: what a domain label is made of. A letter's combining marks count,
+// as a label in an Indic script needs them.
+func isNoteLabelRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsMark(r) || unicode.IsNumber(r)
 }
 
 func isASCIIAlnum(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
-}
-
-func firstRune(s string) rune {
-	r, _ := utf8.DecodeRuneInString(s)
-	return r
-}
-
-func lastRune(s string) rune {
-	r, _ := utf8.DecodeLastRuneInString(s)
-	return r
 }

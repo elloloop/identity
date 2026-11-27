@@ -9677,18 +9677,33 @@ components:
              FAILED_PRECONDITION otherwise.
              The note and each of its lines are trimmed and a CRLF break is read as
              LF. INVALID_ARGUMENT for a note longer than 280 characters, of more than
-             4 lines, with a blank line, with a control character other than the line
-             break or an invisible formatting character (a bidirectional control
-             among them), or that reads as a link: "<", ">", "](", "://", a scheme
-             such as "mailto:" or "tel:" directly followed by text, any word directly
-             followed by ":" and an address ("sip:jane@example.com"), a domain or
-             dotted IPv4 address ("www.example", "example.com", the same spelled with
-             a Cyrillic small letter a in place of the Latin one, or in fullwidth
-             letters), or an address that is not a plain ASCII email address as typed.
-             A plain email address such as "jane@example.com" is allowed; one written
-             with a fullwidth at sign or a fullwidth full stop is refused. A caller who
-             is not an owner or admin of the tenant is PERMISSION_DENIED before any of
-             these checks. The note is not stored: a resend is a new
+             4 lines, with a blank line, or with a control character other than the
+             line break or an invisible formatting character (a bidirectional control
+             among them). The rest is judged on the note folded: the zero-width joiner
+             and non-joiner dropped, NFKC applied (fullwidth and mathematical letters
+             read as the letters they imitate), lower-cased, and an ideographic,
+             halfwidth ideographic or fullwidth full stop read as ".". INVALID_ARGUMENT
+             for a note with:
+               - "<", ">", "](" or "://";
+               - an ASCII letter, then any ASCII letters, digits, "+", "." or "-",
+                 then ":" directly followed by a character other than a space: every
+                 URL scheme, so "mailto:x", "skype:x" and "example:8443";
+               - a "." with a letter, mark or number of any script on each side: every
+                 domain and dotted IPv4 address, and also "e.g", "v1.2", "Node.js" and
+                 two sentences with no space between them, Japanese or Chinese ones
+                 joined by an ideographic full stop included;
+               - seven or more digits with only spaces, "-", ".", "(", ")" or "+"
+                 between them: a phone number, and also a date such as 2026-11-27;
+               - an "@" anywhere but in a plain ASCII email address.
+             A plain ASCII email address, recognised in the note as typed, is the one
+             exemption, from the "." and "@" rules only: a local part of ASCII letters,
+             digits, "_", "+" and "-" with no dot, "@", and a domain of two or more
+             dot-separated labels of ASCII letters, digits and "-", the last of two or
+             more letters. So "Write to jane@example.com." is allowed, while
+             "jane.doe@example.com", "www.example.com@example.org" and an address
+             written with a fullwidth at sign or full stop are refused.
+             A caller who is not an owner or admin of the tenant is PERMISSION_DENIED
+             before any of these checks. The note is not stored: a resend is a new
              CreateTenantInvitation call, which carries its own note. A note goes only
              on an ordinary invitation: INVALID_ARGUMENT with account_username.
       title: CreateTenantInvitationRequest

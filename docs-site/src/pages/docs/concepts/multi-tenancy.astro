@@ -496,28 +496,56 @@ RestoreTenantMember(tenant_id, user_id)
     service sends under its own name, so it is kept short and unable to carry
     a link. The note and each of its lines are trimmed, and a CRLF break is
     read as LF; it is then <code>INVALID_ARGUMENT</code> when it is longer
-    than 280 characters, has more than 4 lines or a blank line, carries a
+    than 280 characters, has more than 4 lines or a blank line, or carries a
     control character other than the line break or an invisible formatting
     character (a bidirectional control among them; the zero-width joiner and
-    non-joiner that scripts and emoji need are allowed), or reads as a link:
-    <code>&lt;</code>, <code>&gt;</code>, <code>](</code>,
-    <code>://</code>, a scheme such as <code>mailto:</code> or
-    <code>tel:</code> directly followed by text, any word directly followed
-    by <code>:</code> and an address (<code>sip:jane@example.com</code>), a
-    domain or dotted IPv4 address, or an address that is not a plain ASCII
-    email address as typed. A word
-    reads as a domain when it is two or more dot-separated labels ending in
-    one of at least two letters, in any script, or a punycode one, so
-    <code>example.com</code>, <code>www.example</code> and a lookalike such
-    as one with a Cyrillic letter are refused, while <code>e.g.</code>,
-    <code>v1.2</code> and a full stop ending a sentence are not; a full stop
-    with no space after it (<code>done.See</code>) reads as a domain. The
-    check reads fullwidth, circled and mathematical letters as the letters
-    they imitate, and an ideographic full stop between two words of a script
-    other than Chinese, Japanese or Korean as a dot. A plain email address
-    such as <code>jane@example.com</code> is allowed, recognised in the note
-    as sent rather than read that way, so one written with a fullwidth or
-    small at sign, or a fullwidth dot, is refused. A caller who is not an
+    non-joiner that scripts and emoji need are allowed).
+  </p>
+  <p>
+    The rest is judged by classes of character, not by what a link looks
+    like, on the note folded: the zero-width joiner and non-joiner dropped,
+    NFKC applied (fullwidth, circled and mathematical letters read as the
+    letters they imitate), lower-cased, and an ideographic, halfwidth
+    ideographic or fullwidth full stop read as <code>.</code>. A note is
+    <code>INVALID_ARGUMENT</code> when it holds:
+  </p>
+  <ul>
+    <li><code>&lt;</code>, <code>&gt;</code>, <code>](</code> or <code>://</code>;</li>
+    <li>
+      an ASCII letter, then any ASCII letters, digits, <code>+</code>,
+      <code>.</code> or <code>-</code>, then <code>:</code> directly followed
+      by a character other than a space: every URL scheme, listed anywhere or
+      not (<code>mailto:x</code>, <code>skype:x</code>), and a host and port
+      (<code>example:8443</code>);
+    </li>
+    <li>
+      a <code>.</code> with a letter, mark or number of any script on each
+      side: every domain and dotted IPv4 address, whatever follows it
+      (<code>example.com+login</code>, <code>example.com.1</code>), and also
+      <code>e.g</code>, <code>v1.2</code>, <code>Node.js</code> and two
+      sentences with no space between them, Japanese or Chinese ones joined by
+      an ideographic full stop included;
+    </li>
+    <li>
+      seven or more digits with only spaces, <code>-</code>, <code>.</code>,
+      <code>(</code>, <code>)</code> or <code>+</code> between them: a phone
+      number, and also a date such as <code>2026-11-27</code>;
+    </li>
+    <li>an <code>@</code> anywhere but in a plain ASCII email address.</li>
+  </ul>
+  <p>
+    A plain ASCII email address is the one exemption, from the
+    <code>.</code> and <code>@</code> rules only, recognised in the note as
+    typed rather than as folded: a local part of ASCII letters, digits,
+    <code>_</code>, <code>+</code> and <code>-</code> with no dot,
+    <code>@</code>, and a domain of two or more dot-separated labels of ASCII
+    letters, digits and <code>-</code>, the last of two or more letters. So
+    <code>jane@example.com</code> is allowed, while
+    <code>jane.doe@example.com</code>,
+    <code>www.example.com@example.org</code> and an address written with a
+    fullwidth or small at sign, or a fullwidth dot, are refused. The rules
+    refuse some ordinary text so that nothing a mail client links can pass.
+    A caller who is not an
     owner or admin of the tenant is <code>PERMISSION_DENIED</code> before any
     of these checks, so a refusal tells no one else whether the Project
     allows notes. A note goes only on an ordinary invitation: with

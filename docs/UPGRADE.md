@@ -35,24 +35,37 @@ invitation itself, such as the address their account will use.
   project allows notes or how the tenant was made.
 - **What a note may hold.** The note and each of its lines are trimmed and a
   CRLF break is read as LF. Then `INVALID_ARGUMENT` for: more than 280
-  characters; more than 4 lines; a blank line; a control character other than
-  the line break, or an invisible formatting character, bidirectional controls
-  among them (the zero-width joiner and non-joiner are allowed); or anything
-  that reads as a link: `<`, `>`, `](`, `://`, one of `mailto:`, `tel:`,
-  `sms:`, `callto:`, `javascript:`, `vbscript:`, `data:` or `file:` directly
-  followed by a non-space, any word directly followed by `:` and an address
-  (`sip:jane@example.com`), a domain or dotted IPv4 address, or an address that
-  is not a plain ASCII email address as typed. A domain is a word of two or more
-  dot-separated labels ending in one of at least two letters (any script) or a
-  punycode label; a word is a run of letters, marks, digits and `-._+@` with
-  its edge punctuation dropped, so `e.g.`, `v1.2` and a sentence's full stop
-  pass, while `done.See` does not. The check reads fullwidth, circled and
-  mathematical letters as the letters they imitate (NFKC), ignores the
-  zero-width joiner and non-joiner, and reads an ideographic full stop between
-  two words of a script other than Chinese, Japanese or Korean as a dot. A
-  plain email address such as `jane@example.com` is allowed, recognised in the
-  note as sent rather than folded, so one written with a fullwidth or small at
-  sign, or a fullwidth dot, is refused. The refusal does not repeat the note.
+  characters; more than 4 lines; a blank line; or a control character other
+  than the line break, or an invisible formatting character, bidirectional
+  controls among them (the zero-width joiner and non-joiner are allowed). The
+  rest is judged by classes of character on the note folded: the zero-width
+  joiner and non-joiner dropped, NFKC applied (fullwidth, circled and
+  mathematical letters read as the letters they imitate), lower-cased, and an
+  ideographic (`。`), halfwidth ideographic (`｡`) or fullwidth (`．`) full stop
+  read as `.`. `INVALID_ARGUMENT` for a note with:
+  - `<`, `>`, `](` or `://`;
+  - an ASCII letter, then any ASCII letters, digits, `+`, `.` or `-`, then `:`
+    directly followed by a character other than a space: every URL scheme,
+    listed anywhere or not (`mailto:x`, `skype:x`, `magnet:?x`), and a host
+    and port (`example:8443`);
+  - a `.` with a letter, mark or number of any script on each side: every
+    domain and dotted IPv4 address, whatever follows it (`example.com+login`,
+    `example.com.1`), and also `e.g`, `v1.2`, `Node.js` and two sentences with
+    no space between them, Japanese or Chinese ones joined by `。` included;
+  - seven or more digits with only spaces, `-`, `.`, `(`, `)` or `+` between
+    them: a phone number, and also a date such as `2026-11-27`;
+  - an `@` anywhere but in a plain ASCII email address.
+
+  A plain ASCII email address is the one exemption, from the `.` and `@` rules
+  only, and is recognised in the note as typed, never as folded: a local part
+  of ASCII letters, digits, `_`, `+` and `-` with **no dot**, `@`, and a
+  domain of two or more dot-separated labels of ASCII letters, digits and `-`,
+  the last of two or more letters. So `Write to jane@example.com.` is allowed,
+  while `jane.doe@example.com`, `www.example.com@example.org` and an address
+  written with a fullwidth or small at sign, or a fullwidth dot, are refused.
+  These rules refuse some ordinary text (`e.g`, version numbers, dates, dotted
+  local parts, unspaced CJK sentences) so that nothing a mail client links can
+  pass. The refusal names the rule and does not repeat the note.
 - **Not stored.** The note is not kept with the invitation: a resend is a new
   `CreateTenantInvitation`, which carries its own note. No log line carries it.
 - **Go API.** `MembershipService.CreateTenantInvitation` takes the note after
