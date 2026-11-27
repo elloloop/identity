@@ -1551,6 +1551,10 @@ type AuthService struct {
 	// with access.admit_tenant_invitations create an account for a proven
 	// address. nil admits no such account.
 	openInvitations OpenInvitationReader
+	// managedSetups and managedTenants set managed accounts up from their
+	// links (WithManagedAccounts). Either nil sets none up.
+	managedSetups  ManagedSetupStore
+	managedTenants TenantStore
 	// joinDomains and joinTenants answer whether an address's domain lets an
 	// invite project with access.admit_domain_join create its account
 	// (WithDomainJoin). Either nil admits no such account.

@@ -27,8 +27,18 @@ type TenantInvitationView struct {
 	Status string
 	// AccountExists reports whether an account of the project holds Email.
 	// It is false whenever the mailer does not deliver or the invitation's
-	// token did not go only into its email (TokenOnlyInEmail).
+	// token did not go only into its email (TokenOnlyInEmail). It is false
+	// for a managed account's set-up link.
 	AccountExists bool
+	// IsManagedSetup marks a managed account's set-up link; Email is then
+	// the account's address.
+	IsManagedSetup bool
+	// AccountAddress and DisplayName describe the managed account a set-up
+	// link sets up, only while the link is pending and is the account's
+	// current one; DisplayName is also withheld for a tenant made through
+	// self-service CreateTenant, as TenantName is.
+	AccountAddress string
+	DisplayName    string
 }
 
 // GetTenantInvitation describes the invitation rawToken names, to anyone who
@@ -43,6 +53,8 @@ type TenantInvitationView struct {
 // its email (TokenOnlyInEmail). Otherwise CreateTenantInvitation may have
 // handed the token to the inviter, and answering would let a tenant admin
 // learn whether any address they invite has an account.
+//
+// A managed account's set-up link is described by describeManagedSetup.
 func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken string) (*TenantInvitationView, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -62,9 +74,14 @@ func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken st
 		return nil, fmt.Errorf("%w: invitation", ErrNotFound)
 	}
 
-	tenantName, err := s.tenantDisplayName(ctx, projectID, inv.TenantID)
+	t, err := s.tenants.GetTenant(ctx, projectID, inv.TenantID)
 	if err != nil {
 		return nil, err
+	}
+	vetted := t != nil && t.CreatedBy == ""
+	tenantName := ""
+	if vetted {
+		tenantName = tenantNameOf(t)
 	}
 	view := &TenantInvitationView{
 		TenantID:    inv.TenantID,
@@ -84,6 +101,13 @@ func (s *MembershipService) GetTenantInvitation(ctx context.Context, rawToken st
 		}
 	}
 	fields := append(invitationDecisionLogFields(ctx, projectID, inv), zap.String("status", view.Status))
+	if inv.IsManagedSetup() {
+		if err := s.describeManagedSetup(ctx, projectID, inv, vetted, view); err != nil {
+			return nil, err
+		}
+		s.logger.Info("tenant_invitation_read", append(fields, zap.Bool("managed_setup", true), zap.Bool("live", view.AccountAddress != ""))...)
+		return view, nil
+	}
 	switch {
 	case !s.mailerDelivers:
 		fields = append(fields, zap.String("account_exists_withheld", "mail_not_delivered"))
@@ -133,4 +157,31 @@ func addressHasAccount(ctx context.Context, repo Repository, email string) (bool
 	}
 	held, err := repo.FindRecoveryEmailHolder(ctx, email)
 	return held != nil, err
+}
+
+// describeManagedSetup fills view for inv, a managed account's set-up link.
+// Email stays the account's address, as stored on the link; the address is
+// repeated as AccountAddress, with the account's name, only while the link
+// is pending and its epoch is the account's current one, so a revoked,
+// replaced or used link no longer describes the account. The address the
+// link was delivered to is never answered, nor the account's id: the read is
+// public to whoever holds the token. The name is withheld unless vetted: a
+// tenant made through self-service has unvetted names.
+func (s *MembershipService) describeManagedSetup(ctx context.Context, projectID string, inv *TenantInvitation, vetted bool, view *TenantInvitationView) error {
+	view.IsManagedSetup = true
+	if view.Status != InvitationStatusPending {
+		return nil
+	}
+	account, err := s.users.GetUserInProject(ctx, projectID, inv.UserID)
+	if err != nil {
+		return err
+	}
+	if account == nil || account.ManagedByTenantID != inv.TenantID || account.Status != StatusInvited || account.SetupEpoch != inv.SetupEpoch {
+		return nil
+	}
+	view.AccountAddress = account.Email
+	if vetted {
+		view.DisplayName = account.Name
+	}
+	return nil
 }

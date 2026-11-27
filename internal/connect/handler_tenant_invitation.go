@@ -24,15 +24,18 @@ func (h *IdentityHandler) GetTenantInvitation(
 		return nil, toConnectError(err)
 	}
 	resp := connect.NewResponse(&identitypb.GetTenantInvitationResponse{
-		TenantId:      view.TenantID,
-		TenantName:    view.TenantName,
-		InviterName:   view.InviterName,
-		InviterEmail:  view.InviterEmail,
-		Email:         view.Email,
-		Role:          view.Role,
-		ExpiresAtMs:   view.ExpiresAtMs,
-		Status:        view.Status,
-		AccountExists: view.AccountExists,
+		TenantId:       view.TenantID,
+		TenantName:     view.TenantName,
+		InviterName:    view.InviterName,
+		InviterEmail:   view.InviterEmail,
+		Email:          view.Email,
+		Role:           view.Role,
+		ExpiresAtMs:    view.ExpiresAtMs,
+		Status:         view.Status,
+		AccountExists:  view.AccountExists,
+		IsManagedSetup: view.IsManagedSetup,
+		AccountAddress: view.AccountAddress,
+		DisplayName:    view.DisplayName,
 	})
 	resp.Header().Set("Cache-Control", "no-store")
 	return resp, nil
@@ -40,12 +43,14 @@ func (h *IdentityHandler) GetTenantInvitation(
 
 // SignUpWithTenantInvitation creates the account a pending tenant invitation
 // names and signs it in. It is gated as PasswordSignup is (local auth,
-// password signup, client assurance).
+// password signup, client assurance), except that where the server enables
+// managed accounts a managed account's set-up link is redeemed whether or
+// not password sign-up is on.
 func (h *IdentityHandler) SignUpWithTenantInvitation(
 	ctx context.Context,
 	req *connect.Request[identitypb.SignUpWithTenantInvitationRequest],
 ) (*connect.Response[identitypb.SignUpWithTenantInvitationResponse], error) {
-	if h.cfg != nil && !h.cfg.PasswordSignupEnabled {
+	if h.cfg != nil && !h.cfg.PasswordSignupEnabled && !h.cfg.ManagedAccountsEnabled {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, service.ErrSignupDisabled)
 	}
 	if err := h.requireAssurance(ctx, h.assuranceEnforcePasswordSignup(), req.Header()); err != nil {

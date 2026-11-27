@@ -641,6 +641,101 @@ RestoreTenantMember(tenant_id, user_id)
     lang="bash"
   />
 
+  <h2 id="managed-accounts">Managed accounts</h2>
+  <p>
+    A tenant may give its people accounts on a domain verified for it, and
+    manage them, as a workspace administrator does: an owner or admin creates
+    <code>ann@acme.example.com</code> before Ann ever signs in, and the account
+    belongs to that tenant only. Personal accounts and invitations by email are
+    unchanged. Managed accounts are off unless the server sets
+    <code>GATEWAY_MANAGED_ACCOUNTS_ENABLED</code> (postgres only, and only with
+    <code>GATEWAY_REVOCATION_MODE=session</code>) and the project sets
+    <code>access.admit_managed_accounts</code> in its <code>config_json</code>;
+    a tenant made through self-service <code>CreateTenant</code> also needs
+    <code>access.admit_managed_accounts_self_service</code>. The switches gate
+    new writes only: an account that is already managed keeps every
+    restriction below.
+  </p>
+  <Code
+    code={`CreateTenantInvitation(tenant_id, email: "ann@example.net", role,
+                       account_username: "ann", account_domain: "acme.example.com",
+                       display_name: "Ann Lee")
+  -> invitation { is_managed_setup: true, account_address: "ann@acme.example.com",
+                  user_id, email: "ann@example.net", ... }, email_send_status
+  -> ALREADY_EXISTS       MANAGED_BY_THIS_TENANT   # already one of this tenant's accounts, set up
+  -> ALREADY_EXISTS       ADDRESS_UNAVAILABLE      # held outside the tenant; which holder is not said
+  -> FAILED_PRECONDITION  DOMAIN_UNVERIFIED        # the domain is not verified for tenant_id
+  -> FAILED_PRECONDITION  POLICY                   # not admitted, the project's account domain, or denied
+  -> FAILED_PRECONDITION  email_delivery_disabled  # the server or project sends no mail
+  -> PERMISSION_DENIED    # not an owner or admin; an owner role, or replacing an owner's link, needs an owner`}
+    lang="bash"
+  />
+  <p>
+    Each refusal carries a <code>ManagedAccountRefusedDetails</code> with its
+    reason. <code>email</code> is only where the set-up link goes; the
+    account's address is
+    <code>&lt;account_username&gt;@&lt;account_domain&gt;</code>, and
+    <code>display_name</code> (plain text, at most 100 characters) is its name.
+    The account is created waiting to be set up, with no password, and the
+    link is mailed: its token goes only into the email, so a server without
+    mail refuses. Asking again for one of the tenant's accounts that has not
+    been set up sends a new link, to the new <code>email</code> if it changed,
+    and the earlier link stops working; the name stays as it was. The
+    invitation limits and the resend cooldown apply, with the account's
+    address as the recipient; the address the link is sent to is held to the
+    cooldown and to the per-recipient cap too, counted across the project.
+    An ordinary invitation to one of the tenant's
+    managed addresses is refused with <code>MANAGED_BY_THIS_TENANT</code>; one
+    to another tenant's managed address is sent as any invitation, so no tenant
+    learns which addresses others manage, and acceptance refuses it. Creation
+    and a resend are audited as <code>managed_account_created</code> and
+    <code>managed_account_setup_resent</code> (with whether the delivery
+    address changed), with no address in the trail.
+  </p>
+  <p id="managed-account-set-up">
+    <code>GetTenantInvitation</code> marks a set-up link
+    <code>is_managed_setup</code>, with <code>email</code> the account's
+    address and <code>account_exists</code> false; while the link is pending
+    and is the account's current one it also answers
+    <code>account_address</code> and <code>display_name</code> (withheld for a
+    self-service tenant, as its name is). It never answers where the link was
+    delivered, nor the account's id: anyone holding the token may read it. Clients then show a set-up form that
+    asks only for a password, and call
+    <code>SignUpWithTenantInvitation(token, password)</code>: the name is the
+    tenant's. That needs local auth and mail, but neither password sign-up nor
+    the project's invitation sign-up; the password meets the rules, and the
+    sign-in the login policy, of the address's tenant, and the deny layer and
+    the project's sign-in rules apply. In one transaction the account becomes
+    active with its email verified, joins the tenant with the link's role, and
+    the link is accepted; then it signs in. A membership an owner suspended
+    stays suspended: the password is set, nothing signs in, and the call is
+    <code>PERMISSION_DENIED</code>. A replaced, revoked, used or expired link,
+    or a domain no longer verified, is <code>FAILED_PRECONDITION</code>; a
+    link whose issuer is no longer an owner or admin of the tenant, or an
+    account removed from it, is <code>PERMISSION_DENIED</code>. The
+    first set-up emits <code>user.created</code>, and every set-up is audited
+    as <code>managed_account_set_up</code>.
+    <code>AcceptTenantInvitation</code> never redeems a set-up link: once it
+    is used, it returns its own account's membership and refuses anyone else.
+  </p>
+  <p>
+    <code>RevokeTenantInvitation</code> on a set-up link also deletes its
+    account while that account has never been set up, whatever the link's
+    status and whatever the managed-account switches say, which frees the
+    address and is audited as <code>managed_account_deleted</code>. It emits
+    no <code>user.deleted</code>: an account never set up was never announced
+    with <code>user.created</code>, which comes at its first set-up. Only an
+    owner may revoke an owner's link. A used link is
+    <code>FAILED_PRECONDITION</code>: remove the member instead.
+    <code>ListTenantInvitations</code> shows each link's
+    <code>is_managed_setup</code>, <code>account_address</code> and
+    <code>user_id</code>, and <code>ListTenantMembers</code> each member's
+    <code>account_kind</code>, <code>PERSONAL</code> or <code>MANAGED</code>.
+    A deployment that keeps its own list of pending invitations should keep
+    the set-up record (account address and delivery address), so its waiting
+    list survives a link's expiry.
+  </p>
+
   <h2 id="operating-tenants">Operating tenants</h2>
   <p>
     A platform operator reads a Project's tenants with the control-plane

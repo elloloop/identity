@@ -1,0 +1,12 @@
+{{if .ProductName}}{{.ProductName}}
+
+{{end}}Hi {{.UserName}},
+
+{{if .TenantName}}{{.TenantName}}{{else}}Your organization{{end}} has created an account for you: {{.AccountAddress}}, as a {{.Role}}. Use the link below to choose its password and sign in.
+
+{{.Link}}
+
+This link expires in {{.ExpiresIn}}. If you weren't expecting it, you can safely ignore this email.
+{{if .SupportEmail}}
+Need help? Contact {{.SupportEmail}}.
+{{end}}

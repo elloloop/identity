@@ -51,6 +51,10 @@ const (
 	// instead of sending them: the Code, the redacted Phone it is for, the
 	// Channel it would have gone by and ExpiresIn.
 	TemplatePhoneCodeCapture = "phone_code_capture"
+	// TemplateManagedAccountSetup carries the set-up link of an account a
+	// tenant manages: the UserName the tenant gave it, its AccountAddress,
+	// the TenantName and Role, ExpiresIn and the Link that sets its password.
+	TemplateManagedAccountSetup = "managed_account_setup"
 )
 
 // Render returns the HTML and plain-text bodies for the given template name,

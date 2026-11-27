@@ -136,6 +136,9 @@ func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
 	if empty.InvitationStoreIface() != nil {
 		t.Error("empty InvitationStoreIface: want nil interface")
 	}
+	if empty.ManagedSetupStore() != nil {
+		t.Error("empty ManagedSetupStore: want nil interface")
+	}
 	if empty.LoginGovernance() != nil {
 		t.Error("empty LoginGovernance: want nil")
 	}
@@ -178,6 +181,9 @@ func TestBuilt_GovernanceAccessors_TypedNilAvoidance(t *testing.T) {
 	}
 	if full.InvitationStoreIface() == nil {
 		t.Error("full InvitationStoreIface: want non-nil")
+	}
+	if full.ManagedSetupStore() == nil {
+		t.Error("full ManagedSetupStore: want non-nil")
 	}
 	if full.LoginGovernance() == nil {
 		t.Error("full LoginGovernance: want non-nil")

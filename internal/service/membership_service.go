@@ -119,7 +119,10 @@ type MembershipService struct {
 	// recovery email may have opened.
 	accounts Repository
 	projects ActiveProjectStore
-	nowFunc  func() time.Time
+	// managedSetups writes managed accounts' set-up links
+	// (WithManagedSetups); nil creates none.
+	managedSetups ManagedSetupStore
+	nowFunc       func() time.Time
 }
 
 // NewMembershipService wires a MembershipService. mailerDelivers tells the
@@ -222,6 +225,14 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
 		return nil, err
 	}
+	if err := s.refuseManagedAddress(ctx, projectID, tenantID, normEmail); err != nil {
+		if errors.Is(err, ErrManagedByThisTenant) {
+			s.logger.Info("managed_account_refused",
+				zap.String("project_id", projectID), zap.String("tenant_id", tenantID),
+				zap.String("inviter_id", callerID), zap.String("path", "ordinary_invitation"))
+		}
+		return nil, err
+	}
 	if s.mailerDelivers {
 		if err := requireProjectEmailDelivery(ctx, projectID, s.projects); err != nil {
 			return nil, err
@@ -294,6 +305,11 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 // invitation stays pending through each. An
 // expired invitation is marked expired and rejected; an
 // unknown/revoked/already-accepted token is rejected without mutation.
+//
+// A managed account's set-up link is redeemed by SignUpWithTenantInvitation,
+// never here: once it is accepted, accepting it again returns its own
+// account's membership and nothing else, and any other caller, or a link
+// still pending, is refused.
 func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID, rawToken string) (*TenantMembership, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -318,6 +334,9 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 		return nil, fmt.Errorf("%w: invitation", ErrNotFound)
 	}
 
+	if inv.IsManagedSetup() {
+		return s.acceptManagedSetupLink(ctx, projectID, callerID, inv)
+	}
 	if inv.Status != InvitationStatusPending {
 		// Already accepted / revoked / expired: not redeemable. Don't leak
 		// which — PermissionDenied for any non-pending state.
@@ -421,6 +440,14 @@ func (s *MembershipService) ListTenantInvitations(ctx context.Context, callerID,
 // audited as EventTenantInvitationRevoked. Each call logs one line:
 // tenant_invitation_revoked, tenant_invitation_revoke_unchanged, or
 // tenant_invitation_revoke_refused with the reason.
+//
+// A managed account's set-up link is always revoked through
+// ManagedSetupStore.RevokeManagedSetup, whatever the managed-account
+// switches say: at any status of the link, its account is deleted while it
+// is still waiting for its first set-up, which is logged and audited as
+// EventManagedAccountDeleted. Only an owner may revoke an owner's link. No
+// user.deleted is announced: an account never set up was never announced as
+// created.
 func (s *MembershipService) RevokeTenantInvitation(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, invitationID, ip, userAgent string) (*TenantInvitation, error) {
 	tenantID, invitationID = strings.TrimSpace(tenantID), strings.TrimSpace(invitationID)
 	projectID, err := s.requireProject(ctx)
@@ -450,7 +477,14 @@ func (s *MembershipService) RevokeTenantInvitation(ctx context.Context, callerID
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
 		return refuse("not_permitted", err)
 	}
-	inv, changed, err := s.invitations.RevokeInvitation(ctx, projectID, tenantID, invitationID)
+	var inv *TenantInvitation
+	var changed, handled bool
+	if s.managedSetups != nil {
+		inv, changed, handled, err = s.revokeManagedSetup(ctx, projectID, tenantID, invitationID, callerID, ip, userAgent)
+	}
+	if !handled {
+		inv, changed, err = s.invitations.RevokeInvitation(ctx, projectID, tenantID, invitationID)
+	}
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return refuse("not_found", err)
@@ -478,8 +512,9 @@ func (s *MembershipService) RevokeTenantInvitation(ctx context.Context, callerID
 	return inv, nil
 }
 
-// ListTenantMembers returns every membership in a tenant. callerID must be an
-// active owner/admin member of the tenant.
+// ListTenantMembers returns every membership in a tenant, each with the kind
+// of account its member has (AccountKind). callerID must be an active
+// owner/admin member of the tenant.
 func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, tenantID string) ([]*TenantMembership, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
@@ -495,7 +530,14 @@ func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, ten
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
 		return nil, err
 	}
-	return s.memberships.ListMembershipsForTenant(ctx, projectID, tenantID)
+	members, err := s.memberships.ListMembershipsForTenant(ctx, projectID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.markManagedMembers(ctx, projectID, tenantID, members); err != nil {
+		return nil, err
+	}
+	return members, nil
 }
 
 // RemoveTenantMember removes a user's membership from a tenant. callerID must
@@ -730,10 +772,16 @@ func (s *MembershipService) tenantDisplayName(ctx context.Context, projectID, te
 	if err != nil || t == nil || t.CreatedBy != "" {
 		return "", err
 	}
+	return tenantNameOf(t), nil
+}
+
+// tenantNameOf is the name an operator-made or auto-formed tenant t shows:
+// its name, else its primary domain.
+func tenantNameOf(t *Tenant) string {
 	if n := strings.TrimSpace(t.Name); n != "" {
-		return n, nil
+		return n
 	}
-	return strings.TrimSpace(t.PrimaryDomain), nil
+	return strings.TrimSpace(t.PrimaryDomain)
 }
 
 // invitationTTL returns the configured invitation validity window, defaulting
