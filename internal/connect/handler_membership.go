@@ -2,6 +2,7 @@ package connect
 
 import (
 	"context"
+	"math"
 
 	"connectrpc.com/connect"
 
@@ -210,11 +211,14 @@ func (h *IdentityHandler) RestoreTenantMember(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	m, err := h.members.RestoreTenantMember(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
+	restored, err := h.members.RestoreTenantMember(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), req.Msg.GetUserId(), clientIP(req.Header()), clientUserAgent(req.Header()))
 	if err != nil {
 		return nil, toConnectError(err)
 	}
-	return connect.NewResponse(&identitypb.RestoreTenantMemberResponse{Membership: membershipToProto(m)}), nil
+	return connect.NewResponse(&identitypb.RestoreTenantMemberResponse{
+		Membership:            membershipToProto(restored.Membership),
+		AgentsLeftDeactivated: int32(min(restored.AgentsLeftDeactivated, math.MaxInt32)), // #nosec G115 -- bounded above
+	}), nil
 }
 
 // TransferTenantOwnership hands the caller's ownership of a tenant to another

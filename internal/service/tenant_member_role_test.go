@@ -300,8 +300,8 @@ func TestSetTenantMemberRole_ASuspendedMemberStaysSuspended(t *testing.T) {
 
 	restored, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.NoError(t, err)
-	assert.Equal(t, RoleAdmin, restored.Role)
-	assert.Equal(t, MembershipStatusActive, restored.Status)
+	assert.Equal(t, RoleAdmin, restored.Membership.Role)
+	assert.Equal(t, MembershipStatusActive, restored.Membership.Status)
 }
 
 // A user_id that is not an active or suspended member is NotFound, as is a

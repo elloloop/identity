@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -681,7 +682,7 @@ func (s *MembershipService) SuspendTenantMember(ctx context.Context, callerID st
 // that is not an active or suspended member is ErrNotFound. Restoring an
 // active member returns the membership unchanged and records nothing; a
 // restore is audited as EventTenantMemberRestored, with the status it left.
-func (s *MembershipService) RestoreTenantMember(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, targetUserID, ip, userAgent string) (*TenantMembership, error) {
+func (s *MembershipService) RestoreTenantMember(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, targetUserID, ip, userAgent string) (*RestoredMember, error) {
 	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
 	if err != nil {
 		return nil, err
@@ -695,14 +696,57 @@ func (s *MembershipService) RestoreTenantMember(ctx context.Context, callerID st
 	if targetUserID == callerID {
 		return nil, fmt.Errorf("%w: you cannot restore yourself", ErrInvalidArgument)
 	}
+	managed, err := s.managedByTenant(ctx, projectID, tenantID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	offAgents := 0
+	if managed {
+		if offAgents, err = s.deactivatedAgentsOf(ctx, projectID, targetUserID); err != nil {
+			return nil, err
+		}
+	}
 	m, changed, err := s.memberships.RestoreMembership(ctx, projectID, tenantID, targetUserID, RestoredByMember(callerID))
 	if err != nil {
 		return nil, err
 	}
-	if changed {
+	if changed && managed {
+		s.logger.Info("managed_account_restored",
+			zap.String("project_id", projectID), zap.String("tenant_id", tenantID),
+			zap.String("user_id", targetUserID), zap.Int("agents_left_deactivated", offAgents))
+		s.auditMemberChangeWith(ctx, audit.EventTenantMemberRestored, callerID, m, ip, userAgent,
+			map[string]any{"managed": true, "agents_left_deactivated": offAgents})
+	} else if changed {
 		s.auditMemberChange(ctx, audit.EventTenantMemberRestored, callerID, m, ip, userAgent)
 	}
-	return m, nil
+	return &RestoredMember{Membership: m, AgentsLeftDeactivated: offAgents}, nil
+}
+
+// RestoredMember is what RestoreTenantMember left: the membership, and how
+// many of the member's agents stay deactivated. A suspension, removal or
+// reset of an account the tenant manages deactivates its agents, and a
+// restore does not bring them back: their owner reactivates each.
+type RestoredMember struct {
+	Membership            *TenantMembership
+	AgentsLeftDeactivated int
+}
+
+// deactivatedAgentsOf counts userID's deactivated agents.
+func (s *MembershipService) deactivatedAgentsOf(ctx context.Context, projectID, userID string) (int, error) {
+	if s.accounts == nil {
+		return 0, fmt.Errorf("%w: the member's agents cannot be read", ErrServiceUnavailable)
+	}
+	agents, err := listOwnedAgents(ctx, s.accounts.WithProject(projectID), userID)
+	if err != nil {
+		return 0, err
+	}
+	off := 0
+	for _, a := range agents {
+		if a.Status == StatusDeactivated {
+			off++
+		}
+	}
+	return off, nil
 }
 
 // memberChangeRef checks an owner or admin's request to change a member:
@@ -730,13 +774,20 @@ func (s *MembershipService) memberChangeRef(ctx context.Context, callerID, tenan
 // callerID, target the member, with memberChangeDetails of the membership
 // the change left, or, for a removal, removed.
 func (s *MembershipService) auditMemberChange(ctx context.Context, event audit.EventType, callerID string, m *TenantMembership, ip, userAgent string) {
+	s.auditMemberChangeWith(ctx, event, callerID, m, ip, userAgent, nil)
+}
+
+// auditMemberChangeWith is auditMemberChange with extra details.
+func (s *MembershipService) auditMemberChangeWith(ctx context.Context, event audit.EventType, callerID string, m *TenantMembership, ip, userAgent string, extra map[string]any) {
 	if s.audit == nil {
 		return
 	}
+	details := memberChangeDetails(m)
+	maps.Copy(details, extra)
 	s.audit.Log(ctx, event,
 		audit.WithActor(callerID), audit.WithTarget(m.UserID),
 		audit.WithIP(ip), audit.WithUserAgent(userAgent),
-		audit.WithSuccess(true), audit.WithDetails(memberChangeDetails(m)),
+		audit.WithSuccess(true), audit.WithDetails(details),
 	)
 }
 

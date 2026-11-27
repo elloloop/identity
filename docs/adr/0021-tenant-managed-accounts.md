@@ -113,3 +113,13 @@ for the tenant.
 - Until a reset operation exists, a managed account whose credentials are
   compromised stays suspended; restoring its membership brings back whatever
   credentials it had.
+- A suspension, removal or reset deactivates the account's agents, and a
+  restore does not bring them back: `RestoreTenantMember` reports how many
+  stay off (`agents_left_deactivated`), and the owner reactivates each.
+
+## Later
+
+- Record why an agent was deactivated (a `deactivation_reason` on the
+  account, cleared by `ReactivateAgent`) and show it on the owner's agent
+  list as an `AgentDeactivationReason` (owner suspended, removed or reset),
+  so the owner sees why each agent is off without asking an admin.

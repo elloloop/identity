@@ -859,7 +859,9 @@ RestoreTenantMember(tenant_id, user_id)
     follows is refused. A managed account may own agents while it stands in its tenant (set
     up, active, an active membership); an agent whose managed owner falls out
     of standing holds no session, and a suspension, removal or reset
-    deactivates its agents.
+    deactivates its agents. A restore does not reactivate them:
+    <code>RestoreTenantMember</code> answers how many stay off
+    (<code>agents_left_deactivated</code>), and the owner reactivates each.
   </p>
   <p>
     <code>RevokeTenantInvitation</code> on a set-up link also deletes its

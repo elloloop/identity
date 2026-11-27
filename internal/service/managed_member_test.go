@@ -427,6 +427,7 @@ func TestSignedInWithin(t *testing.T) {
 		assert.Equal(t, want, signedInWithin(now, authTime, 5*time.Minute), "auth_time %d", authTime)
 	}
 }
+
 func (f *managedFixture) membership(t *testing.T, userID string) *TenantMembership {
 	t.Helper()
 	m, err := f.members.GetMembership(context.Background(), ssProject, ownTenant, userID)
@@ -589,4 +590,53 @@ func TestResetManagedAccount_BadDeliveryAddressIsNotEchoed(t *testing.T) {
 	_, err := f.svc.ResetManagedAccount(managedProject(true, false), ssOwnerID, freshSignIn(), ownTenant, managedMemberID, "not-an-address@", "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
 	assert.NotContains(t, err.Error(), "not-an-address")
+}
+
+// Restoring a managed account says how many of its agents stay
+// deactivated, in the result, the log and the audit entry; a personal
+// member's restore reads no agents and its audit entry is as before.
+func TestRestoreTenantMember_ManagedAccountReportsItsAgentsLeftOff(t *testing.T) {
+	f := newManagedFixture(t)
+	repo := newFakeRepo()
+	f.svc.WithAccounts(repo)
+	for _, status := range []string{StatusDeactivated, StatusDeactivated, StatusActive} {
+		a := seedAgent(repo, managedMemberID)
+		repo.mu.Lock()
+		repo.users[a.ID].Status = status
+		repo.mu.Unlock()
+	}
+	ctx := managedProject(true, false)
+	for _, id := range []string{managedMemberID, ssOtherID} {
+		_, err := f.members.UpsertMembership(context.Background(), &TenantMembership{
+			ProjectID: ssProject, TenantID: ownTenant, UserID: id,
+			Source: MembershipSourceInvited, Role: RoleMember, Status: MembershipStatusSuspended,
+		})
+		require.NoError(t, err)
+	}
+
+	got, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, managedMemberID, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, MembershipStatusActive, got.Membership.Status)
+	assert.Equal(t, 2, got.AgentsLeftDeactivated)
+	details := f.audit.detailsOf(string(audit.EventTenantMemberRestored))
+	require.Len(t, details, 1)
+	assert.Equal(t, true, details[0]["managed"])
+	assert.Equal(t, float64(2), details[0]["agents_left_deactivated"])
+
+	personal, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
+	require.NoError(t, err)
+	assert.Zero(t, personal.AgentsLeftDeactivated)
+	details = f.audit.detailsOf(string(audit.EventTenantMemberRestored))
+	require.Len(t, details, 2)
+	assert.NotContains(t, details[1], "agents_left_deactivated")
+
+	f.svc.WithAccounts(nil)
+	_, err = f.members.UpsertMembership(context.Background(), &TenantMembership{
+		ProjectID: ssProject, TenantID: ownTenant, UserID: managedMemberID,
+		Source: MembershipSourceInvited, Role: RoleMember, Status: MembershipStatusSuspended,
+	})
+	require.NoError(t, err)
+	_, err = f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, managedMemberID, "", "")
+	require.ErrorIs(t, err, ErrServiceUnavailable, "a managed account's agents that cannot be read refuse the restore before it writes")
+	assert.Equal(t, MembershipStatusSuspended, f.membership(t, managedMemberID).Status)
 }
