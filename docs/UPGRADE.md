@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — a help request about a managed account goes to its tenant (migration `0069_add_managed_help_notices`, schema 69; audit event `managed_account_help_requested`; `GATEWAY_MANAGED_HELP_MAX_PER_TENANT`, `GATEWAY_MANAGED_HELP_MAX_PER_SOURCE`, `GATEWAY_TENANT_MEMBERS_PAGE_URL`; `ManagedHelpStore`, `AdminHelpRouter` (Go API))
+## Next — a help request about a managed account goes to its tenant (migration `0070_add_managed_help_notices`, schema 70; audit event `managed_account_help_requested`; `GATEWAY_MANAGED_HELP_MAX_PER_TENANT`, `GATEWAY_MANAGED_HELP_MAX_PER_SOURCE`, `GATEWAY_TENANT_MEMBERS_PAGE_URL`; `ManagedHelpStore`, `AdminHelpRouter` (Go API))
 
 Someone who cannot sign in to an account a tenant manages can only be helped
 by that tenant, so `RequestAdminHelp` about such an account now tells the
@@ -30,12 +30,13 @@ tenant's owners and admins instead of filing it for the project's admins.
   uses no cap and no day. The store decides under a per-tenant lock, so racing requests keep
   the caps. `RequestAdminHelp` gets the passwordless code's per-IP budget
   (`GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP`), over HTTP and native gRPC.
-- **Migration.** `0069_add_managed_help_notices` adds `managed_help_notices`:
+- **Migration.** `0070_add_managed_help_notices` adds `managed_help_notices`:
   one row per notice sent, with an HMAC of the client address under a key
-  derived from the server's TOTP recovery pepper, never the address; rows older than a day are deleted by the next request for the
-  tenant. It takes the locks 0052 took on `projects`, `tenants` and `users`
-  while it adds its foreign keys; on a lock timeout, `identity migrate force
-  68`, then `identity migrate`.
+  derived from the server's TOTP recovery pepper, never the address; rows
+  older than a day are deleted by the next request for the tenant. It takes
+  the locks 0052 took on `projects`, `tenants` and `users` while it adds its
+  foreign keys; on a lock timeout, `identity migrate force 69`, then
+  `identity migrate`.
 - **Audit and logs.** A notice sent records `managed_account_help_requested`
   (target the account, the requester's IP address and user agent, and the
   tenant id, `outcome` `notify`, the number of `recipients` and the caller's

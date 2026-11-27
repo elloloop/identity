@@ -1,4 +1,4 @@
--- 0069_add_managed_help_notices.up.sql
+-- 0070_add_managed_help_notices.up.sql
 --
 -- A help request (RequestAdminHelp) about an account a tenant manages goes to
 -- that tenant's owners and admins. managed_help_notices records each notice
@@ -17,7 +17,7 @@
 -- tenants and users while it adds the foreign-key triggers, blocking writes
 -- to them, not reads, for as long as the catalog change takes. lock_timeout
 -- bounds the wait to acquire them, as in 0052. On a timeout the file rolls
--- back and version 69 is left dirty: `identity migrate force 68`, then
+-- back and version 70 is left dirty: `identity migrate force 69`, then
 -- `identity migrate` again.
 SET LOCAL lock_timeout = '10s';
 

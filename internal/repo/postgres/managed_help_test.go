@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -218,4 +221,32 @@ func TestMembershipStore_RecordManagedHelp_NoRecipientsRecordsNothing(t *testing
 	rec, err := f.ms.RecordManagedHelp(ctx, f.request("ann@acme.com", "src-1", now))
 	require.NoError(t, err)
 	assert.Equal(t, service.ManagedHelpNotify, rec.Outcome)
+}
+
+// TestManagedHelpNoticesMigrationRoundTrip: 0070 adds managed_help_notices,
+// its down drops it, and up adds it again.
+func TestManagedHelpNoticesMigrationRoundTrip(t *testing.T) {
+	dsn := os.Getenv("GATEWAY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("GATEWAY_TEST_POSTGRES_DSN unset")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	scratch := createScratchDatabase(ctx, t, dsn)
+	raw, err := pgx.Connect(ctx, scratch)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close(ctx) }()
+	exists := func() bool {
+		t.Helper()
+		var name *string
+		require.NoError(t, raw.QueryRow(ctx, `SELECT to_regclass('managed_help_notices')::text`).Scan(&name))
+		return name != nil
+	}
+
+	migrateToVersion(t, scratch, 70)
+	require.True(t, exists())
+	require.NoError(t, withMigrator(t, scratch, func(m *migrate.Migrate) error { return m.Steps(-1) }))
+	require.False(t, exists())
+	require.NoError(t, withMigrator(t, scratch, func(m *migrate.Migrate) error { return m.Up() }))
+	require.True(t, exists())
 }

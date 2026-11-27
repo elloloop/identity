@@ -1,4 +1,4 @@
--- 0069_add_managed_help_notices.down.sql
+-- 0070_add_managed_help_notices.down.sql
 --
 -- Drops the record of help-request notices sent to tenants about their
 -- managed accounts. With it gone, the next requests start their daily counts
