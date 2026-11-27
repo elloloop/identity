@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/passwords"
 )
@@ -212,4 +213,60 @@ func TestAgentOwnerStanding_IsTheOneRule(t *testing.T) {
 	require.ErrorIs(t, err, errManagedStandingUnread)
 	require.False(t, isAgentOAuthAdmissionRefusal(err), "an unread standing does not end a grant")
 	require.True(t, isAgentOAuthAdmissionRefusal(ErrAccountNotActive))
+}
+
+// A teammate's tokens stand on its lead's standing too: a managed lead
+// suspended in the tenant gets none, a failed read stays retryable, and a
+// restored lead gets them again.
+func TestTeammateOwnerStandsBehind_ManagedLeadNeedsStanding(t *testing.T) {
+	repo := newFakeRepo()
+	lead := seedPerson(repo, "lead@acme.example.com")
+	repo.mu.Lock()
+	lead.ManagedByTenantID, lead.SetUpAtMs = mTestTenant, 1
+	repo.mu.Unlock()
+	teammate := seedAgent(repo, lead.ID)
+	reader := &managedMembershipsMock{get: membershipIn(MembershipStatusActive)}
+	keys := (&TeammateKeyService{base: repo, logger: zap.NewNop()}).WithManagedStanding(reader, tenantIn(TenantStatusClaimed))
+	key := &TeammateKey{OwnerUserID: lead.ID, TeammateID: teammate.ID}
+	ctx := context.Background()
+
+	require.NoError(t, keys.ownerStandsBehind(ctx, mTestProject, key))
+	reader.get = membershipIn(MembershipStatusSuspended)
+	require.ErrorIs(t, keys.ownerStandsBehind(ctx, mTestProject, key), ErrUnauthenticated)
+	reader.get = func(string, string, string) (*TenantMembership, error) { return nil, errors.New("db down") }
+	require.ErrorIs(t, keys.ownerStandsBehind(ctx, mTestProject, key), errManagedStandingUnread, "a failed read is not a refusal for good")
+	reader.get = membershipIn(MembershipStatusActive)
+	require.NoError(t, keys.ownerStandsBehind(ctx, mTestProject, key))
+
+	unwired := &TeammateKeyService{base: repo, logger: zap.NewNop()}
+	require.ErrorIs(t, unwired.ownerStandsBehind(ctx, mTestProject, key), errManagedStandingUnread, "unwired, a managed lead fails closed")
+	require.Equal(t, ErrUnauthenticated, standingRefusal(ErrAccountNotActive))
+	require.NoError(t, standingRefusal(nil))
+}
+
+// An agent's refresh judges its owner's standing once, before it consumes
+// the token: a read failing afterwards cannot spend it.
+func TestRefreshToken_AgentOwnersStandingIsReadOnce(t *testing.T) {
+	f := newAgentFixture(t)
+	reads := 0
+	reader := &managedMembershipsMock{get: func(projectID, tenantID, userID string) (*TenantMembership, error) {
+		reads++
+		if reads > 2 {
+			return nil, errors.New("db down")
+		}
+		return &TenantMembership{ProjectID: projectID, TenantID: tenantID, UserID: userID, Status: MembershipStatusActive}, nil
+	}}
+	f.svc.WithManagedMemberships(reader, tenantIn(TenantStatusClaimed))
+	f.repo.mu.Lock()
+	f.owner.ManagedByTenantID, f.owner.SetUpAtMs = mTestTenant, 1
+	f.repo.mu.Unlock()
+	agent := seedAgent(f.repo, f.owner.ID)
+	_, refresh := issueAgentTokens(t, f, agent)
+	require.Equal(t, 1, reads)
+
+	_, access, rotated, err := f.svc.RefreshToken(context.Background(), refresh, "", "", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, access)
+	require.NotEmpty(t, rotated)
+	require.Equal(t, 2, reads, "one standing read per refresh")
 }
