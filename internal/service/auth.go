@@ -1555,6 +1555,9 @@ type AuthService struct {
 	// links (WithManagedAccounts). Either nil sets none up.
 	managedSetups  ManagedSetupStore
 	managedTenants TenantStore
+	// managedStanding decides whether a managed account may hold a session
+	// (WithManagedMemberships); its zero value refuses every managed account.
+	managedStanding managedStanding
 	// joinDomains and joinTenants answer whether an address's domain lets an
 	// invite project with access.admit_domain_join create its account
 	// (WithDomainJoin). Either nil admits no such account.
@@ -2350,6 +2353,11 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	if s.needsEmailVerification(user) {
 		return "", "", ErrEmailVerificationRequired
 	}
+	// A managed account holds a session only while it is set up and active
+	// in the tenant that manages it, on every path that mints one.
+	if err := s.refuseManagedAccount(ctx, user); err != nil {
+		return "", "", err
+	}
 
 	now := s.nowMs()
 	sessionStart := sessionStartedAtMs
@@ -2881,6 +2889,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 			}
 			return nil, "", "", err
 		}
+		ctx = withManagedStanding(ctx, timeoutUser.OwnerUserID)
 	case !timeoutUser.IsAnonymous:
 		if err := s.enforceAccountAccessLogin(ctx, timeoutUser); err != nil {
 			return nil, "", "", err
@@ -2896,6 +2905,18 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	statusErr := s.checkAccountStatus(ctx, timeoutUser, ipAddr, userAgent, sessionGateRefresh)
 	if errors.Is(statusErr, ErrAccountLocked) {
 		return nil, "", "", statusErr
+	}
+	// A managed account out of standing in its tenant is refused over its own
+	// state, as a status refusal is: its token is spent and its session ends.
+	// One refused only because its standing could not be read keeps its token.
+	if statusErr == nil {
+		statusErr = s.refuseManagedAccount(ctx, timeoutUser)
+		if isManagedStandingUnread(statusErr) {
+			return nil, "", "", statusErr
+		}
+		if statusErr == nil && timeoutUser.ManagedByTenantID != "" {
+			ctx = withManagedStanding(ctx, timeoutUser.ID)
+		}
 	}
 
 	// The selected tenant, checked before the token is consumed: a client
@@ -3114,6 +3135,7 @@ func (s *AuthService) accessTokenClaims(ctx context.Context, user *User, authTim
 		AvatarURL:     user.AvatarURL,
 		IsMinor:       user.IsMinor,
 		Anonymous:     user.IsAnonymous,
+		Managed:       user.ManagedByTenantID != "",
 		AuthTime:      authTimeMs / 1000,
 	}
 	if user.IsAgent() {

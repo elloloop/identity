@@ -40,6 +40,7 @@ func newManagedSetupFixture(t *testing.T) *managedSetupFixture {
 		WithOpenInvitations(invitations).
 		WithMailDelivery(true).
 		WithManagedAccounts(store, tenants).
+		WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed)).
 		WithEventPublisher(pub)
 	svc.cfg.ManagedAccountsEnabled = true
 	id, err := repo.CreateUser(context.Background(), &User{

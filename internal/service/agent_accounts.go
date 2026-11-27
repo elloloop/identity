@@ -170,8 +170,7 @@ func (s *AuthService) checkAgentStanding(ctx context.Context, agent *User) error
 }
 
 // agentOwner returns the agent's owner when that owner may stand behind a
-// session now (an active permanent person), and errAgentOwnerNotActive
-// otherwise.
+// session now (agentOwnerStanding), and its refusal otherwise.
 func (s *AuthService) agentOwner(ctx context.Context, agent *User) (*User, error) {
 	if agent.OwnerUserID == "" {
 		return nil, errAgentOwnerNotActive
@@ -180,8 +179,8 @@ func (s *AuthService) agentOwner(ctx context.Context, agent *User) (*User, error
 	if err != nil {
 		return nil, fmt.Errorf("fetch agent owner: %w", err)
 	}
-	if !isEligibleAgentOwner(owner) {
-		return nil, errAgentOwnerNotActive
+	if err := s.agentOwnerStanding(ctx, owner); err != nil {
+		return nil, err
 	}
 	return owner, nil
 }
@@ -323,11 +322,15 @@ func (s *AuthService) CreateAgent(
 		if owner, err = repo.GetUser(ctx, id); err != nil {
 			return nil, fmt.Errorf("fetch owner: %w", err)
 		}
-		if !isEligibleAgentOwner(owner) {
+		if s.agentOwnerStanding(ctx, owner) != nil {
 			s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
 				map[string]any{"step": "owner_not_eligible", "owner_user_id": id})
 			return nil, errAgentOwnerNotEligible
 		}
+	} else if err := s.agentOwnerStanding(ctx, owner); err != nil {
+		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
+			map[string]any{"step": "owner_not_eligible"})
+		return nil, err
 	}
 	if err := validateAgentCreationKey(clientRequestID); err != nil {
 		return nil, err
@@ -463,7 +466,7 @@ func (s *AuthService) TransferAgent(
 	if err != nil {
 		return nil, fmt.Errorf("fetch new owner: %w", err)
 	}
-	if !isEligibleAgentOwner(newOwner) {
+	if s.agentOwnerStanding(ctx, newOwner) != nil {
 		s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
 			map[string]any{"step": "owner_not_eligible"})
 		return nil, errAgentOwnerNotEligible
