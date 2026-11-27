@@ -192,9 +192,10 @@ const (
 // note is shown in the email and never stored, so a resend carries the note
 // its own call passes. A blank one is none; any other is
 // normalizeInvitationNote's, and refused with ErrInvitationNoteNotAllowed
-// unless the project allows notes (ProjectTenantsConfig.InvitationNotes) and
-// the tenant is not one a user created, for the reason tenantDisplayName
-// never names such a tenant.
+// unless the project allows notes (ProjectTenantsConfig.InvitationNotes) and,
+// on a tenant a user created, allows them there too
+// (InvitationNotesSelfService): for the reason tenantDisplayName never names
+// such a tenant, its text is unvetted unless the project says otherwise.
 //
 // Every invitation sends an email, so the store refuses one past the limits
 // (see invitationLimits): ErrInvitationLimited past the per-tenant cap,
@@ -236,7 +237,7 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
 		return nil, err
 	}
-	if note != "" {
+	if note != "" && !ProjectScopeFromContext(ctx).Tenants.InvitationNotesSelfService {
 		if err := s.requireNoteableTenant(ctx, projectID, tenantID); err != nil {
 			return nil, err
 		}
@@ -680,16 +681,17 @@ func memberChangeDetails(m *TenantMembership) map[string]any {
 }
 
 // requireNoteableTenant refuses, with ErrInvitationNoteNotAllowed, a note on
-// an invitation to a tenant a user created: like its name, which the email
-// never shows, such a tenant's text is nobody's but its creator's, and the
-// service would be sending it under its own name.
+// an invitation to a tenant a user created, where the project has not allowed
+// notes there: like its name, which the email never shows, such a tenant's
+// text is nobody's but its creator's, and the service would be sending it
+// under its own name.
 func (s *MembershipService) requireNoteableTenant(ctx context.Context, projectID, tenantID string) error {
 	t, err := s.tenants.GetTenant(ctx, projectID, tenantID)
 	if err != nil {
 		return err
 	}
 	if t == nil || t.CreatedBy != "" {
-		return fmt.Errorf("%w: a tenant a user created cannot attach one", ErrInvitationNoteNotAllowed)
+		return fmt.Errorf("%w: the project does not allow notes on a tenant a user created", ErrInvitationNoteNotAllowed)
 	}
 	return nil
 }

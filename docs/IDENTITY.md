@@ -110,10 +110,11 @@ suite (email, productivity tools).
   owner, and invite others to it. It is the same entity as a domain tenant,
   claimed from creation (ADR-0018).
 - Where the project allows it (`tenants.invitation_notes`), an owner or
-  admin of a tenant not made through `CreateTenant` can attach a short
-  plain-text note to an invitation, which its email shows labelled as theirs.
-  It is never stored, and it cannot carry a link (an email address is
-  allowed).
+  admin of a tenant can attach a short plain-text note to an invitation,
+  which its email shows labelled as theirs; on a tenant made through
+  `CreateTenant`, whose admins the project does not vet, only where it also
+  sets `tenants.invitation_notes_self_service`. It is never stored, and it
+  cannot carry a link (an email address is allowed).
 - An owner hands a tenant on to another member with
   `TransferTenantOwnership`, becoming an admin. When no owner can act but
   an admin both can sign in and holds an active membership, the admin

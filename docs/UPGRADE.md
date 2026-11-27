@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — an invitation may carry a note from its inviter: `CreateTenantInvitationRequest.note` (additive field; off by default behind `tenants.invitation_notes` / `GATEWAY_TENANT_INVITATION_NOTES_ENABLED`; no migration)
+## Next — an invitation may carry a note from its inviter: `CreateTenantInvitationRequest.note` (additive field; off by default behind `tenants.invitation_notes` / `GATEWAY_TENANT_INVITATION_NOTES_ENABLED`, and on self-service tenants behind `tenants.invitation_notes_self_service` / `GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED`; no migration)
 
 An administrator inviting someone had no way to tell them anything in the
 invitation itself, such as the address their account will use.
@@ -17,11 +17,20 @@ invitation itself, such as the address their account will use.
   (default `false`), which, like the other tenant switches, needs the postgres
   driver: the server refuses to boot with it on any other. Without it a note
   is `FAILED_PRECONDITION`.
-- **Never on a self-service tenant.** A tenant made through `CreateTenant` cannot
-  attach a note (`FAILED_PRECONDITION`), as its name never appears in the
-  email either: the text would be its creator's, sent under the service's
-  name. The check follows the owner-or-admin one, so only an owner or admin
-  learns it.
+- **Self-service tenants need a second opt-in.** A tenant made through
+  `CreateTenant` attaches a note only where the project also sets
+  `{ "tenants": { "invitation_notes": true, "invitation_notes_self_service": true } }`
+  (the default project: `GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED`,
+  default `false`); otherwise `FAILED_PRECONDITION`, as its name never appears
+  in the email either. The second setting needs the first: a project config
+  with only `invitation_notes_self_service` is refused when written or loaded,
+  and the server refuses to boot with only the second env var. Turning it on
+  accepts that owners and admins the project never vetted, whoever signed up,
+  can put a validated, link-free note in an email the service sends under its
+  own name; the note is still labelled "A note from the administrator who
+  invited you", and the tenant's name stays out. The check follows the
+  owner-or-admin one, so only an owner or admin learns how the tenant was
+  made.
 - **What a note may hold.** The note and each of its lines are trimmed and a
   CRLF break is read as LF. Then `INVALID_ARGUMENT` for: more than 280
   characters; more than 4 lines; a blank line; a control character other than
@@ -43,9 +52,10 @@ invitation itself, such as the address their account will use.
 - **Not stored.** The note is not kept with the invitation: a resend is a new
   `CreateTenantInvitation`, which carries its own note. No log line carries it.
 - **Go API.** `MembershipService.CreateTenantInvitation` takes the note after
-  the role; `ProjectTenantsConfig` gains `InvitationNotes` and `config.Config`
-  `TenantInvitationNotesEnabled`; `service.ErrInvitationNoteNotAllowed` is the
-  new refusal.
+  the role; `ProjectTenantsConfig` gains `InvitationNotes` and
+  `InvitationNotesSelfService`, and `config.Config`
+  `TenantInvitationNotesEnabled` and `TenantInvitationNotesSelfServiceEnabled`;
+  `service.ErrInvitationNoteNotAllowed` is the new refusal.
 
 ## Next — an owner or admin sets a member's role: `SetTenantMemberRole` (additive RPC and audit event `tenant_member_role_changed`; no migration; `MembershipStore.SetMemberRole` (Go API))
 

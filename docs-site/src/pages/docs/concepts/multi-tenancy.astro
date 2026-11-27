@@ -470,8 +470,27 @@ RestoreTenantMember(tenant_id, user_id)
   </p>
   <Code code={`{ "tenants": { "invitation_notes": true } }`} lang="json" />
   <p>
-    Without it, or on a tenant made through <code>CreateTenant</code>, whose
-    text the service never puts in its email, a note is
+    That covers the tenants an operator made or that formed from a verified
+    domain. A tenant made through <code>CreateTenant</code> is another matter:
+    its owners and admins are whoever signed up, not people the Project vetted,
+    which is why the email never shows such a tenant's name. A Project that
+    wants their notes too turns on a second setting, which needs the first (a
+    config with only the second is refused when it is written or loaded); the
+    default Project takes it from
+    <code>GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED</code>, which
+    likewise needs <code>GATEWAY_TENANT_INVITATION_NOTES_ENABLED</code>:
+  </p>
+  <Code code={`{ "tenants": { "invitation_notes": true, "invitation_notes_self_service": true } }`} lang="json" />
+  <p>
+    Turning it on accepts that a person the Project never vetted can put a
+    note, validated as below and so short and link-free, in an email the
+    service sends under its own name. The note is still labelled as one from
+    the administrator who invited the recipient, and it is the only text such
+    a tenant contributes: its name stays out of the email.
+  </p>
+  <p>
+    Without the first setting, or on a tenant made through
+    <code>CreateTenant</code> without the second, a note is
     <code>FAILED_PRECONDITION</code>; an empty one (or only whitespace) sends
     the email exactly as without the field. The note travels in an email the
     service sends under its own name, so it is kept short and unable to carry

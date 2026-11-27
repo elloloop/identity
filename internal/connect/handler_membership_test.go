@@ -443,25 +443,26 @@ func (m *capturingMailer) Send(_ context.Context, msg email.Message) error {
 }
 
 // The request's note reaches the invitation email where the project allows
-// notes, and each refusal of one surfaces with its code: FAILED_PRECONDITION
-// where notes are not allowed or the tenant is one a user created,
-// INVALID_ARGUMENT for a note that reads as a link.
+// notes, on a tenant a user created only where it allows them there too, and
+// each refusal of one surfaces with its code: FAILED_PRECONDITION where notes
+// are not allowed, INVALID_ARGUMENT for a note that reads as a link.
 func TestCreateTenantInvitation_Handler_Note(t *testing.T) {
 	const note = "Your mail address will be jane@example.com"
-	notesScope := func(on bool) *service.ProjectScope {
-		return &service.ProjectScope{ProjectID: testProjectID, Tenants: service.ProjectTenantsConfig{InvitationNotes: on}}
-	}
+	notes := service.ProjectTenantsConfig{InvitationNotes: true}
+	both := service.ProjectTenantsConfig{InvitationNotes: true, InvitationNotesSelfService: true}
 	for _, tc := range []struct {
 		name      string
-		allowed   bool
+		policy    service.ProjectTenantsConfig
 		createdBy string
 		note      string
 		want      connect.Code
 	}{
-		{"allowed", true, "", note, 0},
-		{"project does not allow notes", false, "", note, connect.CodeFailedPrecondition},
-		{"self-service tenant", true, "owner-1", note, connect.CodeFailedPrecondition},
-		{"link", true, "", "Sign in at https://example.test", connect.CodeInvalidArgument},
+		{"allowed", notes, "", note, 0},
+		{"project does not allow notes", service.ProjectTenantsConfig{}, "", note, connect.CodeFailedPrecondition},
+		{"self-service tenant", notes, "owner-1", note, connect.CodeFailedPrecondition},
+		{"self-service tenant where allowed", both, "owner-1", note, 0},
+		{"link", notes, "", "Sign in at https://example.test", connect.CodeInvalidArgument},
+		{"link on a self-service tenant where allowed", both, "owner-1", "Sign in at https://example.test", connect.CodeInvalidArgument},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			members := &connectMembershipStore{member: &service.TenantMembership{
@@ -471,7 +472,7 @@ func TestCreateTenantInvitation_Handler_Note(t *testing.T) {
 			mailer := &capturingMailer{}
 			svc := service.NewMembershipService(newConnectInvitationStore(), members, tenants,
 				&connectUserDirectory{}, mailer, true, &config.Config{}, zap.NewNop())
-			srv := startMembershipServerInScope(t, svc, notesScope(tc.allowed))
+			srv := startMembershipServerInScope(t, svc, &service.ProjectScope{ProjectID: testProjectID, Tenants: tc.policy})
 
 			_, err := srv.client.CreateTenantInvitation(context.Background(),
 				withAuth(&identitypb.CreateTenantInvitationRequest{

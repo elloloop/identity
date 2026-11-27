@@ -9504,7 +9504,10 @@ components:
              the email; empty (or only whitespace) sends the email without one. The
              project must allow notes (tenants.invitation_notes in its config_json,
              or GATEWAY_TENANT_INVITATION_NOTES_ENABLED for the default project), and
-             a tenant a user created cannot attach one: FAILED_PRECONDITION otherwise.
+             a tenant a user created (CreateTenant) attaches one only where the
+             project allows that too (tenants.invitation_notes_self_service, or
+             GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED):
+             FAILED_PRECONDITION otherwise.
              The note and each of its lines are trimmed and a CRLF break is read as
              LF. INVALID_ARGUMENT for a note longer than 280 characters, of more than
              4 lines, with a blank line, with a control character other than the line

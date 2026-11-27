@@ -104,8 +104,9 @@ type ProjectConfig struct {
 	Accounts ProjectAccountsConfig `json:"accounts"`
 
 	// Tenants holds the project's tenant policy: whether a signed-in user may
-	// create a tenant they own, and whether invitations may carry a note.
-	// Default OFF. See ProjectTenantsConfig.
+	// create a tenant they own, and whether invitations, those of such a
+	// tenant included, may carry a note. Default OFF. See
+	// ProjectTenantsConfig.
 	Tenants ProjectTenantsConfig `json:"tenants"`
 
 	// RecoveryEmails holds the project's policy for the additional addresses
@@ -418,6 +419,9 @@ func (c ProjectConfig) Validate() error {
 		return err
 	}
 	if err := c.Accounts.validate(); err != nil {
+		return err
+	}
+	if err := c.Tenants.validate(); err != nil {
 		return err
 	}
 	if err := c.RecoveryEmails.validate(); err != nil {

@@ -1057,8 +1057,9 @@ func New(deps Deps) (*Built, error) {
 			Anonymous: service.ProjectAnonymousConfig{Enabled: deps.Config.AnonymousEnabled},
 			Accounts:  defaultAccounts,
 			Tenants: service.ProjectTenantsConfig{
-				SelfService:     deps.Config.SelfServiceTenantsEnabled,
-				InvitationNotes: deps.Config.TenantInvitationNotesEnabled,
+				SelfService:                deps.Config.SelfServiceTenantsEnabled,
+				InvitationNotes:            deps.Config.TenantInvitationNotesEnabled,
+				InvitationNotesSelfService: deps.Config.TenantInvitationNotesSelfServiceEnabled,
 			},
 		},
 		projectResolver,

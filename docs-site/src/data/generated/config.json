@@ -2218,7 +2218,16 @@
     "type": "boolean",
     "default": "false",
     "required": false,
-    "description": "lets an owner or admin of a tenant of the DEFAULT project attach a short plain-text note to an invitation, which its email shows (CreateTenantInvitationRequest.note); a self-service tenant never can.",
+    "description": "lets an owner or admin of a tenant of the DEFAULT project attach a short plain-text note to an invitation, which its email shows (CreateTenantInvitationRequest.note); a self-service tenant only with TenantInvitationNotesSelfServiceEnabled too.",
+    "category": "Email \u0026 branding",
+    "anchor": "email-and-branding"
+  },
+  {
+    "name": "GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "extends invitation notes to the DEFAULT project's self-service tenants, whose owners and admins it does not vet; it needs TenantInvitationNotesEnabled.",
     "category": "Email \u0026 branding",
     "anchor": "email-and-branding"
   },

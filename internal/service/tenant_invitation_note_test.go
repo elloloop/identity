@@ -133,10 +133,16 @@ const noteLabel = "A note from the administrator who invited you:"
 // withNotesProject is withProject for a project whose tenant policy allows
 // invitation notes or not.
 func withNotesProject(allowed bool) context.Context {
+	return withTenantsPolicy(ProjectTenantsConfig{InvitationNotes: allowed})
+}
+
+// withTenantsPolicy is withProject for a project with the tenant policy
+// tenants, taken as given, unvalidated.
+func withTenantsPolicy(tenants ProjectTenantsConfig) context.Context {
 	return WithProjectScope(context.Background(), &ProjectScope{
 		ProjectID: mTestProject,
 		Access:    ProjectAccessConfig{Mode: AccessModeOpen},
-		Tenants:   ProjectTenantsConfig{InvitationNotes: allowed},
+		Tenants:   tenants,
 	})
 }
 
@@ -187,34 +193,79 @@ func TestCreateTenantInvitation_NoNoteNoNoteSection(t *testing.T) {
 }
 
 // A note is refused before anything is stored or sent: where the project does
-// not allow notes, on a tenant a user created, and when it reads as a link.
-// A caller who is not an owner or admin is refused as one, so a note never
-// tells them whether the tenant is one a user created.
+// not allow notes, even if it allows them on self-service tenants; on a tenant
+// a user created unless the project allows notes there too; and when it reads
+// as a link, on any tenant. A caller who is not an owner or admin is refused
+// as one, so a note never tells them whether the tenant is one a user created.
 func TestCreateTenantInvitation_NoteRefused(t *testing.T) {
+	off := ProjectTenantsConfig{}
+	notes := ProjectTenantsConfig{InvitationNotes: true}
+	both := ProjectTenantsConfig{InvitationNotes: true, InvitationNotesSelfService: true}
+	selfServiceOnly := ProjectTenantsConfig{InvitationNotesSelfService: true}
 	for _, tc := range []struct {
 		name      string
-		allowed   bool
+		policy    ProjectTenantsConfig
 		createdBy string
 		role      string
 		note      string
 		want      error
 	}{
-		{"project does not allow notes", false, "", RoleOwner, "Welcome aboard", ErrInvitationNoteNotAllowed},
-		{"self-service tenant", true, "user-creator", RoleOwner, "Welcome aboard", ErrInvitationNoteNotAllowed},
-		{"link", true, "", RoleOwner, "Sign in at example.com", ErrInvalidArgument},
-		{"link where notes are not allowed", false, "", RoleOwner, "Sign in at example.com", ErrInvalidArgument},
-		{"bidirectional override", true, "", RoleOwner, "Hi \u202Emoc.elpmaxe", ErrInvalidArgument},
-		{"plain member of a self-service tenant", true, "user-creator", RoleMember, "Welcome aboard", ErrPermissionDenied},
+		{"project does not allow notes", off, "", RoleOwner, "Welcome aboard", ErrInvitationNoteNotAllowed},
+		{"self-service tenant, notes allowed only elsewhere", notes, "user-creator", RoleOwner, "Welcome aboard", ErrInvitationNoteNotAllowed},
+		{"self-service setting without notes, self-service tenant", selfServiceOnly, "user-creator", RoleOwner, "Welcome aboard", ErrInvitationNoteNotAllowed},
+		{"self-service setting without notes, operator tenant", selfServiceOnly, "", RoleOwner, "Welcome aboard", ErrInvitationNoteNotAllowed},
+		{"link", notes, "", RoleOwner, "Sign in at example.com", ErrInvalidArgument},
+		{"link where notes are not allowed", off, "", RoleOwner, "Sign in at example.com", ErrInvalidArgument},
+		{"link on a self-service tenant allowed notes", both, "user-creator", RoleOwner, "Sign in at example.com", ErrInvalidArgument},
+		{"lookalike domain on a self-service tenant allowed notes", both, "user-creator", RoleOwner, "Sign in at exаmple.com", ErrInvalidArgument},
+		{"bidirectional override", notes, "", RoleOwner, "Hi \u202Emoc.elpmaxe", ErrInvalidArgument},
+		{"over the cap on a self-service tenant allowed notes", both, "user-creator", RoleOwner, strings.Repeat("a", maxInvitationNoteRunes+1), ErrInvalidArgument},
+		{"plain member of a self-service tenant", notes, "user-creator", RoleMember, "Welcome aboard", ErrPermissionDenied},
+		{"plain member where self-service tenants allow notes", both, "user-creator", RoleMember, "Welcome aboard", ErrPermissionDenied},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newMembershipFixture()
 			f.tenants.put(&Tenant{ID: mTestTenant, ProjectID: mTestProject, Status: TenantStatusClaimed, CreatedBy: tc.createdBy})
 			f.seedMember(mTestProject, mTestTenant, mAdminID, tc.role)
 
-			_, err := f.svc.CreateTenantInvitation(withNotesProject(tc.allowed), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember, tc.note)
+			_, err := f.svc.CreateTenantInvitation(withTenantsPolicy(tc.policy), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember, tc.note)
 			require.ErrorIs(t, err, tc.want)
 			require.Empty(t, f.invitations.byID, "a refused invitation is not stored")
 			require.Zero(t, f.mailer.count(), "a refused invitation sends no email")
+		})
+	}
+}
+
+// With notes allowed, and on self-service tenants too, an owner or admin of
+// either kind of tenant sends a note, normalized as anywhere else, and the
+// self-service tenant's name still stays out of the email.
+func TestCreateTenantInvitation_NoteOnSelfServiceTenantWhereAllowed(t *testing.T) {
+	const crafted = "Payroll update"
+	for _, tc := range []struct {
+		name      string
+		createdBy string
+		role      string
+	}{
+		{"self-service tenant, owner", "user-creator", RoleOwner},
+		{"self-service tenant, admin", "user-creator", RoleAdmin},
+		{"operator tenant", "", RoleOwner},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newMembershipFixture()
+			f.tenants.put(&Tenant{ID: mTestTenant, ProjectID: mTestProject, Name: crafted, Status: TenantStatusClaimed, CreatedBy: tc.createdBy})
+			f.seedMember(mTestProject, mTestTenant, mAdminID, tc.role)
+			policy := ProjectTenantsConfig{InvitationNotes: true, InvitationNotesSelfService: true}
+
+			_, err := f.svc.CreateTenantInvitation(withTenantsPolicy(policy), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleMember,
+				"  Your mail address will be jane@example.com  \r\nSee you Monday.")
+			require.NoError(t, err)
+			msg := f.mailer.last()
+			require.Contains(t, msg.Text, noteLabel+"\n> Your mail address will be jane@example.com\n> See you Monday.\n")
+			require.Contains(t, msg.HTML, ">Your mail address will be jane@example.com<br>See you Monday.</blockquote>")
+			if tc.createdBy != "" {
+				require.NotContains(t, msg.Text, crafted, "a self-service tenant's name stays out")
+				require.NotContains(t, msg.HTML, crafted, "a self-service tenant's name stays out")
+			}
 		})
 	}
 }

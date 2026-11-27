@@ -63,7 +63,7 @@ type DefaultProject struct {
 	// Accounts is the GATEWAY_DEFAULT_EMAIL_DOMAIN account-domain policy.
 	Accounts service.ProjectAccountsConfig
 	// Tenants is the GATEWAY_SELF_SERVICE_TENANTS_ENABLED and
-	// GATEWAY_TENANT_INVITATION_NOTES_ENABLED policy.
+	// GATEWAY_TENANT_INVITATION_NOTES_* policy.
 	Tenants service.ProjectTenantsConfig
 }
 

@@ -111,9 +111,10 @@ type ProjectScope struct {
 
 	// Tenants is the project's tenant policy, parsed from config_json — or,
 	// for the env default project, assembled from
-	// GATEWAY_SELF_SERVICE_TENANTS_ENABLED and
-	// GATEWAY_TENANT_INVITATION_NOTES_ENABLED. Zero (disabled) for a project
-	// that configures none.
+	// GATEWAY_SELF_SERVICE_TENANTS_ENABLED,
+	// GATEWAY_TENANT_INVITATION_NOTES_ENABLED and
+	// GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED. Zero (disabled)
+	// for a project that configures none.
 	Tenants ProjectTenantsConfig
 
 	// RecoveryEmails is the project's recovery-email policy, parsed from

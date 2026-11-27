@@ -22,8 +22,10 @@ const (
 // ErrInvitationNoteNotAllowed refuses a note on an invitation that may not
 // carry one: the project has not turned notes on (tenants.invitation_notes,
 // or GATEWAY_TENANT_INVITATION_NOTES_ENABLED for the default project), or the
-// tenant is one a user created, whose text the service never puts in its
-// email. Mapped to CodeFailedPrecondition.
+// tenant is one a user created and the project has not turned them on there
+// (tenants.invitation_notes_self_service, or
+// GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED). Mapped to
+// CodeFailedPrecondition.
 var ErrInvitationNoteNotAllowed = errors.New("this invitation cannot carry a note")
 
 // noteURLSchemes are the schemes a mail client turns into a link without a
