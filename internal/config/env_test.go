@@ -770,3 +770,19 @@ func TestManagedAccountsBoundTheSessionCache(t *testing.T) {
 		t.Fatalf("the bound applies only with managed accounts on: %v", err)
 	}
 }
+
+// The default project admits no managed accounts unless told to.
+func TestDefaultProjectAdmitManagedAccounts_DefaultsOff(t *testing.T) {
+	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS", "")
+	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE", "")
+	c := Load()
+	if c.DefaultProjectAdmitManagedAccounts || c.DefaultProjectAdmitManagedAccountsSelfService {
+		t.Fatal("the default project's managed-account switches must default off")
+	}
+	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS", "true")
+	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE", "true")
+	c = Load()
+	if !c.DefaultProjectAdmitManagedAccounts || !c.DefaultProjectAdmitManagedAccountsSelfService {
+		t.Fatal("the variables set to true must turn the switches on")
+	}
+}

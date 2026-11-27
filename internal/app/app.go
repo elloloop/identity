@@ -1037,6 +1037,7 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf(
 			"default project access config (check GATEWAY_DEFAULT_PROJECT_ACCESS_MODE, "+
 				"GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS, GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN, "+
+				"GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS, GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE, "+
 				"GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS, GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS, "+
@@ -1351,6 +1352,9 @@ func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
 	default:
 		logger.Info("invited_signup_disabled",
 			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)))
+	}
+	if cfg.DefaultProjectAdmitManagedAccounts && !membershipServiceServed(deps) {
+		return errors.New("app: GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS needs the tenant, membership and invitation stores, which only the postgres driver provides")
 	}
 	if cfg.DefaultProjectAdmitDomainJoin && !domainJoinServed(deps) {
 		return errors.New("app: GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN needs the domain and tenant stores, which only the postgres driver provides")

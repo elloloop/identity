@@ -460,6 +460,24 @@ type Config struct {
 	// boot otherwise.
 	DefaultProjectAdmitDomainJoin bool
 
+	// DefaultProjectAdmitManagedAccounts lets the default project's tenant
+	// owners and admins create accounts their tenant manages, where the
+	// server enables them (GATEWAY_MANAGED_ACCOUNTS_ENABLED); it is the
+	// default project's access.admit_managed_accounts. Set via
+	// GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS; off by default. It
+	// REQUIRES the postgres driver, which alone keeps tenants; the server
+	// refuses to boot otherwise.
+	DefaultProjectAdmitManagedAccounts bool
+
+	// DefaultProjectAdmitManagedAccountsSelfService extends
+	// DefaultProjectAdmitManagedAccounts to tenants made through self-service
+	// CreateTenant: the default project's
+	// access.admit_managed_accounts_self_service. Set via
+	// GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE; off by
+	// default. It REQUIRES GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS; the
+	// server refuses to boot otherwise.
+	DefaultProjectAdmitManagedAccountsSelfService bool
+
 	// DefaultProjectBlockedEmailDomains is the comma-separated list of extra
 	// email domains refused on the default project, in addition to the
 	// consumer mailbox providers the public-domain switch already covers. Set via
@@ -1706,12 +1724,14 @@ func loadFromEnv() *Config {
 		// The deny layer is OFF by default: it subtracts from the configured
 		// mode, and a deployment that has not asked for it must keep exactly
 		// the access its mode already grants.
-		DefaultProjectBlockPublicEmailDomains: envBool("GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS", false),
-		DefaultProjectAdmitTenantInvitations:  envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS", false),
-		DefaultProjectAdmitDomainJoin:         envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN", false),
-		DefaultProjectBlockedEmailDomains:     envStr("GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS", ""),
-		DefaultProjectExemptEmails:            envStr("GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS", ""),
-		RequireVerifiedAuthDomain:             envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
+		DefaultProjectBlockPublicEmailDomains:         envBool("GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS", false),
+		DefaultProjectAdmitTenantInvitations:          envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS", false),
+		DefaultProjectAdmitDomainJoin:                 envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN", false),
+		DefaultProjectAdmitManagedAccounts:            envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS", false),
+		DefaultProjectAdmitManagedAccountsSelfService: envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE", false),
+		DefaultProjectBlockedEmailDomains:             envStr("GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS", ""),
+		DefaultProjectExemptEmails:                    envStr("GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS", ""),
+		RequireVerifiedAuthDomain:                     envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
 
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
