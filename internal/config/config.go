@@ -1650,8 +1650,9 @@ type Config struct {
 	ManagedAccountsEnabled bool
 	// ManagedAccessTokenExpirySeconds is the lifetime of an access token
 	// issued to an account a tenant manages (its managed claim true), from 0
-	// to 60 where managed accounts are enabled (0 selects the default, 60),
-	// and never longer than GATEWAY_JWT_EXPIRY_SECONDS. A service that
+	// to 60 where managed accounts are enabled (0 selects the default, 60);
+	// a larger value, which boot allows only with them off, is still used as
+	// 60. Never longer than GATEWAY_JWT_EXPIRY_SECONDS. A service that
 	// verifies access tokens itself sees the account's suspension, removal
 	// or reset within this time; the refresh that follows checks the
 	// account's standing. Driven by
@@ -2380,12 +2381,16 @@ func (c *Config) JWTExpiry() time.Duration {
 
 // ManagedAccessTokenExpiry is the lifetime of an access token issued to an
 // account a tenant manages: the configured value, or the default when unset,
-// and never longer than JWTExpiry.
+// never longer than MaxManagedAccessTokenExpirySeconds, whether or not
+// managed accounts are on, and never longer than JWTExpiry. Validate refuses
+// a longer value only where managed accounts are on; with them off, the
+// accounts that already exist still get at most a minute.
 func (c *Config) ManagedAccessTokenExpiry() time.Duration {
 	seconds := c.ManagedAccessTokenExpirySeconds
 	if seconds <= 0 {
 		seconds = DefaultManagedAccessTokenExpirySeconds
 	}
+	seconds = min(seconds, MaxManagedAccessTokenExpirySeconds)
 	return min(time.Duration(seconds)*time.Second, c.JWTExpiry())
 }
 

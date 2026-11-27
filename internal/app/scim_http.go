@@ -348,7 +348,7 @@ func (s *repoSCIMStore) refuseManaged(u *service.User, op string) error {
 	}
 	s.logger.Info("managed_account_refused",
 		zap.String("project_id", s.projectID), zap.String("tenant_id", u.ManagedByTenantID),
-		zap.String("user_id", u.ID), zap.String("path", "scim:"+op))
+		zap.String("user_id", u.ID), zap.String("surface", "scim:"+op))
 	return fmt.Errorf("%w: a tenant manages this account", scim.ErrForbidden)
 }
 

@@ -256,19 +256,12 @@ func (s *MembershipService) sendManagedSetupEmail(ctx context.Context, issued *M
 	if s.cfg != nil {
 		brand = resolveBranding(ctx, s.cfg, "")
 	}
-	// The tenant is read once, for its name and for whose words the
-	// greeting may use: a self-service tenant's names are unvetted, so its
-	// email greets by the address's local part instead of the name its
-	// admin typed. A tenant that cannot be read greets that way too.
-	greeting := invitationGreeting(issued.User.Email)
-	tenantName := ""
 	t, err := s.tenants.GetTenant(ctx, inv.ProjectID, inv.TenantID)
-	switch {
-	case err != nil:
+	if err != nil {
 		logger.Warn("managed_account_setup_tenant_lookup_failed", zap.Error(err))
-	case t != nil && t.CreatedBy == "":
-		tenantName, greeting = tenantNameOf(t), issued.User.Name
+		t = nil
 	}
+	greeting, tenantName := managedAccountGreeting(t, issued.User)
 	html, text, err := email.Render(email.TemplateManagedAccountSetup, brand.templateData(map[string]any{
 		"UserName":       greeting,
 		"TenantName":     tenantName,

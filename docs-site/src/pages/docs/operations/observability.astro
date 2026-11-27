@@ -146,6 +146,15 @@ curl -sf http://localhost/healthz`} lang="bash" />
     at most once per <code>op</code> per minute, with the number
     <code>dropped</code> since its previous line.
   </p>
+  <p>
+    With managed accounts on,
+    <code>identity_managed_help_limited_total&#123;outcome&#125;</code> counts
+    the help requests about a managed account that a daily cap kept from its
+    tenant: <code>tenant_limited</code> when the tenant had its
+    <code>GATEWAY_MANAGED_HELP_MAX_PER_TENANT</code> notices for the day,
+    <code>source_limited</code> when one client had caused its
+    <code>GATEWAY_MANAGED_HELP_MAX_PER_SOURCE</code>.
+  </p>
   <Code code={`curl -s http://localhost:9090/metrics | head`} lang="bash" />
 
   <h2>Recommended dashboards</h2>
@@ -162,6 +171,7 @@ curl -sf http://localhost/healthz`} lang="bash" />
     <li><strong>Wrong backend in prod.</strong> Alert if <code>repo_driver_selected</code> reports anything other than <code>postgres</code> in production — <code>sqlite</code> is single-node only and <code>memory</code> is non-durable.</li>
     <li><strong>Spike in lockouts.</strong> A burst of <code>login_failure</code> followed by <code>account_locked</code> on multiple users typically means a credential-stuffing attack.</li>
     <li><strong>Credential mail shed.</strong> Alert when <code>identity_email_send_dropped_total</code> increases: users asked for a reset, code or link that was never sent, usually because a flood of requests from many addresses is filling the send slots.</li>
+    <li><strong>Managed help capped.</strong> Alert when <code>identity_managed_help_limited_total</code> increases: a tenant is being flooded with help requests, or a locked-out member keeps asking and its owners and admins have stopped being told.</li>
     <li><strong>Datastore unreachable.</strong> Repeated <code>identity_server_init_failed</code> at boot is a hard outage; the process exits and the orchestrator restarts.</li>
   </ul>
 </DocsLayout>

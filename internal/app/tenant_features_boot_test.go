@@ -166,3 +166,23 @@ func TestCheckTenantFeatures_LogsBootState(t *testing.T) {
 		assert.Contains(t, invited[0].ContextMap()["hint"], "GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS")
 	})
 }
+
+// With managed accounts on, boot needs both readers of a managed account's
+// standing: without them every managed account would answer UNAVAILABLE
+// where a personal one does not, telling callers which accounts a tenant
+// manages.
+func TestCheckTenantFeatures_ManagedAccountsNeedTheStandingReaders(t *testing.T) {
+	cfg := &config.Config{ManagedAccountsEnabled: true}
+	require.NoError(t, checkTenantFeatures(governanceDeps(cfg), zap.NewNop()))
+	for name, drop := range map[string]func(*Deps){
+		"no membership store": func(d *Deps) { d.MembershipStore = nil },
+		"no tenant store":     func(d *Deps) { d.TenantStore = nil },
+	} {
+		d := governanceDeps(cfg)
+		drop(&d)
+		err := checkTenantFeatures(d, zap.NewNop())
+		require.Error(t, err, name)
+		assert.Contains(t, err.Error(), "GATEWAY_MANAGED_ACCOUNTS_ENABLED", name)
+	}
+	require.NoError(t, checkTenantFeatures(Deps{Config: &config.Config{}}, zap.NewNop()), "managed accounts off")
+}

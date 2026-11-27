@@ -246,8 +246,9 @@ func TestAccessTokenExpiry_ManagedAccountsGetAMinute(t *testing.T) {
 // Every way an agent comes to a managed owner, or acts for one, holds the
 // owner to its standing in its tenant: while its membership is suspended
 // it creates no agent, is given none (by an admin, a transfer, an offer's
-// acceptance or an orphan's reassignment), and its agents hold no session
-// and pass no OAuth or machine admission; reinstated, each works again, and
+// acceptance or an orphan's reassignment), its agents hold no session, pass
+// no OAuth or machine admission and are not reactivated, not even by an
+// admin; reinstated, each works again, and
 // an agent its suspension deactivated works once the owner reactivates it.
 func TestManagedAgentOwner_EveryPathFollowsItsStanding(t *testing.T) {
 	ctx := context.Background()
@@ -290,6 +291,17 @@ func TestManagedAgentOwner_EveryPathFollowsItsStanding(t *testing.T) {
 	require.ErrorIs(t, err, errAgentOwnerNotEligible, "an orphan's reassignment to it")
 	require.ErrorIs(t, f.svc.checkAgentStanding(ctx, agentOf(owned.ID)), ErrAccountNotActive, "its agent's session")
 	require.ErrorIs(t, oauth.ownerStanding(ctx, managed), ErrAccountNotActive, "OAuth and machine admission")
+	f.repo.mu.Lock()
+	f.repo.users[owned.ID].Status = StatusDeactivated
+	f.repo.mu.Unlock()
+	require.ErrorIs(t, f.svc.ReactivateAgent(ctx, f.admin.ID, owned.ID, "", ""), ErrAccountNotActive, "an admin reactivating its agent")
+	assert.Equal(t, StatusDeactivated, agentOf(owned.ID).Status)
+	assert.Equal(t, 1, f.writer.countByEventTypeAndDetail(string(audit.EventAgentReactivated), "step", "owner_not_eligible"))
+	memberships.get = func(string, string, string) (*TenantMembership, error) { return nil, errors.New("store down") }
+	err = f.svc.ReactivateAgent(ctx, f.admin.ID, owned.ID, "", "")
+	require.True(t, isManagedStandingUnread(err), "an owner whose standing cannot be read: %v", err)
+	assert.Equal(t, 1, f.writer.countByEventTypeAndDetail(string(audit.EventAgentReactivated), "step", "owner_standing_unread"))
+	assert.Equal(t, StatusDeactivated, agentOf(owned.ID).Status)
 
 	suspend(false)
 	f.repo.mu.Lock()
@@ -314,7 +326,8 @@ func TestManagedAgentOwner_EveryPathFollowsItsStanding(t *testing.T) {
 // Every token an agent of a managed owner gets lasts the managed lifetime
 // too: its session tokens here, and its delegated and machine tokens
 // through managedTokenCapMs. An agent of a personal owner keeps the usual
-// lifetime, and one whose owner cannot be read gets the short one.
+// lifetime, and one with no owner, or whose owner cannot be read, gets the
+// short one.
 func TestAccessTokenExpiry_AgentsOfManagedOwnersGetAMinute(t *testing.T) {
 	f := newAgentFixture(t)
 	f.svc.cfg.JWTExpirySeconds = 900
@@ -333,6 +346,11 @@ func TestAccessTokenExpiry_AgentsOfManagedOwnersGetAMinute(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, tokenLifetime(t, access))
 
 	assert.Equal(t, time.Minute, f.svc.accessTokenExpiry(ctx, &User{ID: "x", Kind: UserKindAgent, OwnerUserID: "owner-gone"}), "an unread owner gets the short lifetime")
+	assert.Equal(t, time.Minute, f.svc.accessTokenExpiry(ctx, &User{ID: "y", Kind: UserKindAgent}), "an agent with no owner gets the short lifetime")
+	assert.Equal(t, 15*time.Minute, f.svc.accessTokenExpiry(ctx, f.owner), "a personal account keeps the usual lifetime")
+	f.svc.cfg.ManagedAccessTokenExpirySeconds = 3600
+	assert.Equal(t, time.Minute, f.svc.accessTokenExpiry(ctx, managed), "a managed account keeps the one-minute ceiling whatever is configured")
+	f.svc.cfg.ManagedAccessTokenExpirySeconds = 0
 
 	now := time.Now().UnixMilli()
 	far := now + (10 * time.Minute).Milliseconds()

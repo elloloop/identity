@@ -958,9 +958,9 @@
     "type": "integer",
     "default": "60",
     "required": false,
-    "description": "is the lifetime of an access token issued to an account a tenant manages (its managed claim true), from 0 to 60 where managed accounts are enabled (0 selects the default, 60), and never longer than .",
-    "category": "Other",
-    "anchor": "other"
+    "description": "is the lifetime of an access token issued to an account a tenant manages (its managed claim true), from 0 to 60 where managed accounts are enabled (0 selects the default, 60); a larger value, which boot allows only with them off, is still used as 60.",
+    "category": "JWT \u0026 tokens",
+    "anchor": "jwt-and-tokens"
   },
   {
     "name": "GATEWAY_MANAGED_ACCOUNTS_ENABLED",
@@ -977,8 +977,8 @@
     "default": "3",
     "required": false,
     "description": "caps how many of those notices requests from one client address may cause for one tenant in a day, from 0 to 1000 (0 selects the default, 3).",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
   },
   {
     "name": "GATEWAY_MANAGED_HELP_MAX_PER_TENANT",
@@ -986,8 +986,8 @@
     "default": "20",
     "required": false,
     "description": "caps how many help-request notices one tenant's owners and admins are sent about its managed accounts in a day, from 0 to 1000 (0 selects the default, 20); past it a request is answered as any other and no notice is sent.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
   },
   {
     "name": "GATEWAY_METRICS_PORT",
@@ -2309,8 +2309,8 @@
     "default": "",
     "required": false,
     "description": "is the page where a tenant's owners and admins manage its members.",
-    "category": "Other",
-    "anchor": "other"
+    "category": "Email \u0026 branding",
+    "anchor": "email-and-branding"
   },
   {
     "name": "GATEWAY_TENANT_SELECTION_ENABLED",

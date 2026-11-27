@@ -882,8 +882,9 @@ account is a `users` row with `managed_by_tenant_id` set; its set-up link is a
 acceptance by email.
 
 A managed account's access tokens carry `managed: true` and, with every token of an agent it owns, last
-`GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` (default 60, at most 60 while
-managed accounts are enabled, never longer than `GATEWAY_JWT_EXPIRY_SECONDS`),
+`GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` (default 60, never more than 60
+whether or not managed accounts are enabled, never longer than
+`GATEWAY_JWT_EXPIRY_SECONDS`; an agent with no owner gets it too),
 so a service that verifies access tokens itself stops honouring one within a
 minute of the account's suspension, removal or reset; the refresh that
 follows checks the account's standing in its tenant and is refused. Calls

@@ -250,3 +250,66 @@ func TestManagedHelpNoticesMigrationRoundTrip(t *testing.T) {
 	require.NoError(t, withMigrator(t, scratch, func(m *migrate.Migrate) error { return m.Up() }))
 	require.True(t, exists())
 }
+
+// TestMembershipStore_RecordManagedHelp_KeepsToItsProject: the same address
+// is a managed account in two projects. A request in one project tells only
+// that project's tenant and uses only its caps, and a project where the
+// address is no managed account finds none.
+func TestMembershipStore_RecordManagedHelp_KeepsToItsProject(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f := newManagedHelpFixture(ctx, t)
+	now := time.Now()
+
+	owner, err := New(ctx, Config{DSN: os.Getenv("GATEWAY_TEST_POSTGRES_DSN"), MaxConns: 2, ConnTimeout: 5 * time.Second, ProjectID: "control-plane"})
+	require.NoError(t, err)
+	t.Cleanup(owner.Close)
+	otherProject, err := NewProjectStore(owner, true, nil).createProject(ctx, &Project{StorageScopeID: "scope-help-other", Name: "Other"})
+	require.NoError(t, err)
+
+	_, err = f.ms.RecordManagedHelp(ctx, service.ManagedHelpRequest{
+		ProjectID: otherProject, Address: "ann@acme.com", SourceKey: "src-1", NowMs: now.UnixMilli(),
+		SinceMs: now.Add(-24 * time.Hour).UnixMilli(), MaxPerTenant: 3, MaxPerTenantSource: 2,
+	})
+	require.ErrorIs(t, err, service.ErrNotFound, "the other project has no managed account at the address")
+
+	otherTenant, err := NewTenantStore(owner).CreateTenant(ctx, &service.Tenant{ProjectID: otherProject, Status: service.TenantStatusClaimed})
+	require.NoError(t, err)
+	otherAccounts, err := New(ctx, Config{DSN: memberRoleDSN(t), MaxConns: 2, ConnTimeout: 5 * time.Second, ProjectID: otherProject})
+	require.NoError(t, err)
+	t.Cleanup(otherAccounts.Close)
+	otherAnn, err := otherAccounts.CreateUser(ctx, &service.User{
+		Email: "ann@acme.com", Status: service.StatusActive, ManagedByTenantID: otherTenant,
+		SetUpAtMs: now.UnixMilli(), SetupEpoch: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	otherOwner, err := otherAccounts.CreateUser(ctx, &service.User{Email: "boss@other.example.com", Status: service.StatusActive, CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	for _, m := range []*service.TenantMembership{
+		{ProjectID: otherProject, TenantID: otherTenant, UserID: otherAnn, Source: service.MembershipSourceInvited, Role: service.RoleMember, Status: service.MembershipStatusActive},
+		{ProjectID: otherProject, TenantID: otherTenant, UserID: otherOwner, Source: service.MembershipSourceCreated, Role: service.RoleOwner, Status: service.MembershipStatusActive},
+	} {
+		_, err = f.ms.UpsertMembership(ctx, m)
+		require.NoError(t, err)
+	}
+
+	here, err := f.ms.RecordManagedHelp(ctx, f.request("ann@acme.com", "src-1", now))
+	require.NoError(t, err)
+	require.Equal(t, service.ManagedHelpNotify, here.Outcome)
+	assert.Equal(t, f.tenantID, here.TenantID)
+	assert.Equal(t, f.managed, here.Account.ID)
+	for _, r := range here.Recipients {
+		assert.NotEqual(t, otherOwner, r.ID, "the other project's owner is not told")
+	}
+
+	there, err := f.ms.RecordManagedHelp(ctx, service.ManagedHelpRequest{
+		ProjectID: otherProject, Address: "ann@acme.com", SourceKey: "src-1", NowMs: now.UnixMilli(),
+		SinceMs: now.Add(-24 * time.Hour).UnixMilli(), MaxPerTenant: 1, MaxPerTenantSource: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.ManagedHelpNotify, there.Outcome, "the first project's notice uses none of the other's day or caps")
+	assert.Equal(t, otherTenant, there.TenantID)
+	assert.Equal(t, otherAnn, there.Account.ID)
+	require.Len(t, there.Recipients, 1)
+	assert.Equal(t, otherOwner, there.Recipients[0].ID)
+}

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/passwords"
 )
 
@@ -140,7 +142,7 @@ func TestMerge_RefusesAManagedAccountOnEitherSide(t *testing.T) {
 	require.NoError(t, refuseManagedMerge(ctx, logger, mTestProject, personal, &User{ID: "q"}))
 	entries := logs.FilterMessage("managed_account_refused").All()
 	require.Len(t, entries, 2)
-	require.Equal(t, "merge", entries[0].ContextMap()["path"])
+	require.Equal(t, "merge", entries[0].ContextMap()["surface"])
 
 	db := newFakeDB()
 	db.addUser("admin-1", "admin@example.com", "Admin", "admin", "active")
@@ -388,6 +390,11 @@ func TestAgentOwnership_StandingUnreadPassesThrough(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnavailable, "accepting an offer")
 	stored, _ := f.repo.GetUser(ctx, agent.ID)
 	require.Equal(t, f.owner.ID, stored.OwnerUserID)
+
+	assert.Equal(t, 1, f.writer.countByEventTypeAndDetail(string(audit.EventAgentCreated), "step", "owner_standing_unread"), "the creation's refusal is audited")
+	assert.Equal(t, 2, f.writer.countByEventTypeAndDetail(string(audit.EventAgentTransferred), "step", "owner_standing_unread"), "the offer's and the acceptance's")
+	assert.Zero(t, f.writer.countByEventTypeAndDetail(string(audit.EventAgentCreated), "step", "owner_not_eligible"))
+	assert.Zero(t, f.writer.countByEventTypeAndDetail(string(audit.EventAgentTransferred), "step", "owner_not_eligible"))
 }
 
 // An account waiting for its set-up is sent no password reset, and a reset
