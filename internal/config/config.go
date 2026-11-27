@@ -1569,6 +1569,20 @@ type Config struct {
 	// tenants.self_service in their own config_json. Default OFF. Driven by
 	// GATEWAY_SELF_SERVICE_TENANTS_ENABLED.
 	SelfServiceTenantsEnabled bool
+	// TenantInvitationNotesEnabled lets an owner or admin of a tenant of the
+	// DEFAULT project attach a short plain-text note to an invitation, which
+	// its email shows (CreateTenantInvitationRequest.note); a self-service
+	// tenant only with TenantInvitationNotesSelfServiceEnabled too. Other
+	// projects turn it on with tenants.invitation_notes in their own
+	// config_json. Default OFF. Driven by
+	// GATEWAY_TENANT_INVITATION_NOTES_ENABLED.
+	TenantInvitationNotesEnabled bool
+	// TenantInvitationNotesSelfServiceEnabled extends invitation notes to the
+	// DEFAULT project's self-service tenants, whose owners and admins it does
+	// not vet; it needs TenantInvitationNotesEnabled. Other projects set
+	// tenants.invitation_notes_self_service. Default OFF. Driven by
+	// GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED.
+	TenantInvitationNotesSelfServiceEnabled bool
 	// SelfServiceTenantsMaxPerUser caps how many tenants one user may create
 	// in each window, from 0 to 1000 (0 selects the default, 10); a creation
 	// past it is RESOURCE_EXHAUSTED. Deployment-wide. Driven by
@@ -1999,27 +2013,29 @@ func loadFromEnv() *Config {
 		SweeperBatchSize:       envInt("GATEWAY_SWEEPER_BATCH_SIZE", 500),
 		SweeperGraceSeconds:    envInt("GATEWAY_SWEEPER_GRACE_SECONDS", 60),
 
-		AccountDeletionGraceDays:          envInt("GATEWAY_ACCOUNT_DELETION_GRACE_DAYS", 30),
-		ExportMaxAuditEvents:              envInt("GATEWAY_EXPORT_MAX_AUDIT_EVENTS", DefaultExportMaxAuditEvents),
-		AgentsEnabled:                     envBool("GATEWAY_AGENTS_ENABLED", false),
-		AgentOAuthProtocolPerIP:           envInt("GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP", DefaultAgentOAuthProtocolPerIP),
-		AgentMachineChallengePerIP:        envInt("GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP", DefaultAgentMachineChallengePerIP),
-		AgentOAuthIntrospectionPerIP:      envInt("GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP", DefaultAgentOAuthIntrospectionPerIP),
-		AgentOAuthEnabled:                 envBool("GATEWAY_AGENT_OAUTH_ENABLED", false),
-		AgentMachineEnabled:               envBool("GATEWAY_AGENT_MACHINE_ENABLED", false),
-		TeammateKeysEnabled:               envBool("GATEWAY_TEAMMATE_KEYS_ENABLED", false),
-		AgentOAuthAccessSeconds:           envInt("GATEWAY_AGENT_OAUTH_ACCESS_SECONDS", DefaultAgentOAuthAccessSeconds),
-		AgentOAuthConsentSeconds:          envInt("GATEWAY_AGENT_OAUTH_CONSENT_SECONDS", DefaultAgentOAuthConsentSeconds),
-		AgentOAuthRefreshIdleSeconds:      envInt("GATEWAY_AGENT_OAUTH_REFRESH_IDLE_SECONDS", DefaultAgentOAuthRefreshIdleSeconds),
-		AgentOAuthResourceCredentialsJSON: envStr("GATEWAY_AGENT_OAUTH_RESOURCE_CREDENTIALS_JSON", ""),
-		AgentsMaxPerOwner:                 envInt("GATEWAY_AGENTS_MAX_PER_OWNER", DefaultAgentsMaxPerOwner),
-		SelfServiceTenantsEnabled:         envBool("GATEWAY_SELF_SERVICE_TENANTS_ENABLED", false),
-		SelfServiceTenantsMaxPerUser:      envInt("GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", DefaultSelfServiceTenantsMaxPerUser),
-		SelfServiceTenantsWindowSeconds:   envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
-		TenantSelectionEnabled:            envBool("GATEWAY_TENANT_SELECTION_ENABLED", false),
-		ManagedAccountsEnabled:            envBool("GATEWAY_MANAGED_ACCOUNTS_ENABLED", false),
-		TenantStatusCacheTTLSeconds:       envInt("GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS", DefaultTenantStatusCacheTTLSeconds),
-		AuditRetentionDays:                envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
+		AccountDeletionGraceDays:                envInt("GATEWAY_ACCOUNT_DELETION_GRACE_DAYS", 30),
+		ExportMaxAuditEvents:                    envInt("GATEWAY_EXPORT_MAX_AUDIT_EVENTS", DefaultExportMaxAuditEvents),
+		AgentsEnabled:                           envBool("GATEWAY_AGENTS_ENABLED", false),
+		AgentOAuthProtocolPerIP:                 envInt("GATEWAY_AGENT_OAUTH_PROTOCOL_PER_IP", DefaultAgentOAuthProtocolPerIP),
+		AgentMachineChallengePerIP:              envInt("GATEWAY_AGENT_MACHINE_CHALLENGE_PER_IP", DefaultAgentMachineChallengePerIP),
+		AgentOAuthIntrospectionPerIP:            envInt("GATEWAY_AGENT_OAUTH_INTROSPECTION_PER_IP", DefaultAgentOAuthIntrospectionPerIP),
+		AgentOAuthEnabled:                       envBool("GATEWAY_AGENT_OAUTH_ENABLED", false),
+		AgentMachineEnabled:                     envBool("GATEWAY_AGENT_MACHINE_ENABLED", false),
+		TeammateKeysEnabled:                     envBool("GATEWAY_TEAMMATE_KEYS_ENABLED", false),
+		AgentOAuthAccessSeconds:                 envInt("GATEWAY_AGENT_OAUTH_ACCESS_SECONDS", DefaultAgentOAuthAccessSeconds),
+		AgentOAuthConsentSeconds:                envInt("GATEWAY_AGENT_OAUTH_CONSENT_SECONDS", DefaultAgentOAuthConsentSeconds),
+		AgentOAuthRefreshIdleSeconds:            envInt("GATEWAY_AGENT_OAUTH_REFRESH_IDLE_SECONDS", DefaultAgentOAuthRefreshIdleSeconds),
+		AgentOAuthResourceCredentialsJSON:       envStr("GATEWAY_AGENT_OAUTH_RESOURCE_CREDENTIALS_JSON", ""),
+		AgentsMaxPerOwner:                       envInt("GATEWAY_AGENTS_MAX_PER_OWNER", DefaultAgentsMaxPerOwner),
+		SelfServiceTenantsEnabled:               envBool("GATEWAY_SELF_SERVICE_TENANTS_ENABLED", false),
+		TenantInvitationNotesEnabled:            envBool("GATEWAY_TENANT_INVITATION_NOTES_ENABLED", false),
+		TenantInvitationNotesSelfServiceEnabled: envBool("GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED", false),
+		SelfServiceTenantsMaxPerUser:            envInt("GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", DefaultSelfServiceTenantsMaxPerUser),
+		SelfServiceTenantsWindowSeconds:         envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
+		TenantSelectionEnabled:                  envBool("GATEWAY_TENANT_SELECTION_ENABLED", false),
+		ManagedAccountsEnabled:                  envBool("GATEWAY_MANAGED_ACCOUNTS_ENABLED", false),
+		TenantStatusCacheTTLSeconds:             envInt("GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS", DefaultTenantStatusCacheTTLSeconds),
+		AuditRetentionDays:                      envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
 
 		WebhooksEnabled:               envBool("GATEWAY_WEBHOOKS_ENABLED", false),
 		WebhooksMaxAttempts:           envInt("GATEWAY_WEBHOOKS_MAX_ATTEMPTS", 6),
@@ -3404,9 +3420,15 @@ func (c *Config) validateTenantGovernance() error {
 	if c.RateLimitDomainPerIP < 0 {
 		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_DOMAIN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitDomainPerIP)
 	}
+	if c.TenantInvitationNotesSelfServiceEnabled && !c.TenantInvitationNotesEnabled {
+		return errors.New("config: GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED needs GATEWAY_TENANT_INVITATION_NOTES_ENABLED")
+	}
 	if c.RepoDriver != "" && c.RepoDriver != "postgres" {
 		if c.SelfServiceTenantsEnabled {
 			return fmt.Errorf("config: GATEWAY_SELF_SERVICE_TENANTS_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
+		}
+		if c.TenantInvitationNotesEnabled {
+			return fmt.Errorf("config: GATEWAY_TENANT_INVITATION_NOTES_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
 		}
 		if c.TenantSelectionEnabled {
 			return fmt.Errorf("config: GATEWAY_TENANT_SELECTION_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)

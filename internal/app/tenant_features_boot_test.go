@@ -50,8 +50,9 @@ func TestNew_RefusesTenantSwitchesWithoutTheirStores(t *testing.T) {
 	built.Stop()
 
 	for name, on := range map[string]func(*config.Config){
-		"GATEWAY_TENANT_SELECTION_ENABLED":     func(c *config.Config) { c.TenantSelectionEnabled = true },
-		"GATEWAY_SELF_SERVICE_TENANTS_ENABLED": func(c *config.Config) { c.SelfServiceTenantsEnabled = true },
+		"GATEWAY_TENANT_SELECTION_ENABLED":        func(c *config.Config) { c.TenantSelectionEnabled = true },
+		"GATEWAY_SELF_SERVICE_TENANTS_ENABLED":    func(c *config.Config) { c.SelfServiceTenantsEnabled = true },
+		"GATEWAY_TENANT_INVITATION_NOTES_ENABLED": func(c *config.Config) { c.TenantInvitationNotesEnabled = true },
 		"GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS": func(c *config.Config) {
 			c.DefaultProjectAccessMode = "invite"
 			c.DefaultProjectAdmitTenantInvitations = true
@@ -75,7 +76,10 @@ func TestNew_RefusesTenantSwitchesWithoutTheirStores(t *testing.T) {
 }
 
 func TestCheckTenantFeatures_EachStoreIsRequired(t *testing.T) {
-	cfg := &config.Config{TenantSelectionEnabled: true, SelfServiceTenantsEnabled: true, DefaultProjectAdmitTenantInvitations: true}
+	cfg := &config.Config{
+		TenantSelectionEnabled: true, SelfServiceTenantsEnabled: true, DefaultProjectAdmitTenantInvitations: true,
+		TenantInvitationNotesEnabled: true,
+	}
 	require.NoError(t, checkTenantFeatures(governanceDeps(cfg), zap.NewNop()))
 	for name, drop := range map[string]func(*Deps){
 		"no invitation store": func(d *Deps) { d.InvitationStore = nil },

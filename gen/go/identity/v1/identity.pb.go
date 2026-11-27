@@ -14937,7 +14937,49 @@ type CreateTenantInvitationRequest struct {
 	// display_name is the managed account's name: required with
 	// account_username, plain text, at most 100 characters, with no control or
 	// invisible formatting characters.
-	DisplayName   string `protobuf:"bytes,6,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	DisplayName string `protobuf:"bytes,6,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	// note is optional plain text the invitation email shows, labelled as a
+	// note from the administrator who sent it and set apart from the rest of
+	// the email; empty (or only whitespace) sends the email without one. The
+	// project must allow notes (tenants.invitation_notes in its config_json,
+	// or GATEWAY_TENANT_INVITATION_NOTES_ENABLED for the default project), and
+	// a tenant a user created (CreateTenant) attaches one only where the
+	// project allows that too (tenants.invitation_notes_self_service, or
+	// GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED):
+	// FAILED_PRECONDITION otherwise.
+	// The note and each of its lines are trimmed and a CRLF break is read as
+	// LF. INVALID_ARGUMENT for a note longer than 280 characters, of more than
+	// 4 lines, with a blank line, or with a control character other than the
+	// line break or an invisible formatting character (a bidirectional control
+	// among them). The rest is judged on the note folded: the zero-width joiner
+	// and non-joiner dropped, NFKC applied (fullwidth and mathematical letters
+	// read as the letters they imitate), lower-cased, a fullwidth full stop read
+	// as ".", and an ideographic or halfwidth ideographic full stop read as "."
+	// unless a Chinese, Japanese or Korean character is on each side of it,
+	// where it ends a sentence. INVALID_ARGUMENT for a note with:
+	//   - "<", ">", "](" or "://";
+	//   - an ASCII letter, then any ASCII letters, digits, "+", "." or "-",
+	//     then ":" directly followed by a character other than a space: every
+	//     URL scheme, so "mailto:x", "skype:x" and "example:8443";
+	//   - a "." with a letter, mark or number of any script on each side: every
+	//     domain and dotted IPv4 address, and also "e.g", "v1.2", "Node.js" and
+	//     two sentences with no space between them;
+	//   - seven or more digits with only spaces, "-", ".", "(", ")" or "+"
+	//     between them: a phone number, and also a date such as 2026-11-27;
+	//   - an "@" anywhere but in a plain ASCII email address.
+	//
+	// A plain ASCII email address, recognised in the note as typed, is the one
+	// exemption, from the "." and "@" rules only: a local part of ASCII letters,
+	// digits, "_", "+" and "-" with no dot, "@", and a domain of two or more
+	// dot-separated labels of ASCII letters, digits and "-", the last of two or
+	// more letters. So "Write to jane@example.com." is allowed, while
+	// "jane.doe@example.com", "www.example.com@example.org" and an address
+	// written with a fullwidth at sign or full stop are refused.
+	// A caller who is not an owner or admin of the tenant is PERMISSION_DENIED
+	// before any of these checks. The note is not stored: a resend is a new
+	// CreateTenantInvitation call, which carries its own note. A note goes only
+	// on an ordinary invitation: INVALID_ARGUMENT with account_username.
+	Note          string `protobuf:"bytes,7,opt,name=note,proto3" json:"note,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -15010,6 +15052,13 @@ func (x *CreateTenantInvitationRequest) GetAccountDomain() string {
 func (x *CreateTenantInvitationRequest) GetDisplayName() string {
 	if x != nil {
 		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *CreateTenantInvitationRequest) GetNote() string {
+	if x != nil {
+		return x.Note
 	}
 	return ""
 }
@@ -26980,14 +27029,15 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x10is_managed_setup\x18\n" +
 	" \x01(\bR\x0eisManagedSetup\x12'\n" +
 	"\x0faccount_address\x18\v \x01(\tR\x0eaccountAddress\x12\x17\n" +
-	"\auser_id\x18\f \x01(\tR\x06userId\"\xdb\x01\n" +
+	"\auser_id\x18\f \x01(\tR\x06userId\"\xef\x01\n" +
 	"\x1dCreateTenantInvitationRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
 	"\x04role\x18\x03 \x01(\tR\x04role\x12)\n" +
 	"\x10account_username\x18\x04 \x01(\tR\x0faccountUsername\x12%\n" +
 	"\x0eaccount_domain\x18\x05 \x01(\tR\raccountDomain\x12!\n" +
-	"\fdisplay_name\x18\x06 \x01(\tR\vdisplayName\"Z\n" +
+	"\fdisplay_name\x18\x06 \x01(\tR\vdisplayName\x12\x12\n" +
+	"\x04note\x18\a \x01(\tR\x04note\"Z\n" +
 	"\x1cManagedAccountRefusedDetails\x12:\n" +
 	"\x06reason\x18\x01 \x01(\x0e2\".identity.v1.ManagedAccountRefusalR\x06reason\"v\n" +
 	"\x1cCheckManagedAddressesRequest\x12\x1b\n" +

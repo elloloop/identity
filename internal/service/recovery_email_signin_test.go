@@ -223,7 +223,7 @@ func (f *recoveryEmailFixture) heldGrants(userID string, session SessionSignIn) 
 			return err
 		},
 		"CreateTenantInvitation": func() error {
-			_, err := members.CreateTenantInvitation(f.ctx, userID, session, "tenant-1", "invitee@example.org", RoleAdmin)
+			_, err := members.CreateTenantInvitation(f.ctx, userID, session, "tenant-1", "invitee@example.org", RoleAdmin, "")
 			return err
 		},
 		"RevokeTenantInvitation": func() error {

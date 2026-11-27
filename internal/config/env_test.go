@@ -564,6 +564,42 @@ func TestSelfServiceTenantsEnabled_DefaultsOff(t *testing.T) {
 	}
 }
 
+// Invitation notes are opt-in for the default project.
+func TestTenantInvitationNotesEnabled_DefaultsOff(t *testing.T) {
+	t.Setenv("GATEWAY_TENANT_INVITATION_NOTES_ENABLED", "")
+	if Load().TenantInvitationNotesEnabled {
+		t.Fatal("invitation notes must default off")
+	}
+	t.Setenv("GATEWAY_TENANT_INVITATION_NOTES_ENABLED", "true")
+	if !Load().TenantInvitationNotesEnabled {
+		t.Fatal("GATEWAY_TENANT_INVITATION_NOTES_ENABLED=true must turn them on")
+	}
+}
+
+// Notes on the default project's self-service tenants are a second opt-in,
+// and one that needs the first: alone it is refused at boot.
+func TestTenantInvitationNotesSelfServiceEnabled(t *testing.T) {
+	t.Setenv("GATEWAY_TENANT_INVITATION_NOTES_ENABLED", "")
+	t.Setenv("GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED", "")
+	if Load().TenantInvitationNotesSelfServiceEnabled {
+		t.Fatal("notes on self-service tenants must default off")
+	}
+
+	t.Setenv("GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED", "true")
+	c := Load()
+	if !c.TenantInvitationNotesSelfServiceEnabled {
+		t.Fatal("GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED=true must turn them on")
+	}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED needs GATEWAY_TENANT_INVITATION_NOTES_ENABLED") {
+		t.Fatalf("the self-service extension alone must be refused, got %v", err)
+	}
+
+	t.Setenv("GATEWAY_TENANT_INVITATION_NOTES_ENABLED", "true")
+	if err := Load().Validate(); err != nil && strings.Contains(err.Error(), "INVITATION_NOTES") {
+		t.Fatalf("both switches together must be accepted, got %v", err)
+	}
+}
+
 func TestTenantSenderAndDomainLimits(t *testing.T) {
 	c := &Config{}
 	if got := c.TenantInvitationInviterLimit(); got != DefaultTenantInvitationMaxPerInviter {
@@ -655,8 +691,9 @@ func TestTenantSenderAndDomainLimits(t *testing.T) {
 // their RPCs could only answer UNIMPLEMENTED.
 func TestTenantFeaturesNeedPostgres(t *testing.T) {
 	for name, set := range map[string]func(*Config){
-		"GATEWAY_SELF_SERVICE_TENANTS_ENABLED": func(c *Config) { c.SelfServiceTenantsEnabled = true },
-		"GATEWAY_TENANT_SELECTION_ENABLED":     func(c *Config) { c.TenantSelectionEnabled = true },
+		"GATEWAY_SELF_SERVICE_TENANTS_ENABLED":    func(c *Config) { c.SelfServiceTenantsEnabled = true },
+		"GATEWAY_TENANT_SELECTION_ENABLED":        func(c *Config) { c.TenantSelectionEnabled = true },
+		"GATEWAY_TENANT_INVITATION_NOTES_ENABLED": func(c *Config) { c.TenantInvitationNotesEnabled = true },
 		"GATEWAY_MANAGED_ACCOUNTS_ENABLED": func(c *Config) {
 			c.ManagedAccountsEnabled = true
 			c.RevocationMode = RevocationModeSession

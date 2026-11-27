@@ -459,6 +459,104 @@ RestoreTenantMember(tenant_id, user_id)
     suspended in the tenant cannot accept one
     (<code>PERMISSION_DENIED</code>; the invitation stays open).
   </p>
+  <p id="invitation-notes">
+    An invitation may carry a short plain-text <code>note</code>, such as
+    "Your mail address will be jane@example.com", which its email shows
+    labelled as a note from the administrator who invited the recipient, set
+    apart from the rest of the email: quoted in the text part, and escaped in
+    a block of its own in the HTML part. It is off by default; the Project
+    turns it on in its <code>config_json</code> (the default Project takes it
+    from <code>GATEWAY_TENANT_INVITATION_NOTES_ENABLED</code>):
+  </p>
+  <Code code={`{ "tenants": { "invitation_notes": true } }`} lang="json" />
+  <p>
+    That covers the tenants an operator made or that formed from a verified
+    domain. A tenant made through <code>CreateTenant</code> is another matter:
+    its owners and admins are whoever signed up, not people the Project vetted,
+    which is why the email never shows such a tenant's name. A Project that
+    wants their notes too turns on a second setting, which needs the first (a
+    config with only the second is refused when it is written or loaded); the
+    default Project takes it from
+    <code>GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED</code>, which
+    likewise needs <code>GATEWAY_TENANT_INVITATION_NOTES_ENABLED</code>:
+  </p>
+  <Code code={`{ "tenants": { "invitation_notes": true, "invitation_notes_self_service": true } }`} lang="json" />
+  <p>
+    Turning it on accepts that a person the Project never vetted can put a
+    note, validated as below and so short and link-free, in an email the
+    service sends under its own name. The note is still labelled as one from
+    the administrator who invited the recipient, and it is the only text such
+    a tenant contributes: its name stays out of the email.
+  </p>
+  <p>
+    Without the first setting, or on a tenant made through
+    <code>CreateTenant</code> without the second, a note is
+    <code>FAILED_PRECONDITION</code>; an empty one (or only whitespace) sends
+    the email exactly as without the field. The note travels in an email the
+    service sends under its own name, so it is kept short and unable to carry
+    a link. The note and each of its lines are trimmed, and a CRLF break is
+    read as LF; it is then <code>INVALID_ARGUMENT</code> when it is longer
+    than 280 characters, has more than 4 lines or a blank line, or carries a
+    control character other than the line break or an invisible formatting
+    character (a bidirectional control among them; the zero-width joiner and
+    non-joiner that scripts and emoji need are allowed).
+  </p>
+  <p>
+    The rest is judged by classes of character, not by what a link looks
+    like, on the note folded: the zero-width joiner and non-joiner dropped,
+    NFKC applied (fullwidth, circled and mathematical letters read as the
+    letters they imitate), lower-cased, a fullwidth full stop read as
+    <code>.</code>, and an ideographic or halfwidth ideographic full stop read
+    as <code>.</code> unless a Chinese, Japanese or Korean character is on
+    each side of it, where it ends a sentence: two Japanese sentences joined
+    by one pass, while <code>ここ。com</code> and
+    <code>例子。evil。com</code> are refused. A domain written wholly in CJK
+    with an ideographic full stop between its labels is therefore not
+    refused. A note is <code>INVALID_ARGUMENT</code> when it holds:
+  </p>
+  <ul>
+    <li><code>&lt;</code>, <code>&gt;</code>, <code>](</code> or <code>://</code>;</li>
+    <li>
+      an ASCII letter, then any ASCII letters, digits, <code>+</code>,
+      <code>.</code> or <code>-</code>, then <code>:</code> directly followed
+      by a character other than a space: every URL scheme, listed anywhere or
+      not (<code>mailto:x</code>, <code>skype:x</code>), and a host and port
+      (<code>example:8443</code>);
+    </li>
+    <li>
+      a <code>.</code> with a letter, mark or number of any script on each
+      side: every domain and dotted IPv4 address, whatever follows it
+      (<code>example.com+login</code>, <code>example.com.1</code>), and also
+      <code>e.g</code>, <code>v1.2</code>, <code>Node.js</code> and two
+      sentences with no space between them;
+    </li>
+    <li>
+      seven or more digits with only spaces, <code>-</code>, <code>.</code>,
+      <code>(</code>, <code>)</code> or <code>+</code> between them: a phone
+      number, and also a date such as <code>2026-11-27</code>;
+    </li>
+    <li>an <code>@</code> anywhere but in a plain ASCII email address.</li>
+  </ul>
+  <p>
+    A plain ASCII email address is the one exemption, from the
+    <code>.</code> and <code>@</code> rules only, recognised in the note as
+    typed rather than as folded: a local part of ASCII letters, digits,
+    <code>_</code>, <code>+</code> and <code>-</code> with no dot,
+    <code>@</code>, and a domain of two or more dot-separated labels of ASCII
+    letters, digits and <code>-</code>, the last of two or more letters. So
+    <code>jane@example.com</code> is allowed, while
+    <code>jane.doe@example.com</code>,
+    <code>www.example.com@example.org</code> and an address written with a
+    fullwidth or small at sign, or a fullwidth dot, are refused. The rules
+    refuse some ordinary text so that nothing a mail client links can pass.
+    A caller who is not an
+    owner or admin of the tenant is <code>PERMISSION_DENIED</code> before any
+    of these checks, so a refusal tells no one else whether the Project
+    allows notes. A note goes only on an ordinary invitation: with
+    <code>account_username</code> it is <code>INVALID_ARGUMENT</code>. The
+    note is not stored: a resend is a new
+    <code>CreateTenantInvitation</code>, which carries its own note.
+  </p>
   <p>
     An owner or admin withdraws a pending invitation, and its link stops
     working at once:

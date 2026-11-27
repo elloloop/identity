@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -434,6 +435,70 @@ func TestCreateTenantInvitation_Handler_ReportsEmailSendStatus(t *testing.T) {
 	}
 }
 
+// capturingMailer records the messages it is handed and accepts each.
+type capturingMailer struct{ sent []email.Message }
+
+func (m *capturingMailer) Send(_ context.Context, msg email.Message) error {
+	m.sent = append(m.sent, msg)
+	return nil
+}
+
+// The request's note reaches the invitation email where the project allows
+// notes, on a tenant a user created only where it allows them there too, and
+// each refusal of one surfaces with its code: FAILED_PRECONDITION where notes
+// are not allowed, INVALID_ARGUMENT for a note that reads as a link.
+func TestCreateTenantInvitation_Handler_Note(t *testing.T) {
+	const note = "Your mail address will be jane@example.com"
+	notes := service.ProjectTenantsConfig{InvitationNotes: true}
+	both := service.ProjectTenantsConfig{InvitationNotes: true, InvitationNotesSelfService: true}
+	for _, tc := range []struct {
+		name      string
+		policy    service.ProjectTenantsConfig
+		createdBy string
+		note      string
+		want      connect.Code
+	}{
+		{"allowed", notes, "", note, 0},
+		{"project does not allow notes", service.ProjectTenantsConfig{}, "", note, connect.CodeFailedPrecondition},
+		{"self-service tenant", notes, "owner-1", note, connect.CodeFailedPrecondition},
+		{"self-service tenant where allowed", both, "owner-1", note, 0},
+		{"link", notes, "", "Sign in at https://example.test", connect.CodeInvalidArgument},
+		{"link on a self-service tenant where allowed", both, "owner-1", "Sign in at https://example.test", connect.CodeInvalidArgument},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			members := &connectMembershipStore{member: &service.TenantMembership{
+				Role: service.RoleOwner, Status: service.MembershipStatusActive,
+			}}
+			tenants := &connectTenantStore{tenant: &service.Tenant{ID: "tenant-1", Status: service.TenantStatusClaimed, CreatedBy: tc.createdBy}}
+			mailer := &capturingMailer{}
+			svc := service.NewMembershipService(newConnectInvitationStore(), members, tenants,
+				&connectUserDirectory{}, mailer, true, &config.Config{}, zap.NewNop())
+			srv := startMembershipServerInScope(t, svc, &service.ProjectScope{ProjectID: testProjectID, Tenants: tc.policy})
+
+			_, err := srv.client.CreateTenantInvitation(context.Background(),
+				withAuth(&identitypb.CreateTenantInvitationRequest{
+					TenantId: "tenant-1", Email: "invitee@acme.com", Role: service.RoleMember, Note: tc.note,
+				}, "owner-1"))
+			if tc.want != 0 {
+				requireCode(t, err, tc.want)
+				if len(mailer.sent) != 0 {
+					t.Fatalf("a refused invitation sent %d emails", len(mailer.sent))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateTenantInvitation: %v", err)
+			}
+			if len(mailer.sent) != 1 {
+				t.Fatalf("emails sent = %d, want 1", len(mailer.sent))
+			}
+			if msg := mailer.sent[0]; !strings.Contains(msg.Text, "> "+note) || !strings.Contains(msg.HTML, note) {
+				t.Fatalf("the email does not carry the note:\n%s\n%s", msg.Text, msg.HTML)
+			}
+		})
+	}
+}
+
 // ── ListTenantMembers happy path ────────────────────────────────────────
 
 func TestListTenantMembers_Handler(t *testing.T) {
@@ -813,6 +878,25 @@ func TestCreateTenantInvitation_ManagedFieldsRouteToTheManagedSetup(t *testing.T
 		_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(req, "u1"))
 		requireCode(t, err, connect.CodeUnimplemented)
 	}
+}
+
+// A managed account's set-up email has no place for a note, so a request
+// naming any managed-account field with a note is refused before it is routed
+// rather than sent without the note; a note of only whitespace is none.
+func TestCreateTenantInvitation_NoteRefusedOnManagedSetup(t *testing.T) {
+	t.Parallel()
+	srv := startMembershipServer(t, newMembershipSvc(nil, nil, nil, nil))
+	for _, req := range []*identitypb.CreateTenantInvitationRequest{
+		{TenantId: "t", Email: "a@example.com", AccountUsername: "ann", Note: "Welcome aboard"},
+		{TenantId: "t", Email: "a@example.com", AccountDomain: "acme.example.com", Note: "Welcome aboard"},
+		{TenantId: "t", Email: "a@example.com", DisplayName: "Ann", Note: "Welcome aboard"},
+	} {
+		_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(req, "u1"))
+		requireCode(t, err, connect.CodeInvalidArgument)
+	}
+	_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(
+		&identitypb.CreateTenantInvitationRequest{TenantId: "t", Email: "a@example.com", AccountUsername: "ann", Note: " \n\t"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
 }
 
 func TestInvitationToProto_ManagedSetupLink(t *testing.T) {

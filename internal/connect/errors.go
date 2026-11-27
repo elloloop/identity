@@ -139,6 +139,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAccountMergeDisabled),
 		errors.Is(err, service.ErrAgentsDisabled),
 		errors.Is(err, service.ErrSelfServiceTenantsDisabled),
+		errors.Is(err, service.ErrInvitationNoteNotAllowed),
 		errors.Is(err, service.ErrTenantSelectionDisabled),
 		errors.Is(err, service.ErrAgentOAuthDisabled),
 		errors.Is(err, service.ErrTeammateKeysDisabled),

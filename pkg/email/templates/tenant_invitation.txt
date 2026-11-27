@@ -4,7 +4,10 @@
 
 {{.InviterName}} has invited you to join {{if .TenantName}}{{.TenantName}}{{else}}a team{{end}} as a {{.Role}}. Use the link below to accept and become a member.
 
-{{.Link}}
+{{if .NoteLines}}A note from the administrator who invited you:
+{{range .NoteLines}}> {{.}}
+{{end}}
+{{end}}{{.Link}}
 
 This invitation expires in {{.ExpiresIn}}. If you weren't expecting it, you can safely ignore this email.
 {{if .SupportEmail}}

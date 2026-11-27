@@ -272,3 +272,90 @@ func TestRedesign_TenantInvitation_TokenHandedOutBeforeMailIsConfigured(t *testi
 		t.Fatalf("membership = %+v, want the invitee in the inviting tenant", got)
 	}
 }
+
+// TestRedesign_TenantInvitation_NoteFollowsTheServerSettings drives a note
+// through the whole stack against a real Postgres. The default project takes
+// its invitation-note switches from GATEWAY_TENANT_INVITATION_NOTES_ENABLED
+// and GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED: with neither, a
+// note is FAILED_PRECONDITION; with the first, an operator tenant's owner
+// sends one and a self-service tenant's owner is refused; with both, the
+// self-service tenant's owner sends one too, still validated. Nothing is sent
+// on a refusal.
+func TestRedesign_TenantInvitation_NoteFollowsTheServerSettings(t *testing.T) {
+	const note = "Your mail address will be jane@example.com"
+	invite := func(h *RedesignHarness, owner ownerCaller, text string) error {
+		invitee := fmt.Sprintf("note-%d@example-corp.com", time.Now().UnixNano())
+		h.Mailer.Reset()
+		_, err := owner.client.CreateTenantInvitation(context.Background(), connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+			TenantId: owner.tenantID, Email: invitee, Role: service.RoleMember, Note: text,
+		}))
+		if err != nil {
+			if sent := h.Mailer.Sent(); len(sent) != 0 {
+				t.Fatalf("a refused invitation sent %d emails", len(sent))
+			}
+			return err
+		}
+		sent := h.Mailer.Sent()
+		if len(sent) != 1 || sent[0].To != invitee {
+			t.Fatalf("emails = %+v, want the one invitation", sent)
+		}
+		if !strings.Contains(sent[0].Text, "> "+text) || !strings.Contains(sent[0].HTML, text) {
+			t.Fatalf("the invitation does not carry the note:\n%s", sent[0].Text)
+		}
+		return nil
+	}
+	codeOf := func(err error) connect.Code {
+		if err == nil {
+			return 0
+		}
+		return connect.CodeOf(err)
+	}
+	for _, tc := range []struct {
+		name                       string
+		notes, selfService         bool
+		wantOperator, wantSelfMade connect.Code
+	}{
+		{"notes off", false, false, connect.CodeFailedPrecondition, connect.CodeFailedPrecondition},
+		{"notes on", true, false, 0, connect.CodeFailedPrecondition},
+		{"notes on self-service tenants too", true, true, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := startRedesignHarnessWith(t, func(c *config.Config) {
+				c.TenantInvitationNotesEnabled = tc.notes
+				c.TenantInvitationNotesSelfServiceEnabled = tc.selfService
+			})
+			if err := invite(h, signupOwner(t, h, "note-operator"), note); codeOf(err) != tc.wantOperator {
+				t.Fatalf("operator tenant: %v, want %v", err, tc.wantOperator)
+			}
+			selfMade := selfServiceOwner(t, h, "note-self-service")
+			if err := invite(h, selfMade, note); codeOf(err) != tc.wantSelfMade {
+				t.Fatalf("self-service tenant: %v, want %v", err, tc.wantSelfMade)
+			}
+			if err := invite(h, selfMade, "Sign in at example.com"); connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("a link on a self-service tenant: %v, want InvalidArgument", err)
+			}
+		})
+	}
+}
+
+// selfServiceOwner is signupOwner's caller made the owner of a second tenant,
+// one recorded as created by them, as CreateTenant records it.
+func selfServiceOwner(t *testing.T, h *RedesignHarness, label string) ownerCaller {
+	t.Helper()
+	ctx := context.Background()
+	owner := signupOwner(t, h, label)
+	tenantID, err := h.Stores.tenants.CreateTenant(ctx, &service.Tenant{
+		ProjectID: h.ProjectID, Name: label + " tenant", Status: service.TenantStatusClaimed, CreatedBy: owner.userID,
+	})
+	if err != nil {
+		t.Fatalf("selfServiceOwner CreateTenant: %v", err)
+	}
+	if _, err := h.Stores.memberships.UpsertMembership(ctx, &service.TenantMembership{
+		ProjectID: h.ProjectID, TenantID: tenantID, UserID: owner.userID,
+		Source: service.MembershipSourceCreated, Role: service.RoleOwner, Status: service.MembershipStatusActive,
+	}); err != nil {
+		t.Fatalf("selfServiceOwner UpsertMembership: %v", err)
+	}
+	owner.tenantID = tenantID
+	return owner
+}

@@ -1,5 +1,82 @@
 # Upgrade guide
 
+## Next — an invitation may carry a note from its inviter: `CreateTenantInvitationRequest.note` (additive field; off by default behind `tenants.invitation_notes` / `GATEWAY_TENANT_INVITATION_NOTES_ENABLED`, and on self-service tenants behind `tenants.invitation_notes_self_service` / `GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED`; no migration)
+
+An administrator inviting someone had no way to tell them anything in the
+invitation itself, such as the address their account will use.
+
+- **`CreateTenantInvitationRequest.note`** (field 7) is optional plain text the
+  invitation email shows, labelled "A note from the administrator who invited
+  you" and set apart from the rest: quoted line by line in the text part, and
+  escaped in a block of its own in the HTML part, after the invitation and
+  before the link. An empty note, or one that is only whitespace, sends the
+  email byte for byte as before.
+- **Ordinary invitations only.** A note with `account_username` (a
+  managed account's set-up link) is `INVALID_ARGUMENT`.
+- **Off by default.** A project turns it on with
+  `{ "tenants": { "invitation_notes": true } }` in its `config_json`; the
+  default project takes it from `GATEWAY_TENANT_INVITATION_NOTES_ENABLED`
+  (default `false`), which, like the other tenant switches, needs the postgres
+  driver: the server refuses to boot with it on any other. Without it a note
+  is `FAILED_PRECONDITION`.
+- **Self-service tenants need a second opt-in.** A tenant made through
+  `CreateTenant` attaches a note only where the project also sets
+  `{ "tenants": { "invitation_notes": true, "invitation_notes_self_service": true } }`
+  (the default project: `GATEWAY_TENANT_INVITATION_NOTES_SELF_SERVICE_ENABLED`,
+  default `false`); otherwise `FAILED_PRECONDITION`, as its name never appears
+  in the email either. The second setting needs the first: a project config
+  with only `invitation_notes_self_service` is refused when written or loaded,
+  and the server refuses to boot with only the second env var. Turning it on
+  accepts that owners and admins the project never vetted, whoever signed up,
+  can put a validated, link-free note in an email the service sends under its
+  own name; the note is still labelled "A note from the administrator who
+  invited you", and the tenant's name stays out. Every note check follows
+  the owner-or-admin one, so only an owner or admin learns whether the
+  project allows notes or how the tenant was made.
+- **What a note may hold.** The note and each of its lines are trimmed and a
+  CRLF break is read as LF. Then `INVALID_ARGUMENT` for: more than 280
+  characters; more than 4 lines; a blank line; or a control character other
+  than the line break, or an invisible formatting character, bidirectional
+  controls among them (the zero-width joiner and non-joiner are allowed). The
+  rest is judged by classes of character on the note folded: the zero-width
+  joiner and non-joiner dropped, NFKC applied (fullwidth, circled and
+  mathematical letters read as the letters they imitate), lower-cased, a
+  fullwidth full stop (`．`) read as `.`, and an ideographic (`。`) or halfwidth
+  ideographic (`｡`) full stop read as `.` unless a Chinese, Japanese or Korean
+  character is on each side of it, where it ends a sentence: `ようこそ。明日`
+  passes, while `ここ。com` and `例子。evil。com` are refused. A domain written
+  wholly in CJK with `。` between its labels is therefore not refused.
+  `INVALID_ARGUMENT` for a note with:
+  - `<`, `>`, `](` or `://`;
+  - an ASCII letter, then any ASCII letters, digits, `+`, `.` or `-`, then `:`
+    directly followed by a character other than a space: every URL scheme,
+    listed anywhere or not (`mailto:x`, `skype:x`, `magnet:?x`), and a host
+    and port (`example:8443`);
+  - a `.` with a letter, mark or number of any script on each side: every
+    domain and dotted IPv4 address, whatever follows it (`example.com+login`,
+    `example.com.1`), and also `e.g`, `v1.2`, `Node.js` and two sentences with
+    no space between them;
+  - seven or more digits with only spaces, `-`, `.`, `(`, `)` or `+` between
+    them: a phone number, and also a date such as `2026-11-27`;
+  - an `@` anywhere but in a plain ASCII email address.
+
+  A plain ASCII email address is the one exemption, from the `.` and `@` rules
+  only, and is recognised in the note as typed, never as folded: a local part
+  of ASCII letters, digits, `_`, `+` and `-` with **no dot**, `@`, and a
+  domain of two or more dot-separated labels of ASCII letters, digits and `-`,
+  the last of two or more letters. So `Write to jane@example.com.` is allowed,
+  while `jane.doe@example.com`, `www.example.com@example.org` and an address
+  written with a fullwidth or small at sign, or a fullwidth dot, are refused.
+  These rules refuse some ordinary text (`e.g`, version numbers, dates, dotted
+  local parts) so that nothing a mail client links can pass. The refusal names the rule and does not repeat the note.
+- **Not stored.** The note is not kept with the invitation: a resend is a new
+  `CreateTenantInvitation`, which carries its own note. No log line carries it.
+- **Go API.** `MembershipService.CreateTenantInvitation` takes the note after
+  the role; `ProjectTenantsConfig` gains `InvitationNotes` and
+  `InvitationNotesSelfService`, and `config.Config`
+  `TenantInvitationNotesEnabled` and `TenantInvitationNotesSelfServiceEnabled`;
+  `service.ErrInvitationNoteNotAllowed` is the new refusal.
+
 ## Next — the default project can admit tenant-managed accounts: `GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS` and `GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE` (off by default; no migration)
 
 The environment-configured default project had no way to set

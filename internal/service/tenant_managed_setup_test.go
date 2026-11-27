@@ -252,7 +252,7 @@ func TestCreateTenantInvitation_RefusesTheTenantsManagedAddress(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, _ := managedMembershipFixture(&managedSetupsMock{holders: tc.holders})
-			_, err := f.svc.CreateTenantInvitation(managedScope(admitted()), mAdminID, SessionSignIn{}, mTestTenant, maAddress, RoleMember)
+			_, err := f.svc.CreateTenantInvitation(managedScope(admitted()), mAdminID, SessionSignIn{}, mTestTenant, maAddress, RoleMember, "")
 			require.ErrorIs(t, err, tc.want)
 			require.Zero(t, f.mailer.count())
 		})
@@ -260,7 +260,7 @@ func TestCreateTenantInvitation_RefusesTheTenantsManagedAddress(t *testing.T) {
 	f, _ := managedMembershipFixture(&managedSetupsMock{holders: func(_, _ string, a []string) (map[string]string, error) {
 		return map[string]string{a[0]: ManagedAddressHeldOutsideTheTenant}, nil
 	}})
-	_, err := f.svc.CreateTenantInvitation(managedScope(admitted()), mAdminID, SessionSignIn{}, mTestTenant, maAddress, RoleMember)
+	_, err := f.svc.CreateTenantInvitation(managedScope(admitted()), mAdminID, SessionSignIn{}, mTestTenant, maAddress, RoleMember, "")
 	require.NoError(t, err, "an address held outside the tenant is invited as any other")
 }
 

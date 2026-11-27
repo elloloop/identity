@@ -534,6 +534,32 @@ func TestParseProjectConfig_TenantsSelfService(t *testing.T) {
 	cfg, err = ParseProjectConfig(`{"cors":{"allowed_origins":["https://a.example.test"]}}`)
 	require.NoError(t, err)
 	assert.False(t, cfg.Tenants.SelfService)
+	assert.False(t, cfg.Tenants.InvitationNotes)
+}
+
+func TestParseProjectConfig_TenantsInvitationNotes(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"tenants":{"invitation_notes":true}}`)
+	require.NoError(t, err)
+	assert.True(t, cfg.Tenants.InvitationNotes)
+	assert.False(t, cfg.Tenants.SelfService, "each switch is its own")
+	assert.False(t, cfg.Tenants.InvitationNotesSelfService, "self-service tenants need their own opt-in")
+	require.NoError(t, cfg.Validate())
+
+	cfg, err = ParseProjectConfig(`{"tenants":{"invitation_notes":true,"invitation_notes_self_service":true}}`)
+	require.NoError(t, err)
+	assert.True(t, cfg.Tenants.InvitationNotes)
+	assert.True(t, cfg.Tenants.InvitationNotesSelfService)
+
+	// The self-service extension without notes could never take effect, so it
+	// is refused rather than kept inert.
+	_, err = ParseProjectConfig(`{"tenants":{"invitation_notes_self_service":true}}`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invitation_notes_self_service needs invitation_notes")
+	_, err = ParseProjectConfig(`{"tenants":{"invitation_notes":false,"invitation_notes_self_service":true}}`)
+	require.Error(t, err)
+	require.Error(t, ProjectConfig{Tenants: ProjectTenantsConfig{InvitationNotesSelfService: true}}.Validate())
 }
 
 func TestParseProjectConfig_OAuth_HostClients_Present(t *testing.T) {

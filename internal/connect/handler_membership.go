@@ -2,6 +2,8 @@ package connect
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"connectrpc.com/connect"
 
@@ -27,13 +29,17 @@ func (h *IdentityHandler) CreateTenantInvitation(
 	}
 	var created *service.CreatedInvitation
 	var err error
-	if m := req.Msg; m.GetAccountUsername() != "" || m.GetAccountDomain() != "" || m.GetDisplayName() != "" {
+	m := req.Msg
+	if m.GetAccountUsername() != "" || m.GetAccountDomain() != "" || m.GetDisplayName() != "" {
+		if strings.TrimSpace(m.GetNote()) != "" {
+			return nil, toConnectError(fmt.Errorf("%w: a note goes only on an ordinary invitation", service.ErrInvalidArgument))
+		}
 		created, err = h.members.CreateManagedSetupInvitation(ctx, userID, authenticatedSignIn(req.Header()), service.ManagedAccountRequest{
 			TenantID: m.GetTenantId(), Username: m.GetAccountUsername(), Domain: m.GetAccountDomain(),
 			DisplayName: m.GetDisplayName(), DeliveryEmail: m.GetEmail(), Role: m.GetRole(),
 		}, clientIP(req.Header()), clientUserAgent(req.Header()))
 	} else {
-		created, err = h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId, req.Msg.Email, req.Msg.Role)
+		created, err = h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), m.GetTenantId(), m.GetEmail(), m.GetRole(), m.GetNote())
 	}
 	if err != nil {
 		return nil, toConnectError(err)

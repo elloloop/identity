@@ -37,7 +37,7 @@ func newRevokeFixture(t *testing.T) *revokeFixture {
 	f.svc.WithAudit(audit.NewLogger(w, "test-tenant", nil))
 	f.svc.logger = zap.New(core)
 	f.seedAdmin(mTestProject, mTestTenant, mAdminID)
-	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleAdmin)
+	out, err := f.svc.CreateTenantInvitation(withProject(mTestProject), mAdminID, SessionSignIn{}, mTestTenant, mInvitee, RoleAdmin, "")
 	require.NoError(t, err)
 	f.users.put(mTestProject, mInviteeID, mInvitee)
 	return &revokeFixture{membershipFixture: f, audit: w, logs: logs, inv: out.Invitation, token: out.RawToken}
@@ -159,7 +159,7 @@ func TestRevokeTenantInvitation_AnotherTenantsOrUnknownInvitationIsNotFound(t *t
 	ctx := withProject(mTestProject)
 	const otherTenant, otherAdmin = "tenant-2", "user-admin-2"
 	f.seedAdmin(mTestProject, otherTenant, otherAdmin)
-	other, err := f.svc.CreateTenantInvitation(ctx, otherAdmin, SessionSignIn{}, otherTenant, "someone@acme.com", RoleMember)
+	other, err := f.svc.CreateTenantInvitation(ctx, otherAdmin, SessionSignIn{}, otherTenant, "someone@acme.com", RoleMember, "")
 	require.NoError(t, err)
 
 	_, err = f.svc.RevokeTenantInvitation(ctx, mAdminID, SessionSignIn{}, mTestTenant, other.Invitation.ID, "", "")

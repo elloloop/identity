@@ -1,0 +1,7 @@
+Hi jane,
+
+A tenant administrator has invited you to join a team as a admin. Use the link below to accept and become a member.
+
+https://auth.example.com/auth/accept-invitation?token=abc
+
+This invitation expires in 7 days. If you weren't expecting it, you can safely ignore this email.
