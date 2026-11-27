@@ -446,6 +446,57 @@ func issuerStillMayIssue(held map[string]*service.TenantMembership, link *servic
 	return nil
 }
 
+// setUpState is what CompleteManagedSetup read under its locks, besides the
+// link and the account.
+type setUpState struct {
+	now            int64
+	domainVerified bool
+	governed       bool
+	removed        bool
+}
+
+// setUpRefusal says why link cannot set account up now, or nil.
+func setUpRefusal(link *service.TenantInvitation, account *service.User, st setUpState) error {
+	switch {
+	case link.Status == service.InvitationStatusAccepted:
+		return service.ErrInvitationUsed
+	case link.Status == service.InvitationStatusExpired,
+		link.Status == service.InvitationStatusPending && link.ExpiresAtMs != 0 && link.ExpiresAtMs < st.now:
+		return service.ErrInvitationExpired
+	case link.Status != service.InvitationStatusPending,
+		account == nil,
+		account.Status != service.StatusInvited,
+		account.ManagedByTenantID != link.TenantID,
+		account.SetupEpoch != link.SetupEpoch:
+		return service.ErrManagedSetupStale
+	case !st.domainVerified:
+		return service.ErrManagedDomainUnverified
+	case !st.governed:
+		return fmt.Errorf("%w: the tenant cannot take members", service.ErrPermissionDenied)
+	case st.removed:
+		return service.ErrRemovedFromTenant
+	}
+	return nil
+}
+
+// keepOrGrantMembership leaves an active or suspended membership as it is,
+// makes one that has ended active again with its own role, and grants an
+// account with none the link's role.
+func keepOrGrantMembership(ctx context.Context, tx pgx.Tx, op string, link *service.TenantInvitation, held *service.TenantMembership) (*service.TenantMembership, error) {
+	if held != nil && (held.Status == service.MembershipStatusActive || held.Status == service.MembershipStatusSuspended) {
+		return held, nil
+	}
+	role := link.Role
+	if held != nil {
+		role = held.Role
+	}
+	if err := clearRemoval(ctx, tx, op, link.ProjectID, link.TenantID, link.UserID, service.MembershipSourceInvited); err != nil {
+		return nil, err
+	}
+	granted, _, err := grantIn(ctx, tx, op, link.ProjectID, link.TenantID, link.UserID, service.MembershipSourceInvited, role)
+	return granted, err
+}
+
 // CompleteManagedSetup implements service.ManagedSetupStore.
 func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.ManagedSetupCompletion) (*service.ManagedSetupCompleted, error) {
 	const op = "CompleteManagedSetup"
@@ -499,24 +550,8 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 	if link, err = lockInvitationRow(ctx, tx, c.ProjectID, link.ID); err != nil {
 		return nil, wrapPgErr(op+"(lock link)", err)
 	}
-	switch {
-	case link.Status == service.InvitationStatusAccepted:
-		return nil, service.ErrInvitationUsed
-	case link.Status == service.InvitationStatusExpired,
-		link.Status == service.InvitationStatusPending && link.ExpiresAtMs != 0 && link.ExpiresAtMs < now:
-		return nil, service.ErrInvitationExpired
-	case link.Status != service.InvitationStatusPending,
-		account == nil,
-		account.Status != service.StatusInvited,
-		account.ManagedByTenantID != link.TenantID,
-		account.SetupEpoch != link.SetupEpoch:
-		return nil, service.ErrManagedSetupStale
-	case !verified:
-		return nil, service.ErrManagedDomainUnverified
-	case !governed:
-		return nil, fmt.Errorf("%w: the tenant cannot take members", service.ErrPermissionDenied)
-	case removed:
-		return nil, service.ErrRemovedFromTenant
+	if err := setUpRefusal(link, account, setUpState{now: now, domainVerified: verified, governed: governed, removed: removed}); err != nil {
+		return nil, err
 	}
 	if err := issuerStillMayIssue(held, link, account.ID); err != nil {
 		return nil, err
@@ -532,18 +567,9 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 		RETURNING `+userColumns, c.ProjectID, account.ID, c.PasswordHash, service.StatusActive, now)); err != nil {
 		return nil, wrapPgErr(op+"(account)", err)
 	}
-	membership := held[account.ID]
-	if membership == nil || (membership.Status != service.MembershipStatusActive && membership.Status != service.MembershipStatusSuspended) {
-		role := link.Role
-		if membership != nil {
-			role = membership.Role
-		}
-		if err := clearRemoval(ctx, tx, op, c.ProjectID, link.TenantID, account.ID, service.MembershipSourceInvited); err != nil {
-			return nil, err
-		}
-		if membership, _, err = grantIn(ctx, tx, op, c.ProjectID, link.TenantID, account.ID, service.MembershipSourceInvited, role); err != nil {
-			return nil, err
-		}
+	membership, err := keepOrGrantMembership(ctx, tx, op, link, held[account.ID])
+	if err != nil {
+		return nil, err
 	}
 	accepted, err := scanInvitation(tx.QueryRow(ctx, `UPDATE tenant_invitations SET status = 'accepted', accepted_at_ms = $3
 		WHERE project_id = $1 AND id = $2 AND status = 'pending' AND setup_epoch = $4
