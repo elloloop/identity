@@ -40,9 +40,13 @@ invitation itself, such as the address their account will use.
   controls among them (the zero-width joiner and non-joiner are allowed). The
   rest is judged by classes of character on the note folded: the zero-width
   joiner and non-joiner dropped, NFKC applied (fullwidth, circled and
-  mathematical letters read as the letters they imitate), lower-cased, and an
-  ideographic (`。`), halfwidth ideographic (`｡`) or fullwidth (`．`) full stop
-  read as `.`. `INVALID_ARGUMENT` for a note with:
+  mathematical letters read as the letters they imitate), lower-cased, a
+  fullwidth full stop (`．`) read as `.`, and an ideographic (`。`) or halfwidth
+  ideographic (`｡`) full stop read as `.` unless a Chinese, Japanese or Korean
+  character is on each side of it, where it ends a sentence: `ようこそ。明日`
+  passes, while `ここ。com` and `例子。evil。com` are refused. A domain written
+  wholly in CJK with `。` between its labels is therefore not refused.
+  `INVALID_ARGUMENT` for a note with:
   - `<`, `>`, `](` or `://`;
   - an ASCII letter, then any ASCII letters, digits, `+`, `.` or `-`, then `:`
     directly followed by a character other than a space: every URL scheme,
@@ -51,7 +55,7 @@ invitation itself, such as the address their account will use.
   - a `.` with a letter, mark or number of any script on each side: every
     domain and dotted IPv4 address, whatever follows it (`example.com+login`,
     `example.com.1`), and also `e.g`, `v1.2`, `Node.js` and two sentences with
-    no space between them, Japanese or Chinese ones joined by `。` included;
+    no space between them;
   - seven or more digits with only spaces, `-`, `.`, `(`, `)` or `+` between
     them: a phone number, and also a date such as `2026-11-27`;
   - an `@` anywhere but in a plain ASCII email address.
@@ -64,8 +68,7 @@ invitation itself, such as the address their account will use.
   while `jane.doe@example.com`, `www.example.com@example.org` and an address
   written with a fullwidth or small at sign, or a fullwidth dot, are refused.
   These rules refuse some ordinary text (`e.g`, version numbers, dates, dotted
-  local parts, unspaced CJK sentences) so that nothing a mail client links can
-  pass. The refusal names the rule and does not repeat the note.
+  local parts) so that nothing a mail client links can pass. The refusal names the rule and does not repeat the note.
 - **Not stored.** The note is not kept with the invitation: a resend is a new
   `CreateTenantInvitation`, which carries its own note. No log line carries it.
 - **Go API.** `MembershipService.CreateTenantInvitation` takes the note after

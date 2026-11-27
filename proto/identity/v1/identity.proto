@@ -2331,17 +2331,17 @@ message CreateTenantInvitationRequest {
   // line break or an invisible formatting character (a bidirectional control
   // among them). The rest is judged on the note folded: the zero-width joiner
   // and non-joiner dropped, NFKC applied (fullwidth and mathematical letters
-  // read as the letters they imitate), lower-cased, and an ideographic,
-  // halfwidth ideographic or fullwidth full stop read as ".". INVALID_ARGUMENT
-  // for a note with:
+  // read as the letters they imitate), lower-cased, a fullwidth full stop read
+  // as ".", and an ideographic or halfwidth ideographic full stop read as "."
+  // unless a Chinese, Japanese or Korean character is on each side of it,
+  // where it ends a sentence. INVALID_ARGUMENT for a note with:
   //   - "<", ">", "](" or "://";
   //   - an ASCII letter, then any ASCII letters, digits, "+", "." or "-",
   //     then ":" directly followed by a character other than a space: every
   //     URL scheme, so "mailto:x", "skype:x" and "example:8443";
   //   - a "." with a letter, mark or number of any script on each side: every
   //     domain and dotted IPv4 address, and also "e.g", "v1.2", "Node.js" and
-  //     two sentences with no space between them, Japanese or Chinese ones
-  //     joined by an ideographic full stop included;
+  //     two sentences with no space between them;
   //   - seven or more digits with only spaces, "-", ".", "(", ")" or "+"
   //     between them: a phone number, and also a date such as 2026-11-27;
   //   - an "@" anywhere but in a plain ASCII email address.

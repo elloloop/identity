@@ -505,9 +505,14 @@ RestoreTenantMember(tenant_id, user_id)
     The rest is judged by classes of character, not by what a link looks
     like, on the note folded: the zero-width joiner and non-joiner dropped,
     NFKC applied (fullwidth, circled and mathematical letters read as the
-    letters they imitate), lower-cased, and an ideographic, halfwidth
-    ideographic or fullwidth full stop read as <code>.</code>. A note is
-    <code>INVALID_ARGUMENT</code> when it holds:
+    letters they imitate), lower-cased, a fullwidth full stop read as
+    <code>.</code>, and an ideographic or halfwidth ideographic full stop read
+    as <code>.</code> unless a Chinese, Japanese or Korean character is on
+    each side of it, where it ends a sentence: two Japanese sentences joined
+    by one pass, while <code>ここ。com</code> and
+    <code>例子。evil。com</code> are refused. A domain written wholly in CJK
+    with an ideographic full stop between its labels is therefore not
+    refused. A note is <code>INVALID_ARGUMENT</code> when it holds:
   </p>
   <ul>
     <li><code>&lt;</code>, <code>&gt;</code>, <code>](</code> or <code>://</code>;</li>
@@ -523,8 +528,7 @@ RestoreTenantMember(tenant_id, user_id)
       side: every domain and dotted IPv4 address, whatever follows it
       (<code>example.com+login</code>, <code>example.com.1</code>), and also
       <code>e.g</code>, <code>v1.2</code>, <code>Node.js</code> and two
-      sentences with no space between them, Japanese or Chinese ones joined by
-      an ideographic full stop included;
+      sentences with no space between them;
     </li>
     <li>
       seven or more digits with only spaces, <code>-</code>, <code>.</code>,

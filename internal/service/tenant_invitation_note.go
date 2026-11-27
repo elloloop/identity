@@ -83,7 +83,8 @@ func normalizeInvitationNote(note string) (string, error) {
 //     shape of every URL scheme, listed anywhere or not;
 //   - outside such an email address, a "." with a letter, mark or number on
 //     both sides, which every domain and dotted IPv4 address has; so are
-//     "e.g", "v1.2" and "Node.js", and two sentences with no space between;
+//     "e.g", "v1.2" and "Node.js", and two sentences with no space between,
+//     other than CJK ones joined by an ideographic full stop (foldNote);
 //   - seven or more digits with only spaces, "-", ".", "(", ")" or "+"
 //     between them, the shape of a phone number; so is a date such as
 //     "2026-11-27".
@@ -173,10 +174,28 @@ func noteEmailAddress(word string) bool {
 // writes fullwidth, circled and mathematical characters as the ones they
 // imitate, a fullwidth full stop as "." and a halfwidth ideographic one as
 // the ideographic full stop); lower-cased; and with the ideographic full
-// stop, which IDNA reads as a dot, written as one.
+// stop, which IDNA reads as a dot, written as one unless a CJK character
+// (isCJKRune) is on each side of it, where it ends a sentence instead.
 func foldNote(note string) string {
 	note = strings.NewReplacer("\u200c", "", "\u200d", "").Replace(note)
-	return strings.ReplaceAll(strings.ToLower(norm.NFKC.String(note)), "\u3002", ".")
+	runes := []rune(strings.ToLower(norm.NFKC.String(note)))
+	for i, r := range runes {
+		if r == ideographicFullStop && (i == 0 || i == len(runes)-1 || !isCJKRune(runes[i-1]) || !isCJKRune(runes[i+1])) {
+			runes[i] = '.'
+		}
+	}
+	return string(runes)
+}
+
+// ideographicFullStop is U+3002, which NFKC also makes of the halfwidth one.
+const ideographicFullStop = '\u3002'
+
+// isCJKRune reports whether r is a character of Chinese, Japanese or Korean
+// writing: of the Han, Hiragana, Katakana, Hangul or Bopomofo script, or the
+// prolonged sound mark, which Unicode assigns to no one script but which ends
+// Japanese words.
+func isCJKRune(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul, unicode.Bopomofo) || r == '\u30fc'
 }
 
 // noteSchemeRE matches the shape of a URL scheme and its colon.
