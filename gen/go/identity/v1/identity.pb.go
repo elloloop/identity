@@ -15422,13 +15422,12 @@ type GetTenantInvitationResponse struct {
 	// manages: the page shows a form that sets the account's password
 	// (SignUpWithTenantInvitation) instead of a sign-up or sign-in.
 	IsManagedSetup bool `protobuf:"varint,10,opt,name=is_managed_setup,json=isManagedSetup,proto3" json:"is_managed_setup,omitempty"`
-	// account_address, display_name and user_id describe the managed account
-	// the link sets up. They are set only while the invitation is pending and
-	// is the account's current set-up link; display_name is also withheld for
-	// a tenant made through self-service CreateTenant, as tenant_name is.
+	// account_address and display_name describe the managed account the link
+	// sets up. They are set only while the invitation is pending and is the
+	// account's current set-up link; display_name is also withheld for a
+	// tenant made through self-service CreateTenant, as tenant_name is.
 	AccountAddress string `protobuf:"bytes,11,opt,name=account_address,json=accountAddress,proto3" json:"account_address,omitempty"`
 	DisplayName    string `protobuf:"bytes,12,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	UserId         string `protobuf:"bytes,13,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -15543,13 +15542,6 @@ func (x *GetTenantInvitationResponse) GetAccountAddress() string {
 func (x *GetTenantInvitationResponse) GetDisplayName() string {
 	if x != nil {
 		return x.DisplayName
-	}
-	return ""
-}
-
-func (x *GetTenantInvitationResponse) GetUserId() string {
-	if x != nil {
-		return x.UserId
 	}
 	return ""
 }
@@ -27013,7 +27005,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\traw_token\x18\x02 \x01(\tR\brawToken\x12H\n" +
 	"\x11email_send_status\x18\x03 \x01(\x0e2\x1c.identity.v1.EmailSendStatusR\x0femailSendStatus\"2\n" +
 	"\x1aGetTenantInvitationRequest\x12\x14\n" +
-	"\x05token\x18\x01 \x01(\tR\x05token\"\xbf\x03\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\"\xa6\x03\n" +
 	"\x1bGetTenantInvitationResponse\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1f\n" +
 	"\vtenant_name\x18\x02 \x01(\tR\n" +
@@ -27028,8 +27020,7 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\x10is_managed_setup\x18\n" +
 	" \x01(\bR\x0eisManagedSetup\x12'\n" +
 	"\x0faccount_address\x18\v \x01(\tR\x0eaccountAddress\x12!\n" +
-	"\fdisplay_name\x18\f \x01(\tR\vdisplayName\x12\x17\n" +
-	"\auser_id\x18\r \x01(\tR\x06userId\"i\n" +
+	"\fdisplay_name\x18\f \x01(\tR\vdisplayName\"i\n" +
 	"!SignUpWithTenantInvitationRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +

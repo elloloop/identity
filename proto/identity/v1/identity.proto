@@ -2465,13 +2465,12 @@ message GetTenantInvitationResponse {
   // manages: the page shows a form that sets the account's password
   // (SignUpWithTenantInvitation) instead of a sign-up or sign-in.
   bool is_managed_setup = 10;
-  // account_address, display_name and user_id describe the managed account
-  // the link sets up. They are set only while the invitation is pending and
-  // is the account's current set-up link; display_name is also withheld for
-  // a tenant made through self-service CreateTenant, as tenant_name is.
+  // account_address and display_name describe the managed account the link
+  // sets up. They are set only while the invitation is pending and is the
+  // account's current set-up link; display_name is also withheld for a
+  // tenant made through self-service CreateTenant, as tenant_name is.
   string account_address = 11;
   string display_name = 12;
-  string user_id = 13;
 }
 
 // SignUpWithTenantInvitationRequest creates the account a tenant invitation
