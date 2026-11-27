@@ -813,8 +813,9 @@ RestoreTenantMember(tenant_id, user_id)
     owner or admin who suspends or removes a managed member stops the
     account's next sign-in and its next refresh, which spends the refresh
     token; restoring the membership lets it sign in again. Access tokens
-    already issued last until they expire. When the membership cannot be read
-    the account is refused too, and a refresh keeps its token for a retry.
+    already issued last until they expire. When the membership or the tenant
+    cannot be read the account is refused too, with <code>UNAVAILABLE</code>,
+    and a refresh keeps its token for a retry.
     Personal accounts are never read for. A managed account's access token
     carries the claim <code>managed: true</code>, a JSON boolean; a personal
     account's token has no <code>managed</code> claim. The claim says what the

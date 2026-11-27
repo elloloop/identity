@@ -119,6 +119,8 @@ func (p *agentOAuthProtocol) VerifyClient(ctx context.Context, r *op.Request[op.
 
 func oauthProtocolError(err error) error {
 	switch {
+	case errors.Is(err, service.ErrUnavailable):
+		return oidc.ErrServerError()
 	case errors.Is(err, service.ErrAgentOAuthGrant), errors.Is(err, service.ErrAgentOAuthRevision), errors.Is(err, service.ErrAccountNotActive), errors.Is(err, service.ErrEmailVerificationRequired), errors.Is(err, service.ErrIDVRequired), errors.Is(err, service.ErrDOBRequired), errors.Is(err, service.ErrAccessNotAllowed), errors.Is(err, service.ErrProductAgeRestricted):
 		return oidc.ErrInvalidGrant()
 	case errors.Is(err, service.ErrInvalidArgument):

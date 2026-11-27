@@ -46,7 +46,7 @@ func (s *TeammateKeyService) CreateHireGrant(ctx context.Context, callerID strin
 	if !isActivePerson(caller) {
 		return nil, refuse("caller_not_active_person")
 	}
-	if err := s.standing.refuse(ctx, project, caller); err != nil {
+	if err := s.standing.refuse(ctx, project, caller, "hire_grant"); err != nil {
 		if isManagedStandingUnread(err) {
 			return nil, err
 		}

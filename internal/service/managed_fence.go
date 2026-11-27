@@ -69,7 +69,7 @@ func (s *AuthService) fenceManagedCaller(ctx context.Context, userID string, sig
 	if user == nil {
 		return nil
 	}
-	return s.refuseManagedAccount(ctx, user)
+	return s.refuseManagedAccount(ctx, user, path)
 }
 
 // accessTokenExpiry is how long an access token issued to user lasts: an

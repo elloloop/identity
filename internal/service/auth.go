@@ -2378,7 +2378,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 	}
 	// A managed account holds a session only while it is set up and active
 	// in the tenant that manages it, on every path that mints one.
-	if err := s.refuseManagedAccount(ctx, user); err != nil {
+	if err := s.refuseManagedAccount(ctx, user, "session"); err != nil {
 		return "", "", err
 	}
 
@@ -2933,7 +2933,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 	// state, as a status refusal is: its token is spent and its session ends.
 	// One refused only because its standing could not be read keeps its token.
 	if statusErr == nil {
-		statusErr = s.refuseManagedAccount(ctx, timeoutUser)
+		statusErr = s.refuseManagedAccount(ctx, timeoutUser, "refresh")
 		if isManagedStandingUnread(statusErr) {
 			return nil, "", "", statusErr
 		}

@@ -82,7 +82,7 @@ func TestRefuseManagedAccount(t *testing.T) {
 				}
 				svc.WithManagedMemberships(tc.reader, tenants)
 			}
-			err := svc.refuseManagedAccount(managedScope(admitted()), &tc.user)
+			err := svc.refuseManagedAccount(managedScope(admitted()), &tc.user, "session")
 			if tc.want == nil {
 				require.NoError(t, err)
 			} else {
