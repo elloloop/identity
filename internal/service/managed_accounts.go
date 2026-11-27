@@ -41,6 +41,9 @@ const (
 	ManagedAddressFree                 = ""
 	ManagedAddressManagedByThis        = "managed_by_this_tenant"
 	ManagedAddressHeldOutsideTheTenant = "unavailable"
+	// ManagedAddressDomainUnverified is an address on a domain the tenant has
+	// not verified, which is not looked up at all.
+	ManagedAddressDomainUnverified = "domain_unverified"
 )
 
 // ManagedSetup asks ManagedSetupStore.CreateManagedSetup for a managed
@@ -186,29 +189,37 @@ type ManagedSetupStore interface {
 	// recovery email, ErrManagedAddressUnavailable. A domain not verified for
 	// the tenant is ErrManagedDomainUnverified; an inviter who is not an
 	// active owner or admin (or owner, where needed) is ErrPermissionDenied;
-	// limits refuse as CreateInvitation's do.
+	// a role other than member, admin or owner is ErrInvalidArgument; limits
+	// refuse as CreateInvitation's do.
 	CreateManagedSetup(ctx context.Context, setup ManagedSetup) (*ManagedSetupIssued, error)
 	// CompleteManagedSetup sets the account's password from its pending,
 	// unexpired, current link: the account becomes active with its email
-	// verified, set_up_at_ms is stamped if it was 0, its membership of the
-	// managing tenant is granted active with the link's role unless it is
-	// suspended, which it stays, and the link is accepted. An unknown link is
+	// verified, set_up_at_ms is stamped if it was 0, and the link is accepted.
+	// A membership the account already holds keeps its role and an active or
+	// suspended status, so a reset's link never undoes a role change made
+	// after the reset; one that has ended is made active again with its role,
+	// and an account with none is granted the link's role. An unknown link is
 	// ErrNotFound, an accepted one ErrInvitationUsed, an expired one
 	// ErrInvitationExpired, one revoked or replaced, or whose account is not
-	// waiting to be set up, ErrManagedSetupStale, and a domain the tenant no
-	// longer verifies ErrManagedDomainUnverified.
+	// waiting to be set up, ErrManagedSetupStale, a domain the tenant no
+	// longer verifies ErrManagedDomainUnverified, and a tenant that is not
+	// claimed or has no other active owner or admin ErrPermissionDenied.
 	CompleteManagedSetup(ctx context.Context, c ManagedSetupCompletion) (*ManagedSetupCompleted, error)
 	// RevokeManagedSetup revokes tenantID's managed set-up link
 	// invitationID, if pending, and, at any status of the link, deletes its
 	// account while that account is still invited and has never been set up,
-	// revoking its other pending links. An accepted link is
-	// ErrInvitationUsed; an id that is not one of the tenant's managed set-up
-	// links is ErrNotFound.
-	RevokeManagedSetup(ctx context.Context, projectID, tenantID, invitationID string) (*ManagedSetupRevoked, error)
+	// revoking its other pending links. by must be an active owner or admin of
+	// tenantID where the revoke is written (ErrPermissionDenied). An accepted
+	// link is ErrInvitationUsed; an id that is not one of the tenant's managed
+	// set-up links is ErrNotFound.
+	RevokeManagedSetup(ctx context.Context, projectID, tenantID, invitationID, by string) (*ManagedSetupRevoked, error)
 	// ManagedAddressHolders reports, for each canonical address, who holds
 	// it as tenantID sees it: ManagedAddressFree,
-	// ManagedAddressManagedByThis, or ManagedAddressHeldOutsideTheTenant.
-	// It locks nothing; the answer may be stale by the time it is read.
+	// ManagedAddressManagedByThis, or ManagedAddressHeldOutsideTheTenant. An
+	// address on a domain tenantID has not verified is
+	// ManagedAddressDomainUnverified and is not looked up, so no tenant learns
+	// who holds addresses on another's domain. It locks nothing; the answer
+	// may be stale by the time it is read.
 	ManagedAddressHolders(ctx context.Context, projectID, tenantID string, addresses []string) (map[string]string, error)
 }
 

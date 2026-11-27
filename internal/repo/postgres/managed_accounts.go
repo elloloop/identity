@@ -249,6 +249,9 @@ func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.
 	if role == "" {
 		role = service.RoleMember
 	}
+	if role != service.RoleMember && role != service.RoleAdmin && role != service.RoleOwner {
+		return nil, fmt.Errorf("%w: role %q", service.ErrInvalidArgument, role)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, wrapPgErr(op, err)
@@ -404,6 +407,24 @@ func lockInvitationRow(ctx context.Context, tx pgx.Tx, projectID, id string) (*s
 		FOR UPDATE`, projectID, id))
 }
 
+// tenantGovernable reports whether tenantID can still take a member: it is
+// claimed, and holds an active owner or admin other than userID. It holds the
+// tenant's row FOR SHARE, so a change of the tenant's status waits for tx;
+// the governors are held by the membership pass taken before it.
+func tenantGovernable(ctx context.Context, tx pgx.Tx, projectID, tenantID, userID string) (bool, error) {
+	var governed bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM tenant_memberships
+			WHERE project_id = $1 AND tenant_id = $2 AND user_id <> $3
+			  AND status = 'active' AND role IN ('owner', 'admin'))
+		FROM tenants WHERE project_id = $1 AND id = $2 AND status = $4
+		FOR SHARE OF tenants`, projectID, tenantID, userID, service.TenantStatusClaimed).Scan(&governed)
+	if noRows(err) {
+		return false, nil
+	}
+	return governed, err
+}
+
 // CompleteManagedSetup implements service.ManagedSetupStore.
 func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.ManagedSetupCompletion) (*service.ManagedSetupCompleted, error) {
 	const op = "CompleteManagedSetup"
@@ -442,9 +463,13 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 			return nil, wrapPgErr(op+"(domain)", err)
 		}
 	}
-	held, err := lockOwnersAnd(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
+	held, err := lockGovernorsAnd(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
 	if err != nil {
 		return nil, wrapPgErr(op+"(lock)", err)
+	}
+	governed, err := tenantGovernable(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
+	if err != nil {
+		return nil, wrapPgErr(op+"(tenant)", err)
 	}
 	if link, err = lockInvitationRow(ctx, tx, c.ProjectID, link.ID); err != nil {
 		return nil, wrapPgErr(op+"(lock link)", err)
@@ -463,6 +488,8 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 		return nil, service.ErrManagedSetupStale
 	case !verified:
 		return nil, service.ErrManagedDomainUnverified
+	case !governed:
+		return nil, fmt.Errorf("%w: the tenant cannot take members", service.ErrPermissionDenied)
 	}
 	firstSetUp := account.SetUpAtMs == 0
 	if account, err = scanUser(tx.QueryRow(ctx, `UPDATE users SET
@@ -476,11 +503,15 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 		return nil, wrapPgErr(op+"(account)", err)
 	}
 	membership := held[account.ID]
-	if membership == nil || membership.Status != service.MembershipStatusSuspended {
+	if membership == nil || (membership.Status != service.MembershipStatusActive && membership.Status != service.MembershipStatusSuspended) {
+		role := link.Role
+		if membership != nil {
+			role = membership.Role
+		}
 		if err := clearRemoval(ctx, tx, op, c.ProjectID, link.TenantID, account.ID, service.MembershipSourceInvited); err != nil {
 			return nil, err
 		}
-		if membership, _, err = grantIn(ctx, tx, op, c.ProjectID, link.TenantID, account.ID, service.MembershipSourceInvited, link.Role); err != nil {
+		if membership, _, err = grantIn(ctx, tx, op, c.ProjectID, link.TenantID, account.ID, service.MembershipSourceInvited, role); err != nil {
 			return nil, err
 		}
 	}
@@ -500,10 +531,10 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 }
 
 // RevokeManagedSetup implements service.ManagedSetupStore.
-func (s *InvitationStore) RevokeManagedSetup(ctx context.Context, projectID, tenantID, invitationID string) (*service.ManagedSetupRevoked, error) {
+func (s *InvitationStore) RevokeManagedSetup(ctx context.Context, projectID, tenantID, invitationID, by string) (*service.ManagedSetupRevoked, error) {
 	const op = "RevokeManagedSetup"
-	if projectID == "" || tenantID == "" || invitationID == "" {
-		return nil, fmt.Errorf("%w: project_id, tenant_id and invitation_id are required", service.ErrInvalidArgument)
+	if projectID == "" || tenantID == "" || invitationID == "" || by == "" {
+		return nil, fmt.Errorf("%w: project_id, tenant_id, invitation_id and by are required", service.ErrInvalidArgument)
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -527,8 +558,12 @@ func (s *InvitationStore) RevokeManagedSetup(ctx context.Context, projectID, ten
 	if err != nil {
 		return nil, wrapPgErr(op+"(account)", err)
 	}
-	if _, err := lockOwnersAnd(ctx, tx, projectID, tenantID, link.UserID); err != nil {
+	held, err := lockGovernorsAnd(ctx, tx, projectID, tenantID, link.UserID, by)
+	if err != nil {
 		return nil, wrapPgErr(op+"(lock)", err)
+	}
+	if _, err := governorOf(held, by); err != nil {
+		return nil, err
 	}
 	if link, err = lockInvitationRow(ctx, tx, projectID, link.ID); err != nil {
 		return nil, wrapPgErr(op+"(lock link)", err)
@@ -580,7 +615,29 @@ func (s *InvitationStore) ManagedAddressHolders(ctx context.Context, projectID, 
 	if len(folds) == 0 {
 		return out, nil
 	}
-	rows, err := s.pool.forProject(projectID).Query(ctx, `
+	pool := s.pool.forProject(projectID)
+	domainRows, err := pool.Query(ctx, `SELECT lower(domain) FROM domains
+		WHERE project_id = $1 AND tenant_id = $2 AND status = 'verified'`, projectID, tenantID)
+	if err != nil {
+		return nil, wrapPgErr(op+"(domains)", err)
+	}
+	verified, err := pgx.CollectRows(domainRows, pgx.RowTo[string])
+	if err != nil {
+		return nil, wrapPgErr(op+"(domains)", err)
+	}
+	folds = slices.DeleteFunc(folds, func(f string) bool {
+		if slices.Contains(verified, strings.ToLower(addressDomain(f))) {
+			return false
+		}
+		for _, a := range byFold[f] {
+			out[a] = service.ManagedAddressDomainUnverified
+		}
+		return true
+	})
+	if len(folds) == 0 {
+		return out, nil
+	}
+	rows, err := pool.Query(ctx, `
 		SELECT email_fold, managed_by_tenant_id = $3 FROM users
 		WHERE project_id = $1 AND email <> '' AND email_fold = ANY($2::text[])
 		UNION ALL

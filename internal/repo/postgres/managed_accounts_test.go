@@ -330,7 +330,7 @@ func TestRevokeManagedSetup(t *testing.T) {
 
 	first := f.create(ctx, t, f.setup("ann@acme.com", "x@example.com", f.other))
 	second := f.create(ctx, t, f.setup("ann@acme.com", "y@example.com", f.other))
-	revoked, err := f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, first.Invitation.ID)
+	revoked, err := f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, first.Invitation.ID, f.other)
 	require.NoError(t, err)
 	assert.False(t, revoked.Changed, "the first link was already replaced")
 	require.NotNil(t, revoked.DeletedUser)
@@ -339,7 +339,7 @@ func TestRevokeManagedSetup(t *testing.T) {
 	assert.Equal(t, service.InvitationStatusRevoked, f.invitation(ctx, t, second.Invitation).Status)
 
 	pending := f.create(ctx, t, f.setup("bob@acme.com", "x@example.com", f.other))
-	revoked, err = f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, pending.Invitation.ID)
+	revoked, err = f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, pending.Invitation.ID, f.other)
 	require.NoError(t, err)
 	assert.True(t, revoked.Changed)
 	assert.Equal(t, service.InvitationStatusRevoked, revoked.Invitation.Status)
@@ -348,16 +348,16 @@ func TestRevokeManagedSetup(t *testing.T) {
 	setUp := f.create(ctx, t, f.setup("cy@acme.com", "x@example.com", f.other))
 	_, err = f.complete(ctx, setUp.Invitation.ID)
 	require.NoError(t, err)
-	_, err = f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, setUp.Invitation.ID)
+	_, err = f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, setUp.Invitation.ID, f.other)
 	require.ErrorIs(t, err, service.ErrInvitationUsed)
 	assert.NotNil(t, f.readUser(ctx, t, setUp.User.ID))
 
-	_, err = f.is.RevokeManagedSetup(ctx, f.projectID, "another-tenant", setUp.Invitation.ID)
+	_, err = f.is.RevokeManagedSetup(ctx, f.projectID, "another-tenant", setUp.Invitation.ID, f.other)
 	require.ErrorIs(t, err, service.ErrNotFound)
 	ordinary := &service.TenantInvitation{ProjectID: f.projectID, TenantID: f.tenantID, TokenHash: managedToken(), Email: "guest@example.com", InvitedBy: f.other, ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli()}
 	_, err = f.is.CreateInvitation(ctx, ordinary, generousLimits())
 	require.NoError(t, err)
-	_, err = f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, ordinary.ID)
+	_, err = f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, ordinary.ID, f.other)
 	require.ErrorIs(t, err, service.ErrNotFound)
 }
 
@@ -368,18 +368,24 @@ func TestManagedAddressHolders(t *testing.T) {
 	f.create(ctx, t, f.setup("ann@acme.com", "x@example.com", f.other))
 	require.NoError(t, f.accounts.AddRecoveryEmail(ctx, &service.RecoveryEmail{UserID: f.user, Email: "spare@acme.com", VerifiedAt: time.Now().UnixMilli()}, 5))
 
-	got, err := f.is.ManagedAddressHolders(ctx, f.projectID, f.tenantID, []string{"ann@acme.com", "u1@acme.com", "spare@acme.com", "free@acme.com"})
+	now := time.Now()
+	_, err := f.accounts.CreateUser(ctx, &service.User{Email: "held@other.example.com", Status: "active", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+
+	got, err := f.is.ManagedAddressHolders(ctx, f.projectID, f.tenantID, []string{"ann@acme.com", "u1@acme.com", "spare@acme.com", "free@acme.com", "held@other.example.com", "free@other.example.com"})
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{
-		"ann@acme.com":   service.ManagedAddressManagedByThis,
-		"u1@acme.com":    service.ManagedAddressHeldOutsideTheTenant,
-		"spare@acme.com": service.ManagedAddressHeldOutsideTheTenant,
-		"free@acme.com":  service.ManagedAddressFree,
-	}, got)
+		"ann@acme.com":           service.ManagedAddressManagedByThis,
+		"u1@acme.com":            service.ManagedAddressHeldOutsideTheTenant,
+		"spare@acme.com":         service.ManagedAddressHeldOutsideTheTenant,
+		"free@acme.com":          service.ManagedAddressFree,
+		"held@other.example.com": service.ManagedAddressDomainUnverified,
+		"free@other.example.com": service.ManagedAddressDomainUnverified,
+	}, got, "an address off the tenant's verified domains is never looked up")
 
 	got, err = f.is.ManagedAddressHolders(ctx, f.projectID, "another-tenant", []string{"ann@acme.com"})
 	require.NoError(t, err)
-	assert.Equal(t, service.ManagedAddressHeldOutsideTheTenant, got["ann@acme.com"])
+	assert.Equal(t, service.ManagedAddressDomainUnverified, got["ann@acme.com"], "another tenant learns nothing about acme.com")
 }
 
 // TestSuspendManaged: a suspension ends the account's sessions, refresh
@@ -631,7 +637,7 @@ func TestManagedRace_RevokeAndSetUp(t *testing.T) {
 		errSetUp, errRevoke := runTogether(
 			func() error { _, err := f.complete(ctx, issued.Invitation.ID); return err },
 			func() error {
-				_, err := f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, issued.Invitation.ID)
+				_, err := f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, issued.Invitation.ID, f.other)
 				return err
 			},
 		)
@@ -685,4 +691,55 @@ func TestCreateInvitation_KeepsAPendingSetUpLink(t *testing.T) {
 	}, generousLimits())
 	require.ErrorIs(t, err, service.ErrManagedByThisTenant)
 	assert.Equal(t, service.InvitationStatusPending, f.invitation(ctx, t, issued.Invitation).Status)
+}
+
+// A set-up after a reset keeps the role the member holds now: a demotion
+// made after the reset is not undone by the link the reset issued.
+func TestManagedSetup_AfterResetKeepsTheCurrentRole(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	ann := f.setUpAccount(ctx, t, service.RoleAdmin)
+	reset, err := f.ms.ResetManaged(ctx, f.reset(ann, "x@example.com", f.other))
+	require.NoError(t, err)
+	require.Equal(t, service.RoleAdmin, reset.Invitation.Role)
+	_, _, err = f.ms.SetMemberRole(ctx, service.MemberRoleChange{ProjectID: f.projectID, TenantID: f.tenantID, UserID: ann, Role: service.RoleMember, By: f.other})
+	require.NoError(t, err)
+
+	done, err := f.complete(ctx, reset.Invitation.ID)
+	require.NoError(t, err)
+	assert.Equal(t, service.RoleMember, done.Membership.Role)
+	assert.Equal(t, service.RoleMember, f.membership(ctx, t, ann).Role)
+}
+
+// A set-up is refused once the tenant can no longer take members: it is
+// suspended, or no active owner or admin is left.
+func TestManagedSetup_CompleteNeedsAGovernedTenant(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	suspended := f.create(ctx, t, f.setup("ann@acme.com", "x@example.com", f.other))
+	_, err := f.accounts.pool.Exec(ctx, `UPDATE tenants SET status = $3 WHERE project_id = $1 AND id = $2`, f.projectID, f.tenantID, service.TenantStatusSuspended)
+	require.NoError(t, err)
+	_, err = f.complete(ctx, suspended.Invitation.ID)
+	require.ErrorIs(t, err, service.ErrPermissionDenied)
+	_, err = f.accounts.pool.Exec(ctx, `UPDATE tenants SET status = $3 WHERE project_id = $1 AND id = $2`, f.projectID, f.tenantID, service.TenantStatusClaimed)
+	require.NoError(t, err)
+
+	_, err = f.accounts.pool.Exec(ctx, `UPDATE tenant_memberships SET status = 'suspended' WHERE project_id = $1 AND tenant_id = $2 AND user_id = $3`, f.projectID, f.tenantID, f.other)
+	require.NoError(t, err)
+	_, err = f.complete(ctx, suspended.Invitation.ID)
+	require.ErrorIs(t, err, service.ErrPermissionDenied, "no active owner or admin is left")
+	assert.Equal(t, service.StatusInvited, f.readUser(ctx, t, suspended.User.ID).Status)
+}
+
+// Only an active owner or admin revokes a set-up link, and only a known role
+// is issued.
+func TestManagedSetup_RevokeAndRoleRefusals(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	issued := f.create(ctx, t, f.setup("ann@acme.com", "x@example.com", f.other))
+	_, err := f.is.RevokeManagedSetup(ctx, f.projectID, f.tenantID, issued.Invitation.ID, f.user)
+	require.ErrorIs(t, err, service.ErrPermissionDenied)
+	assert.NotNil(t, f.readUser(ctx, t, issued.User.ID))
+
+	s := f.setup("bob@acme.com", "x@example.com", f.other)
+	s.Role = "superuser"
+	_, err = f.is.CreateManagedSetup(ctx, s)
+	require.ErrorIs(t, err, service.ErrInvalidArgument)
 }
