@@ -78,7 +78,9 @@ for the tenant.
   unless `GATEWAY_SESSION_CACHE_TTL_SECONDS` is at most 60, the longest
   another replica may serve a revoked session.
 - **Set-up links stay set-up links.** A set-up link is never an open
-  invitation, never accepted (`AcceptTenantInvitation` answers `NOT_FOUND`),
+  invitation and is never accepted as an ordinary one: `AcceptTenantInvitation`
+  refuses another account, and a link still pending, with `PERMISSION_DENIED`,
+  and for an accepted link only restores its own account's membership. It is
   never revoked as an ordinary invitation, works only while its issuer may
   still issue it, and never brings back a member the tenant removed.
 - **Purge order.** Purging a managed account revokes its pending set-up
