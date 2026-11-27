@@ -13,18 +13,12 @@ import (
 // call may name.
 const maxManagedAddressChecks = 100
 
-// What CheckManagedAddresses found for an address, beside the holders
-// ManagedSetupStore.ManagedAddressHolders reports (ManagedAddressFree,
-// ManagedAddressManagedByThis, ManagedAddressHeldOutsideTheTenant).
-const (
-	// ManagedAddressDomainUnverified: the domain is not verified for the
-	// tenant, so nothing about the address was looked up.
-	ManagedAddressDomainUnverified = "domain_unverified"
-	// ManagedAddressInvalid: the username or the address is not valid, or
-	// the project holds no managed account there (its own account domain,
-	// or an address its deny layer refuses).
-	ManagedAddressInvalid = "invalid"
-)
+// ManagedAddressInvalid is what CheckManagedAddresses answers, beside the
+// holders ManagedSetupStore.ManagedAddressHolders reports, for an address
+// whose username or form is not valid, or where the project holds no
+// managed account (its own account domain, or an address its deny layer
+// refuses). Nothing about such an address is looked up.
+const ManagedAddressInvalid = "invalid"
 
 // ErrManagedAddressCheckLimited refuses a CheckManagedAddresses call past
 // the tenant's budget for the window
@@ -32,9 +26,9 @@ const (
 // CodeResourceExhausted.
 var ErrManagedAddressCheckLimited = errors.New("too many address checks for this tenant recently; try again later")
 
-// WithManagedAddressCheckBudget caps the CheckManagedAddresses calls made
-// against one tenant to perTenant per windowMs, and returns the service for
-// chaining. Without it the check is unimplemented.
+// WithManagedAddressCheckBudget caps the addresses CheckManagedAddresses
+// looks up for one tenant to perTenant per windowMs, and returns the service
+// for chaining. Without it the check is unimplemented.
 func (s *MembershipService) WithManagedAddressCheckBudget(perTenant int, windowMs int64) *MembershipService {
 	s.addressChecks = newProbeBudget(windowMs, perTenant)
 	return s
@@ -56,45 +50,48 @@ type ManagedAddressCheck struct {
 // managed account of tenantID could be created there now, writing nothing.
 // callerID must be an active owner or admin of a tenant that may be
 // governed. The server, project and tenant must admit managed accounts
-// (ErrManagedAccountsNotAdmitted). An address on a domain not verified for
-// tenantID is ManagedAddressDomainUnverified and nothing about it is looked
-// up, so no tenant can probe addresses on another tenant's domain; the rest
-// are answered as CreateTenantInvitation would decide them. Between 1 and
-// maxManagedAddressChecks addresses may be named (ErrInvalidArgument). The
-// answer is a point in time: creation decides again under its locks.
+// (ErrManagedAccountsNotAdmitted). An address that is not valid, or that the
+// project refuses, is ManagedAddressInvalid; every other is answered by
+// ManagedSetupStore.ManagedAddressHolders, which looks up only addresses on
+// domains verified for tenantID (the rest are
+// ManagedAddressDomainUnverified), against the request's project's accounts
+// and recovery emails, so no tenant can probe another tenant's domain.
+// Between 1 and maxManagedAddressChecks addresses may be named
+// (ErrInvalidArgument), and each address handed to the store spends one unit
+// of the tenant's budget for the window (ErrManagedAddressCheckLimited), on
+// top of the per-IP cap the server applies. The answer is a point in time:
+// creation decides again under its locks. Each refusal is logged as
+// managed_address_check_refused with its reason, and each answer as
+// managed_address_check with a count per status.
 func (s *MembershipService) CheckManagedAddresses(ctx context.Context, callerID, tenantID string, queries []ManagedAddressQuery) ([]ManagedAddressCheck, error) {
 	projectID, err := s.requireProject(ctx)
-	if err != nil {
+	tenantID = strings.TrimSpace(tenantID)
+	fields := []zap.Field{zap.String("project_id", projectID), zap.String("tenant_id", tenantID), zap.String("user_id", callerID)}
+	refuse := func(reason string, err error) ([]ManagedAddressCheck, error) {
+		s.logger.Info("managed_address_check_refused", append(fields, zap.String("reason", reason), zap.Error(err))...)
 		return nil, err
+	}
+	if err != nil {
+		return refuse("no_project", err)
 	}
 	if callerID == "" {
-		return nil, ErrUnauthenticated
+		return refuse("unauthenticated", ErrUnauthenticated)
 	}
-	if s.managedSetups == nil || s.domains == nil || s.addressChecks == nil {
-		return nil, ErrUnimplemented
+	if s.managedSetups == nil || s.addressChecks == nil {
+		return refuse("unavailable", ErrUnimplemented)
 	}
-	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
-		return nil, fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
+		return refuse("invalid_argument", fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument))
 	}
 	if len(queries) == 0 || len(queries) > maxManagedAddressChecks {
-		return nil, fmt.Errorf("%w: name between 1 and %d addresses", ErrInvalidArgument, maxManagedAddressChecks)
+		return refuse("invalid_argument", fmt.Errorf("%w: name between 1 and %d addresses", ErrInvalidArgument, maxManagedAddressChecks))
 	}
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
-		return nil, err
+		return refuse("not_permitted", err)
 	}
 	scope := ProjectScopeFromContext(ctx)
 	if err := requireManagedAccountsAdmitted(ctx, s.cfg, s.tenants, scope, tenantID); err != nil {
-		return nil, err
-	}
-	if !s.addressChecks.reserve(projectID+"|"+tenantID, s.nowFunc().UnixMilli()) {
-		s.logger.Info("managed_address_check_limited",
-			zap.String("project_id", projectID), zap.String("tenant_id", tenantID), zap.String("user_id", callerID))
-		return nil, ErrManagedAddressCheckLimited
-	}
-	verified, err := s.verifiedDomainsOf(ctx, projectID, tenantID)
-	if err != nil {
-		return nil, err
+		return refuse("policy", err)
 	}
 
 	out := make([]ManagedAddressCheck, len(queries))
@@ -103,22 +100,20 @@ func (s *MembershipService) CheckManagedAddresses(ctx context.Context, callerID,
 	for i, q := range queries {
 		out[i].Query = q
 		address, domain, err := managedAccountAddress(q.Username, q.Domain)
-		switch {
-		case err != nil:
+		if err != nil || refuseProjectAddress(s.cfg, scope, address, domain) != nil {
 			out[i].Status = ManagedAddressInvalid
-		case !verified[domain]:
-			out[i].Status = ManagedAddressDomainUnverified
-		case refuseProjectAddress(s.cfg, scope, address, domain) != nil:
-			out[i].Status = ManagedAddressInvalid
-		default:
-			addresses[i] = address
-			lookUp = append(lookUp, address)
+			continue
 		}
+		addresses[i] = address
+		lookUp = append(lookUp, address)
 	}
 	if len(lookUp) > 0 {
+		if !s.addressChecks.reserveUnits(projectID+"|"+tenantID, len(lookUp), s.nowFunc().UnixMilli()) {
+			return refuse("limited", ErrManagedAddressCheckLimited)
+		}
 		holders, err := s.managedSetups.ManagedAddressHolders(ctx, projectID, tenantID, lookUp)
 		if err != nil {
-			return nil, err
+			return refuse("store_error", err)
 		}
 		for i, address := range addresses {
 			if address != "" {
@@ -126,23 +121,16 @@ func (s *MembershipService) CheckManagedAddresses(ctx context.Context, callerID,
 			}
 		}
 	}
-	s.logger.Info("managed_address_check",
-		zap.String("project_id", projectID), zap.String("tenant_id", tenantID),
-		zap.String("user_id", callerID), zap.Int("addresses", len(queries)), zap.Int("looked_up", len(lookUp)))
+	counts := map[string]int{}
+	for _, c := range out {
+		counts[c.Status]++
+	}
+	s.logger.Info("managed_address_check", append(fields,
+		zap.Int("addresses", len(queries)), zap.Int("looked_up", len(lookUp)),
+		zap.Int("free", counts[ManagedAddressFree]),
+		zap.Int("managed_by_this_tenant", counts[ManagedAddressManagedByThis]),
+		zap.Int("unavailable", counts[ManagedAddressHeldOutsideTheTenant]),
+		zap.Int("domain_unverified", counts[ManagedAddressDomainUnverified]),
+		zap.Int("invalid", counts[ManagedAddressInvalid]))...)
 	return out, nil
-}
-
-// verifiedDomainsOf is the set of domains verified for tenantID.
-func (s *MembershipService) verifiedDomainsOf(ctx context.Context, projectID, tenantID string) (map[string]bool, error) {
-	domains, err := s.domains.ListDomainsByTenant(ctx, projectID, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	verified := map[string]bool{}
-	for _, d := range domains {
-		if d.Status == DomainStatusVerified {
-			verified[strings.ToLower(d.Domain)] = true
-		}
-	}
-	return verified, nil
 }

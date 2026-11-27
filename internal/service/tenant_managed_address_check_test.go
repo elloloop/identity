@@ -11,32 +11,27 @@ import (
 	"github.com/elloloop/identity/internal/config"
 )
 
-// addressCheckFixture is a managed-membership fixture whose tenant has
-// maDomain verified and another domain only pending, its holders answered by
-// holders.
-func addressCheckFixture(t *testing.T, holders func(string, string, []string) (map[string]string, error)) (*membershipFixture, *fakeDomainStore) {
+// addressCheckFixture is a managed-membership fixture whose holders are
+// answered by holders.
+func addressCheckFixture(t *testing.T, holders func(string, string, []string) (map[string]string, error)) *membershipFixture {
 	t.Helper()
 	f, _ := managedMembershipFixture(&managedSetupsMock{holders: holders})
-	domains := newFakeDomainStore()
-	f.svc.WithDomains(domains).WithManagedAddressCheckBudget(1000, 60_000)
-	ctx := context.Background()
-	for name, status := range map[string]string{maDomain: DomainStatusVerified, "pending.example.com": DomainStatusPending} {
-		_, err := domains.CreateDomain(ctx, &Domain{ProjectID: mTestProject, TenantID: mTestTenant, Domain: name, VerificationMethod: DomainVerificationDNSTXT, Status: status})
-		require.NoError(t, err)
-	}
-	return f, domains
+	f.svc.WithManagedAddressCheckBudget(1000, 60_000)
+	return f
 }
 
 func TestCheckManagedAddresses_AnswersEachAddressInOrder(t *testing.T) {
 	var looked []string
-	f, _ := addressCheckFixture(t, func(projectID, tenantID string, addresses []string) (map[string]string, error) {
+	f := addressCheckFixture(t, func(projectID, tenantID string, addresses []string) (map[string]string, error) {
 		require.Equal(t, mTestProject, projectID)
 		require.Equal(t, mTestTenant, tenantID)
 		looked = addresses
 		return map[string]string{
-			"ann@" + maDomain:   ManagedAddressFree,
-			"bob@" + maDomain:   ManagedAddressManagedByThis,
-			"carol@" + maDomain: ManagedAddressHeldOutsideTheTenant,
+			"ann@" + maDomain:            ManagedAddressFree,
+			"bob@" + maDomain:            ManagedAddressManagedByThis,
+			"carol@" + maDomain:          ManagedAddressHeldOutsideTheTenant,
+			"dan@pending.example.com":    ManagedAddressDomainUnverified,
+			"erin@elsewhere.example.com": ManagedAddressDomainUnverified,
 		}, nil
 	})
 	queries := []ManagedAddressQuery{
@@ -59,12 +54,12 @@ func TestCheckManagedAddresses_AnswersEachAddressInOrder(t *testing.T) {
 		ManagedAddressFree, ManagedAddressManagedByThis, ManagedAddressHeldOutsideTheTenant,
 		ManagedAddressDomainUnverified, ManagedAddressDomainUnverified, ManagedAddressInvalid, ManagedAddressInvalid,
 	}, statuses)
-	require.Equal(t, []string{"ann@" + maDomain, "bob@" + maDomain, "carol@" + maDomain}, looked,
-		"only addresses on the tenant's verified domains are looked up")
+	require.Equal(t, []string{"ann@" + maDomain, "bob@" + maDomain, "carol@" + maDomain, "dan@pending.example.com", "erin@elsewhere.example.com"}, looked,
+		"every valid address goes to the store, which looks up only the tenant's verified domains")
 }
 
 func TestCheckManagedAddresses_ProjectRefusedAddressesAreInvalid(t *testing.T) {
-	f, _ := addressCheckFixture(t, func(string, string, []string) (map[string]string, error) {
+	f := addressCheckFixture(t, func(string, string, []string) (map[string]string, error) {
 		t.Fatal("nothing the project refuses is looked up")
 		return nil, nil
 	})
@@ -88,24 +83,31 @@ func TestCheckManagedAddresses_Refusals(t *testing.T) {
 		caller  string
 		tenant  string
 		queries []ManagedAddressQuery
-		mutate  func(*membershipFixture, *fakeDomainStore)
+		mutate  func(*membershipFixture)
 		want    error
 	}{
-		"no project":      {ctx: context.Background(), caller: mAdminID, tenant: mTestTenant, queries: one, want: ErrPermissionDenied},
-		"no caller":       {caller: "", tenant: mTestTenant, queries: one, want: ErrUnauthenticated},
-		"no tenant":       {caller: mAdminID, tenant: " ", queries: one, want: ErrInvalidArgument},
-		"no addresses":    {caller: mAdminID, tenant: mTestTenant, want: ErrInvalidArgument},
-		"too many":        {caller: mAdminID, tenant: mTestTenant, queries: tooMany, want: ErrInvalidArgument},
-		"not an admin":    {caller: "stranger", tenant: mTestTenant, queries: one, want: ErrPermissionDenied},
-		"another tenant":  {caller: mAdminID, tenant: "other-tenant", queries: one, want: ErrPermissionDenied},
-		"not admitted":    {ctx: managedScope(ProjectAccessConfig{}), caller: mAdminID, tenant: mTestTenant, queries: one, want: ErrManagedAccountsNotAdmitted},
-		"domains unread":  {caller: mAdminID, tenant: mTestTenant, queries: one, mutate: func(_ *membershipFixture, d *fakeDomainStore) { d.listErr = storeErr }, want: storeErr},
-		"no domain store": {caller: mAdminID, tenant: mTestTenant, queries: one, mutate: func(f *membershipFixture, _ *fakeDomainStore) { f.svc.domains = nil }, want: ErrUnimplemented},
+		"no project":     {ctx: context.Background(), caller: mAdminID, tenant: mTestTenant, queries: one, want: ErrPermissionDenied},
+		"no caller":      {caller: "", tenant: mTestTenant, queries: one, want: ErrUnauthenticated},
+		"no tenant":      {caller: mAdminID, tenant: " ", queries: one, want: ErrInvalidArgument},
+		"no addresses":   {caller: mAdminID, tenant: mTestTenant, want: ErrInvalidArgument},
+		"too many":       {caller: mAdminID, tenant: mTestTenant, queries: tooMany, want: ErrInvalidArgument},
+		"not an admin":   {caller: "stranger", tenant: mTestTenant, queries: one, want: ErrPermissionDenied},
+		"another tenant": {caller: mAdminID, tenant: "other-tenant", queries: one, want: ErrPermissionDenied},
+		"not admitted":   {ctx: managedScope(ProjectAccessConfig{}), caller: mAdminID, tenant: mTestTenant, queries: one, want: ErrManagedAccountsNotAdmitted},
+		"suspended tenant": {caller: mAdminID, tenant: mTestTenant, queries: one, mutate: func(f *membershipFixture) {
+			f.tenants.put(&Tenant{ID: mTestTenant, ProjectID: mTestProject, Status: TenantStatusSuspended})
+		}, want: ErrPermissionDenied},
+		"suspended admin": {caller: "admin-2", tenant: mTestTenant, queries: one, mutate: func(f *membershipFixture) {
+			_, _ = f.memberships.UpsertMembership(context.Background(), &TenantMembership{
+				ProjectID: mTestProject, TenantID: mTestTenant, UserID: "admin-2",
+				Source: MembershipSourceAdded, Role: RoleAdmin, Status: MembershipStatusSuspended,
+			})
+		}, want: ErrPermissionDenied},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f, domains := addressCheckFixture(t, func(string, string, []string) (map[string]string, error) { return map[string]string{}, nil })
+			f := addressCheckFixture(t, func(string, string, []string) (map[string]string, error) { return map[string]string{}, nil })
 			if tc.mutate != nil {
-				tc.mutate(f, domains)
+				tc.mutate(f)
 			}
 			ctx := tc.ctx
 			if ctx == nil {
@@ -116,34 +118,37 @@ func TestCheckManagedAddresses_Refusals(t *testing.T) {
 		})
 	}
 
-	f, _ := addressCheckFixture(t, func(string, string, []string) (map[string]string, error) { return nil, storeErr })
+	f := addressCheckFixture(t, func(string, string, []string) (map[string]string, error) { return nil, storeErr })
 	_, err := f.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, one)
 	require.ErrorIs(t, err, storeErr)
 
 	plain := newMembershipFixtureWith(true, &config.Config{ManagedAccountsEnabled: true})
+	plain.svc.WithManagedSetups(&managedSetupsMock{})
 	plain.seedAdmin(mTestProject, mTestTenant, mAdminID)
 	_, err = plain.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, one)
-	require.ErrorIs(t, err, ErrUnimplemented, "without the managed store the check is unimplemented")
+	require.ErrorIs(t, err, ErrUnimplemented, "without its budget the check is unimplemented")
 }
 
-// The check is capped per tenant: past the budget every call is refused,
-// whatever it asks, and other tenants keep theirs.
+// The tenant's budget counts the addresses looked up: a call spends one unit
+// per address, refused whole once fewer are left, while an address nothing
+// is looked up for costs nothing; other tenants keep their own budgets.
 func TestCheckManagedAddresses_CappedPerTenant(t *testing.T) {
-	f, _ := addressCheckFixture(t, func(string, string, []string) (map[string]string, error) { return map[string]string{}, nil })
-	f.svc.WithManagedAddressCheckBudget(2, 60_000)
+	f := addressCheckFixture(t, func(string, string, []string) (map[string]string, error) { return map[string]string{}, nil })
+	f.svc.WithManagedAddressCheckBudget(3, 60_000)
 	f.seedAdmin(mTestProject, "tenant-2", mAdminID)
-	one := []ManagedAddressQuery{{Username: "ann", Domain: maDomain}}
-	for i := range 2 {
-		_, err := f.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, one)
-		require.NoError(t, err, "call %d", i+1)
-	}
-	_, err := f.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, one)
-	require.ErrorIs(t, err, ErrManagedAddressCheckLimited)
-	_, err = f.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, "tenant-2", one)
+	two := []ManagedAddressQuery{{Username: "ann", Domain: maDomain}, {Username: "bob", Domain: maDomain}}
+	_, err := f.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, two)
+	require.NoError(t, err, "two of three units")
+	_, err = f.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, two)
+	require.ErrorIs(t, err, ErrManagedAddressCheckLimited, "two more do not fit in the one left")
+	_, err = f.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, []ManagedAddressQuery{{Username: "x..y", Domain: maDomain}})
+	require.NoError(t, err, "an address nothing is looked up for costs nothing")
+	_, err = f.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, two[:1])
+	require.NoError(t, err, "the last unit")
+	_, err = f.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, "tenant-2", two)
 	require.NoError(t, err, "another tenant keeps its own budget")
 
 	unbudgeted, _ := managedMembershipFixture(&managedSetupsMock{})
-	unbudgeted.svc.WithDomains(newFakeDomainStore())
-	_, err = unbudgeted.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, one)
+	_, err = unbudgeted.svc.CheckManagedAddresses(managedScope(admitted()), mAdminID, mTestTenant, two)
 	require.ErrorIs(t, err, ErrUnimplemented, "the check never runs without its budget")
 }

@@ -716,10 +716,12 @@ RestoreTenantMember(tenant_id, user_id)
     against that project's accounts and recovery emails, so no tenant learns
     anything about another tenant's domain. Calls are limited per client IP on
     a budget of their own, the size of
-    <code>GATEWAY_RATE_LIMIT_INVITATION_PER_IP</code>, and per tenant by
-    <code>GATEWAY_RATE_LIMIT_MANAGED_ADDRESS_CHECK_PER_TENANT</code> (default
-    60 calls per rate-limit window, counted per replica; it cannot be switched
-    off). Past either the call is <code>RESOURCE_EXHAUSTED</code>.
+    <code>GATEWAY_RATE_LIMIT_INVITATION_PER_IP</code>, and the addresses looked
+    up per tenant by <code>GATEWAY_RATE_LIMIT_MANAGED_ADDRESS_CHECK_PER_TENANT</code>
+    (default 1000 addresses per rate-limit window, counted per replica; it
+    cannot be switched off). A call that does not fit in what is left is
+    refused whole. Past either limit the call is
+    <code>RESOURCE_EXHAUSTED</code>.
   </p>
   <p id="managed-account-set-up">
     <code>GetTenantInvitation</code> marks a set-up link

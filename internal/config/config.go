@@ -136,10 +136,10 @@ const (
 	// unthrottled.
 	DefaultRateLimitPhoneMatchPerTenant = 60
 	// DefaultRateLimitManagedAddressCheckPerTenant is the cap per window on
-	// the CheckManagedAddresses calls made against one tenant
+	// the addresses CheckManagedAddresses looks up for one tenant
 	// (RateLimitManagedAddressCheckPerTenant) when none is configured or the
 	// configured value is zero: the check is never unthrottled.
-	DefaultRateLimitManagedAddressCheckPerTenant = 60
+	DefaultRateLimitManagedAddressCheckPerTenant = 1000
 
 	// DefaultRateLimitSCIMPerIP is the per-IP cap per window on requests
 	// under /scim/v2/ when GATEWAY_RATE_LIMIT_SCIM_PER_IP is unset.
@@ -1415,8 +1415,9 @@ type Config struct {
 	// the default and a negative value is refused at boot.
 	RateLimitPhoneMatchPerTenant int
 	// RateLimitManagedAddressCheckPerTenant is the cap per window on the
-	// CheckManagedAddresses calls made against one tenant, each checking up
-	// to 100 addresses, on top of the per-IP cap. It is counted per replica
+	// addresses CheckManagedAddresses looks up for one tenant, each call
+	// spending one unit per address it looks up (up to 100), on top of the
+	// per-IP cap on calls. It is counted per replica
 	// and cannot be switched off: zero selects the default and a negative
 	// value is refused at boot. Driven by
 	// GATEWAY_RATE_LIMIT_MANAGED_ADDRESS_CHECK_PER_TENANT.
