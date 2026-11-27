@@ -4,7 +4,8 @@
 -- that tenant's owners and admins. managed_help_notices records each notice
 -- sent, so a tenant is told about one account at most once a day, and the
 -- notices one tenant is sent, and those one source causes, stay under their
--- daily caps. source_key is a hash of the client address, never the address.
+-- daily caps. source_key is an HMAC of the client address (an IPv6 client
+-- as its /64) under a server secret, never the address.
 -- Rows older than a day are deleted by the next request for the tenant.
 --
 -- Like tenant_memberships, it is a governance table with no row-level

@@ -369,8 +369,8 @@ func TestValidate_GenericOIDC_Invariants(t *testing.T) {
 	})
 }
 
-// The two URLs emailed links are built on, the email-link base and the tenant
-// invitation page, are validated alike: absolute https (http only for a
+// The URLs emailed links are built on, the email-link base and the tenant
+// invitation and members pages, are validated alike: absolute https (http only for a
 // loopback host), with no userinfo, query, fragment or character a URL must
 // percent-encode, never echoing a password.
 func TestValidate_EmailedLinkURLs(t *testing.T) {
@@ -380,6 +380,7 @@ func TestValidate_EmailedLinkURLs(t *testing.T) {
 	}{
 		{"GATEWAY_EMAIL_LINK_BASE_URL", func(c *Config, s string) { c.EmailLinkBaseURL = s }},
 		{"GATEWAY_TENANT_INVITATION_PAGE_URL", func(c *Config, s string) { c.TenantInvitationPageURL = s }},
+		{"GATEWAY_TENANT_MEMBERS_PAGE_URL", func(c *Config, s string) { c.TenantMembersPageURL = s }},
 	} {
 		t.Run(v.name, func(t *testing.T) { validateEmailedLinkURLCases(t, v.name, v.set) })
 	}

@@ -359,8 +359,11 @@ RestoreTenantMember(tenant_id, user_id)
     So a person locked out of a managed account asks for help with
     <code>RequestAdminHelp</code>, and the request goes to the tenant, not
     to the project's admins: its active owners and admins are mailed a
-    notice naming the account's address and nothing the person wrote, at
-    most once a day per account and within the tenant's daily caps
+    notice, "Ann (ann@acme.example.com) asked for help signing in.", naming
+    the account by its stored name and address and carrying nothing the
+    person wrote, with an Open Members button to
+    <code>GATEWAY_TENANT_MEMBERS_PAGE_URL</code><code>?tenant_id=…</code>
+    when that is set; at most once a day per account and within the tenant's daily caps
     (<code>GATEWAY_MANAGED_HELP_MAX_PER_TENANT</code>,
     <code>GATEWAY_MANAGED_HELP_MAX_PER_SOURCE</code>). The answer is the
     same for every address, so it says nothing about who has an account.

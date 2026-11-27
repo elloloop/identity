@@ -2,6 +2,7 @@ package identityserver_test
 
 import (
 	"context"
+	"encoding/base64"
 	"net"
 	"net/http/httptest"
 	"strconv"
@@ -425,5 +426,58 @@ func TestAccountClassificationSharesHTTPAndNativeBudget(t *testing.T) {
 	}
 	if _, err := grpcClient.ClassifyAccounts(context.Background(), req); status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("native over quota: %v", err)
+	}
+}
+
+// RequestAdminHelp draws on one per-IP budget across HTTP and native gRPC
+// where managed accounts are on: past it a native call is RESOURCE_EXHAUSTED
+// with the window as its retry-after, and an HTTP call is over quota too.
+// Where they are off it has no budget on either surface, as before.
+func TestRegisterGRPC_RequestAdminHelpSharesHTTPBudget(t *testing.T) {
+	t.Parallel()
+	req := &identitypb.RequestAdminHelpRequest{Email: "ann@example.com"}
+	for _, on := range []bool{true, false} {
+		srv := newTestServerWith(t, func(c *config.Config) {
+			c.RateLimitPasswordlessPerIP = 2
+			c.RateLimitWindowSeconds = 40
+			if on {
+				c.RepoDriver = "postgres"
+				c.ProjectSecretsKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
+				c.ManagedAccountsEnabled = true
+				c.RevocationMode = config.RevocationModeSession
+				c.SessionCacheTTLSeconds = 0
+			}
+		}, nil)
+		httpSrv := httptest.NewServer(srv.Handler())
+		t.Cleanup(httpSrv.Close)
+		httpClient := identityconnectgen.NewIdentityServiceClient(httpSrv.Client(), httpSrv.URL)
+		grpcClient := serveGRPC(t, srv)
+
+		if _, err := httpClient.RequestAdminHelp(context.Background(), connect.NewRequest(req)); err != nil {
+			t.Fatalf("on=%v HTTP: %v", on, err)
+		}
+		if _, err := grpcClient.RequestAdminHelp(context.Background(), req); err != nil {
+			t.Fatalf("on=%v native: %v", on, err)
+		}
+		var header metadata.MD
+		_, err := grpcClient.RequestAdminHelp(context.Background(), req, grpc.Header(&header))
+		if !on {
+			if err != nil {
+				t.Fatalf("off: native third call = %v, want no budget", err)
+			}
+			if _, err := httpClient.RequestAdminHelp(context.Background(), connect.NewRequest(req)); err != nil {
+				t.Fatalf("off: HTTP third call = %v, want no budget", err)
+			}
+			continue
+		}
+		if status.Code(err) != codes.ResourceExhausted {
+			t.Fatalf("native over quota: %v, want ResourceExhausted", err)
+		}
+		if got := header.Get("retry-after"); len(got) != 1 || got[0] != "40" {
+			t.Fatalf("retry-after = %v, want [40]", got)
+		}
+		if _, err := httpClient.RequestAdminHelp(context.Background(), connect.NewRequest(req)); connect.CodeOf(err) != connect.CodeUnavailable {
+			t.Fatalf("HTTP over quota: %v, want the 429 (Unavailable)", err)
+		}
 	}
 }

@@ -185,3 +185,37 @@ func TestMembershipStore_RecordManagedHelp_ConcurrentRequestsKeepTheCap(t *testi
 	}
 	assert.Equal(t, 1, notified)
 }
+
+// TestMembershipStore_RecordManagedHelp_NoRecipientsRecordsNothing: a tenant
+// with no active owner or admin to tell gets no notice and records nothing,
+// so neither the account's day nor a cap is used up; once it has one, the
+// next request tells it.
+func TestMembershipStore_RecordManagedHelp_NoRecipientsRecordsNothing(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f := newManagedHelpFixture(ctx, t)
+	setOwner := func(status string) {
+		t.Helper()
+		_, err := f.ms.UpsertMembership(ctx, &service.TenantMembership{
+			ProjectID: f.projectID, TenantID: f.tenantID, UserID: f.other,
+			Source: service.MembershipSourceCreated, Role: service.RoleOwner, Status: status,
+		})
+		require.NoError(t, err)
+	}
+	setOwner(service.MembershipStatusSuspended)
+	now := time.Now()
+	for range 2 {
+		rec, err := f.ms.RecordManagedHelp(ctx, f.request("ann@acme.com", "src-1", now))
+		require.NoError(t, err)
+		assert.Equal(t, service.ManagedHelpNoRecipients, rec.Outcome)
+		assert.Empty(t, rec.Recipients)
+	}
+	var recorded int
+	require.NoError(t, f.ms.pool.QueryRow(ctx, `SELECT count(*) FROM managed_help_notices WHERE project_id = $1`, f.projectID).Scan(&recorded))
+	assert.Zero(t, recorded)
+
+	setOwner(service.MembershipStatusActive)
+	rec, err := f.ms.RecordManagedHelp(ctx, f.request("ann@acme.com", "src-1", now))
+	require.NoError(t, err)
+	assert.Equal(t, service.ManagedHelpNotify, rec.Outcome)
+}

@@ -2,12 +2,18 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
 )
@@ -29,6 +35,10 @@ const (
 	// ManagedHelpSourceLimited: requests from the source caused their cap of
 	// the tenant's notices in the window.
 	ManagedHelpSourceLimited = "source_limited"
+	// ManagedHelpNoRecipients: the tenant has no active owner or admin to
+	// tell; nothing is recorded, and the request goes to the project's
+	// admins.
+	ManagedHelpNoRecipients = "no_recipients"
 )
 
 // ManagedHelpRequest asks ManagedHelpStore.RecordManagedHelp to record a
@@ -37,8 +47,9 @@ type ManagedHelpRequest struct {
 	ProjectID string
 	// Address is the address asked about, in canonical form.
 	Address string
-	// SourceKey stands for the client the request came from; the store keeps
-	// it to count the requests from one source.
+	// SourceKey stands for the client the request came from
+	// (managedHelpSourceKey); the store keeps it to count the requests from
+	// one source.
 	SourceKey string
 	NowMs     int64
 	// SinceMs starts the window the account's earlier notice, and the caps,
@@ -55,7 +66,8 @@ type ManagedHelpRecorded struct {
 	// TenantID is the tenant that manages it.
 	TenantID string
 	// Outcome is ManagedHelpNotify, ManagedHelpDuplicate,
-	// ManagedHelpTenantLimited or ManagedHelpSourceLimited.
+	// ManagedHelpTenantLimited, ManagedHelpSourceLimited or
+	// ManagedHelpNoRecipients.
 	Outcome string
 	// Recipients are the tenant's active owners and admins, active accounts
 	// with an address other than Account, when Outcome is ManagedHelpNotify.
@@ -68,18 +80,21 @@ type ManagedHelpStore interface {
 	// RecordManagedHelp finds the managed account at req.Address and, when
 	// its membership of the tenant that manages it is active or suspended,
 	// decides in one transaction, serialised per tenant, whether its tenant
-	// is told: not when it was told about the account since req.SinceMs, nor
-	// past the tenant's cap or the source's. Only a notice that goes out is
-	// recorded. An address that is no such account is ErrNotFound.
+	// is told: not when it has no active owner or admin to tell
+	// (ManagedHelpNoRecipients, which uses no cap), nor when it was told
+	// about the account since req.SinceMs, nor past the tenant's cap or the
+	// source's. Only a notice that goes out is recorded. An address that is
+	// no such account is ErrNotFound.
 	RecordManagedHelp(ctx context.Context, req ManagedHelpRequest) (*ManagedHelpRecorded, error)
 }
 
 // AdminHelpRouter decides where a help request goes (WithAdminHelpRouter).
 type AdminHelpRouter interface {
-	// RouteAdminHelp takes a request about address from sourceIP and
-	// userAgent; for anything it does not route itself it calls ordinary,
-	// which files the request for the project's admins.
-	RouteAdminHelp(ctx context.Context, address, sourceIP, userAgent string, ordinary func(context.Context))
+	// RouteAdminHelp takes a request about address, with the caller's
+	// reason, from sourceIP and userAgent; for anything it does not route
+	// itself it calls ordinary, which files the request for the project's
+	// admins.
+	RouteAdminHelp(ctx context.Context, address, reason, sourceIP, userAgent string, ordinary func(context.Context))
 }
 
 // WithManagedHelp sets the store help requests about managed accounts are
@@ -95,26 +110,28 @@ func (s *AuthService) WithManagedHelp(store ManagedHelpStore) *AuthService {
 // account: a request about an active or suspended managed account goes to
 // the owners and admins of the tenant that manages it (RecordManagedHelp
 // decides whether they are told) and never to the project's admins, and any
-// other request is filed as ordinary files it. The notice carries nothing
-// the caller wrote, nor their IP address or user agent, which only the audit
-// entry keeps. Where managed accounts are off, or the project sends no
-// email, ordinary files every request at once, as it always has.
-func (s *AuthService) RouteAdminHelp(ctx context.Context, address, sourceIP, userAgent string, ordinary func(context.Context)) {
+// other request, or one about a tenant with no owner or admin to tell, is
+// filed as ordinary files it. The notice carries nothing the caller wrote,
+// nor their IP address or user agent; the audit entry keeps those and the
+// reason. Where managed accounts are off, or the project sends no email,
+// ordinary files every request at once, as it always has; a dispatch that is
+// dropped files it too.
+func (s *AuthService) RouteAdminHelp(ctx context.Context, address, reason, sourceIP, userAgent string, ordinary func(context.Context)) {
 	if !s.cfg.ManagedAccountsEnabled || s.managedHelp == nil {
 		ordinary(ctx)
 		return
 	}
-	if err := requireProjectEmailDelivery(ctx, s.cfg.DefaultProjectID, s.activeProjects); err != nil {
+	if err := requireProjectEmailDelivery(ctx, s.cfg.DefaultProjectID, s.activeProjects); errors.Is(err, ErrEmailDeliveryDisabled) {
 		ordinary(ctx)
 		return
 	}
-	s.dispatchEmailSend(ctx, "admin_help", func(ctx context.Context) {
-		s.routeAdminHelpNow(ctx, address, sourceIP, userAgent, ordinary)
-	})
+	s.dispatchEmailSendOr(ctx, "admin_help", func(ctx context.Context) {
+		s.routeAdminHelpNow(ctx, address, reason, sourceIP, userAgent, ordinary)
+	}, ordinary)
 }
 
 // routeAdminHelpNow is the body of RouteAdminHelp's dispatch.
-func (s *AuthService) routeAdminHelpNow(ctx context.Context, address, sourceIP, userAgent string, ordinary func(context.Context)) {
+func (s *AuthService) routeAdminHelpNow(ctx context.Context, address, reason, sourceIP, userAgent string, ordinary func(context.Context)) {
 	addr, usable := canonicalMailbox(address)
 	if !usable {
 		ordinary(ctx)
@@ -123,7 +140,7 @@ func (s *AuthService) routeAdminHelpNow(ctx context.Context, address, sourceIP, 
 	now := s.nowMs()
 	projectID := requestProjectID(ctx, s.cfg.DefaultProjectID)
 	rec, err := s.managedHelp.RecordManagedHelp(ctx, ManagedHelpRequest{
-		ProjectID: projectID, Address: string(addr), SourceKey: sha256Hex(sourceIP), NowMs: now,
+		ProjectID: projectID, Address: string(addr), SourceKey: s.managedHelpSourceKey(sourceIP), NowMs: now,
 		SinceMs:            now - managedHelpWindow.Milliseconds(),
 		MaxPerTenant:       s.cfg.ManagedHelpTenantLimit(),
 		MaxPerTenantSource: s.cfg.ManagedHelpSourceLimit(),
@@ -140,26 +157,65 @@ func (s *AuthService) routeAdminHelpNow(ctx context.Context, address, sourceIP, 
 		zap.String("project_id", projectID), zap.String("tenant_id", rec.TenantID),
 		zap.String("user_id", rec.Account.ID), zap.String("outcome", rec.Outcome),
 	}
-	if rec.Outcome != ManagedHelpNotify {
+	switch rec.Outcome {
+	case ManagedHelpNoRecipients:
+		s.logger.Info("managed_account_help_not_sent", fields...)
+		ordinary(ctx)
+		return
+	case ManagedHelpNotify:
+	default:
 		s.logger.Info("managed_account_help_not_sent", fields...)
 		if rec.Outcome != ManagedHelpDuplicate {
-			s.auditManagedHelp(ctx, rec, false, sourceIP, userAgent)
+			s.auditManagedHelp(ctx, rec, false, reason, sourceIP, userAgent)
 		}
 		return
 	}
 	sent := s.sendManagedHelpNotices(ctx, rec)
 	s.logger.Info("managed_account_help_requested", append(fields, zap.Int("recipients", len(rec.Recipients)), zap.Int("sent", sent))...)
-	s.auditManagedHelp(ctx, rec, true, sourceIP, userAgent)
+	s.auditManagedHelp(ctx, rec, true, reason, sourceIP, userAgent)
+}
+
+// managedHelpSourceLabel separates the key managedHelpSourceKey derives from
+// the server secret from every other use of that secret.
+const managedHelpSourceLabel = "identity/managed-help-source/v1"
+
+// managedHelpSourceKey stands for the client a help request came from: an
+// HMAC of its address, an IPv6 address taken as its /64 so one host cannot
+// spread its requests over its prefix, under a key derived from the server's
+// TOTP recovery pepper, a secret every server holds. The store keeps this
+// key, never the address, and one cannot be turned back into the other
+// without the secret.
+func (s *AuthService) managedHelpSourceKey(sourceIP string) string {
+	derive := hmac.New(sha256.New, s.totpRecoveryPepper)
+	derive.Write([]byte(managedHelpSourceLabel))
+	mac := hmac.New(sha256.New, derive.Sum(nil))
+	mac.Write([]byte(normalizeHelpSource(sourceIP)))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// normalizeHelpSource is the part of a client address a help request is
+// counted against: an IPv4 address whole, an IPv6 address as its /64, and
+// anything that does not parse as it came.
+func normalizeHelpSource(sourceIP string) string {
+	addr, err := netip.ParseAddr(sourceIP)
+	if err != nil {
+		return sourceIP
+	}
+	addr = addr.Unmap()
+	if addr.Is4() {
+		return addr.String()
+	}
+	prefix, err := addr.WithZone("").Prefix(64)
+	if err != nil {
+		return sourceIP
+	}
+	return prefix.String()
 }
 
 // sendManagedHelpNotices tells each recipient that someone asked for help
 // signing in to rec.Account, and returns how many notices went out.
 func (s *AuthService) sendManagedHelpNotices(ctx context.Context, rec *ManagedHelpRecorded) int {
-	notice := accountNotice{
-		headline: "Someone asked for help signing in",
-		detail:   fmt.Sprintf("Someone asked for help signing in to %s, an account your organization manages.", rec.Account.Email),
-		advice:   "If they should have access, reset the account from your organization's member list. If you did not expect this, you can ignore this message.",
-	}
+	notice := managedHelpNotice(s.cfg, rec)
 	brand := resolveBranding(ctx, s.cfg, "")
 	sent := 0
 	for _, to := range rec.Recipients {
@@ -179,9 +235,28 @@ func (s *AuthService) sendManagedHelpNotices(ctx context.Context, rec *ManagedHe
 	return sent
 }
 
+// managedHelpNotice is the notice a tenant's owners and admins get about
+// rec's account: named by its stored display name and address, never by
+// anything the caller wrote, with a button to the tenant's members page
+// when GATEWAY_TENANT_MEMBERS_PAGE_URL is set.
+func managedHelpNotice(cfg *config.Config, rec *ManagedHelpRecorded) accountNotice {
+	name, who := rec.Account.Email, rec.Account.Email
+	if n := strings.TrimSpace(rec.Account.Name); n != "" {
+		name, who = n, fmt.Sprintf("%s (%s)", n, rec.Account.Email)
+	}
+	return accountNotice{
+		headline:    name + " asked for help signing in",
+		detail:      who + " asked for help signing in.",
+		advice:      "If you know it was them, reset their sign-in from Members: it signs them out, clears their password and two-step verification, and sends a new set-up link to an address you choose. If it was not them, do nothing; no other request about this account is sent for 24 hours. You get this because you are an owner or admin of the organization that manages the account.",
+		buttonLabel: "Open Members",
+		buttonURL:   tenantMembersLink(cfg, rec.TenantID),
+	}
+}
+
 // auditManagedHelp records a managed account's help request that told its
-// tenant (ok) or was refused by a cap.
-func (s *AuthService) auditManagedHelp(ctx context.Context, rec *ManagedHelpRecorded, ok bool, sourceIP, userAgent string) {
+// tenant (ok) or was refused by a cap, with the caller's reason as
+// RequestAdminHelp truncated it.
+func (s *AuthService) auditManagedHelp(ctx context.Context, rec *ManagedHelpRecorded, ok bool, reason, sourceIP, userAgent string) {
 	s.audit.Log(ctx, audit.EventManagedAccountHelpRequested,
 		audit.WithTarget(rec.Account.ID),
 		audit.WithIP(sourceIP), audit.WithUserAgent(userAgent),
@@ -189,6 +264,7 @@ func (s *AuthService) auditManagedHelp(ctx context.Context, rec *ManagedHelpReco
 			"tenant_id":  rec.TenantID,
 			"outcome":    rec.Outcome,
 			"recipients": len(rec.Recipients),
+			"reason":     reason,
 		}),
 	)
 }

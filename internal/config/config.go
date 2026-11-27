@@ -1293,6 +1293,15 @@ type Config struct {
 	// GATEWAY_TENANT_INVITATION_PAGE_URL.
 	TenantInvitationPageURL string
 
+	// TenantMembersPageURL is the page where a tenant's owners and admins
+	// manage its members. A help request about an account the tenant manages
+	// mails them a notice whose Open Members button links to
+	// <page>?tenant_id=…; with it empty the notice has no button. Must be an
+	// absolute https URL (http only for a loopback host) without userinfo,
+	// query, fragment, space or other character a URL must percent-encode;
+	// the path is kept exactly. Driven by GATEWAY_TENANT_MEMBERS_PAGE_URL.
+	TenantMembersPageURL string
+
 	// How long an email-verification or password-reset token is valid for.
 	EmailTokenExpirySeconds int // GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS (default 86400)
 
@@ -1977,6 +1986,7 @@ func loadFromEnv() *Config {
 		AppBaseURL:              envStr("GATEWAY_APP_BASE_URL", "http://localhost:9002"),
 		EmailLinkBaseURL:        envStr("GATEWAY_EMAIL_LINK_BASE_URL", ""),
 		TenantInvitationPageURL: envStr("GATEWAY_TENANT_INVITATION_PAGE_URL", ""),
+		TenantMembersPageURL:    envStr("GATEWAY_TENANT_MEMBERS_PAGE_URL", ""),
 		EmailTokenExpirySeconds: envInt("GATEWAY_EMAIL_TOKEN_EXPIRY_SECONDS", 86400),
 		// 604800 = 7 days; team invitations are less time-sensitive than
 		// password resets.
@@ -2624,6 +2634,10 @@ func (c *Config) Validate() error {
 	}
 
 	if err := c.validateTenantInvitationPageURL(); err != nil {
+		return err
+	}
+
+	if err := validateEmailedLinkVar("GATEWAY_TENANT_MEMBERS_PAGE_URL", c.TenantMembersPageURL); err != nil {
 		return err
 	}
 

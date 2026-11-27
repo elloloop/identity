@@ -55,6 +55,13 @@ func (s *MembershipStore) RecordManagedHelp(ctx context.Context, req service.Man
 	if err != nil {
 		return nil, wrapPgErr(op+"(membership)", err)
 	}
+	recipients, err := tenantGovernorAccounts(ctx, tx, req.ProjectID, tenantID, account.ID)
+	if err != nil {
+		return nil, wrapPgErr(op+"(recipients)", err)
+	}
+	if len(recipients) == 0 {
+		return &service.ManagedHelpRecorded{Account: account, TenantID: tenantID, Outcome: service.ManagedHelpNoRecipients}, nil
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM managed_help_notices
 		WHERE project_id = $1 AND tenant_id = $2 AND created_at_ms < $3`, req.ProjectID, tenantID, req.SinceMs); err != nil {
 		return nil, wrapPgErr(op+"(expire)", err)
@@ -87,9 +94,7 @@ func (s *MembershipStore) RecordManagedHelp(ctx context.Context, req service.Man
 			newID(), req.ProjectID, tenantID, account.ID, req.SourceKey, req.NowMs); err != nil {
 			return nil, wrapPgErr(op+"(record)", err)
 		}
-		if rec.Recipients, err = tenantGovernorAccounts(ctx, tx, req.ProjectID, tenantID, account.ID); err != nil {
-			return nil, wrapPgErr(op+"(recipients)", err)
-		}
+		rec.Recipients = recipients
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, wrapPgErr(op+"(commit)", err)

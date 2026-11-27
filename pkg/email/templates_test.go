@@ -268,3 +268,30 @@ func TestRenderAccountNotice_AdviceReplacesTheOwnersAdvice(t *testing.T) {
 		}
 	}
 }
+
+// An account notice carries a button only when it has both a label and a
+// link.
+func TestRender_AccountNoticeButton(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, button, link string
+		want               bool
+	}{
+		{name: "both", button: "Open Members", link: "https://app.example.com/members?tenant_id=t-1", want: true},
+		{name: "no link", button: "Open Members"},
+		{name: "none"},
+	} {
+		html, text, err := Render(TemplateAccountNotice, map[string]any{
+			"UserName": "Ann", "Headline": "Help", "Detail": "Bo asked for help.", "Button": tc.button, "Link": tc.link,
+		})
+		if err != nil {
+			t.Fatalf("%s: Render: %v", tc.name, err)
+		}
+		if got := strings.Contains(html, `>Open Members</a>`); got != tc.want {
+			t.Errorf("%s: html button = %v, want %v", tc.name, got, tc.want)
+		}
+		if got := strings.Contains(text, "Open Members: https://app.example.com/members?tenant_id=t-1"); got != tc.want {
+			t.Errorf("%s: text button = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

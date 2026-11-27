@@ -60,6 +60,7 @@ func TestValidatePhoneCodeCapture_RefusesADeploymentThatIsNotLocal(t *testing.T)
 		{"GATEWAY_APP_BASE_URL", func(c *Config) { c.AppBaseURL = "https://app.example.com" }},
 		{"GATEWAY_EMAIL_LINK_BASE_URL", func(c *Config) { c.EmailLinkBaseURL = "https://hub.example.com" }},
 		{"GATEWAY_TENANT_INVITATION_PAGE_URL", func(c *Config) { c.TenantInvitationPageURL = "https://app.example.com/join" }},
+		{"GATEWAY_TENANT_MEMBERS_PAGE_URL", func(c *Config) { c.TenantMembersPageURL = "https://app.example.com/members" }},
 		{"GATEWAY_QR_LOGIN_BASE_URL", func(c *Config) { c.QRLoginBaseURL = "https://qr.example.com" }},
 		{"GATEWAY_PASSKEY_RP_ID", func(c *Config) { c.PasskeyRPID = "example.com" }},
 		{"GATEWAY_PASSKEY_ORIGIN", func(c *Config) { c.PasskeyOrigin = "https://example.com" }},

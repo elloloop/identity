@@ -23,6 +23,9 @@
               {{- end}}
               <h1 style="margin:0 0 10px; font-size:22px; line-height:1.3; color:#111827; font-weight:700;">{{.Headline}}</h1>
               <p style="margin:0 0 24px; font-size:15px; line-height:1.55; color:#4b5563;">Hi {{.UserName}}, {{.Detail}}</p>
+              {{- if and .Button .Link}}
+              <a href="{{.Link}}" style="display:inline-block; background:{{if .PrimaryColor}}{{.PrimaryColor}}{{else}}#111827{{end}}; color:#ffffff; padding:11px 20px; border-radius:8px; text-decoration:none; font-size:15px; font-weight:600;">{{.Button}}</a>
+              {{- end}}
             </td>
           </tr>
           <tr>

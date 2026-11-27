@@ -74,7 +74,7 @@ func (s *HelpService) RequestAdminHelp(
 		file(ctx)
 		return nil
 	}
-	s.router.RouteAdminHelp(ctx, email, sourceIP, userAgent, file)
+	s.router.RouteAdminHelp(ctx, email, strings.TrimSpace(reason), sourceIP, userAgent, file)
 	return nil
 }
 

@@ -1964,6 +1964,14 @@ const maxInFlightEmailSends = 128
 // would put the send back on the request path, and the answer must not depend
 // on whether mail goes out.
 func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send func(context.Context)) {
+	s.dispatchEmailSendOr(ctx, op, send, nil)
+}
+
+// dispatchEmailSendOr is dispatchEmailSend that, when the send is dropped
+// (every slot taken, or the project's email policy refusing it or failing
+// to load), runs dropped instead, inline when no slot was free and on the
+// detached context otherwise. A nil dropped drops silently.
+func (s *AuthService) dispatchEmailSendOr(ctx context.Context, op string, send, dropped func(context.Context)) {
 	detached := context.WithoutCancel(ctx)
 	run := func() {
 		defer func() {
@@ -1976,6 +1984,9 @@ func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send fun
 		if err := requireProjectEmailDelivery(sendCtx, s.cfg.DefaultProjectID, s.activeProjects); err != nil {
 			if !errors.Is(err, ErrEmailDeliveryDisabled) {
 				s.logger.Warn("email_dispatch_refused", zap.String("op", op), zap.Error(err))
+			}
+			if dropped != nil {
+				dropped(sendCtx)
 			}
 			return
 		}
@@ -1996,6 +2007,9 @@ func (s *AuthService) dispatchEmailSend(ctx context.Context, op string, send fun
 		if n := s.emailDropReports.add(op, s.nowMs()); n > 0 {
 			s.logger.Warn("email_send_dropped_at_capacity",
 				zap.String("op", op), zap.Int("dropped", n), zap.Int("in_flight", maxInFlightEmailSends))
+		}
+		if dropped != nil {
+			dropped(ctx)
 		}
 	}
 }

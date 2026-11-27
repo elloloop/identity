@@ -27,7 +27,7 @@ func requestAdminHelp(t *testing.T, h *RedesignHarness, addr string) {
 // account mails the tenant's owner and admin, once a day, with nothing the caller
 // wrote; a request about a personal account mails no tenant.
 func TestRedesign_ManagedHelp_GoesToTheTenant(t *testing.T) {
-	h := startManagedHarness(t, func(*config.Config) {})
+	h := startManagedHarness(t, func(c *config.Config) { c.TenantMembersPageURL = "https://app.example.com/members" })
 	m := newManagedMember(t, h, "managed-help")
 	owner, admin := ownerAddress(t, h, m.ownerID), ownerAddress(t, h, m.mt.admin.userID)
 
@@ -37,8 +37,11 @@ func TestRedesign_ManagedHelp_GoesToTheTenant(t *testing.T) {
 	var to []string
 	for _, msg := range sent {
 		to = append(to, msg.To)
-		if !strings.Contains(msg.Text, m.address) || strings.Contains(msg.Text, "555-0100") {
-			t.Fatalf("notice = %q, want the account's address and nothing the caller wrote", msg.Text)
+		if !strings.Contains(msg.Text, "Ann ("+m.address+") asked for help signing in.") || strings.Contains(msg.Text, "555-0100") {
+			t.Fatalf("notice = %q, want the account's stored name and address and nothing the caller wrote", msg.Text)
+		}
+		if link := "Open Members: https://app.example.com/members?tenant_id=" + m.tenantID; !strings.Contains(msg.Text, link) {
+			t.Fatalf("notice = %q, want %q", msg.Text, link)
 		}
 	}
 	if len(to) != 2 || !slices.Contains(to, owner) || !slices.Contains(to, admin) {

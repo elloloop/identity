@@ -2295,6 +2295,15 @@
     "anchor": "email-and-branding"
   },
   {
+    "name": "GATEWAY_TENANT_MEMBERS_PAGE_URL",
+    "type": "string",
+    "default": "",
+    "required": false,
+    "description": "is the page where a tenant's owners and admins manage its members.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_TENANT_SELECTION_ENABLED",
     "type": "boolean",
     "default": "false",
