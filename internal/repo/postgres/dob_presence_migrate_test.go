@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
@@ -32,6 +33,7 @@ func TestDateOfBirthPresenceMigrationRoundTrip(t *testing.T) {
 		require.NoError(t, raw.QueryRow(ctx, `SELECT date_of_birth_present FROM users WHERE id=$1`, id).Scan(&present))
 		require.Equal(t, id == "positive", present)
 	}
+	require.NoError(t, withMigrator(t, scratch, func(m *migrate.Migrate) error { return m.Up() }))
 	repo, err := New(ctx, Config{DSN: scratch, ProjectID: "dob"})
 	require.NoError(t, err)
 	t.Cleanup(repo.Close)
