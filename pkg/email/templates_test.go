@@ -136,7 +136,10 @@ func TestRenderManagedAccountSetup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	for _, want := range []string{"Acme", "ann@acme.example.com", "member", "7 days", "https://example.com/invite?t=baz"} {
+	for _, want := range []string{
+		"Acme", "ann@acme.example.com", "member", "7 days", "https://example.com/invite?t=baz",
+		"This link works once", "Your company admin sent your account's set-up link to this address.",
+	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("html missing %q", want)
 		}

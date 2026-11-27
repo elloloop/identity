@@ -6,7 +6,7 @@
 
 {{.Link}}
 
-This link expires in {{.ExpiresIn}}. If you weren't expecting it, you can safely ignore this email.
+This link works once and expires in {{.ExpiresIn}}. Your company admin sent your account's set-up link to this address. If you weren't expecting it, you can safely ignore this email.
 {{if .SupportEmail}}
 Need help? Contact {{.SupportEmail}}.
 {{end}}

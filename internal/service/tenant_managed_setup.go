@@ -274,7 +274,7 @@ func (s *MembershipService) sendManagedSetupEmail(ctx context.Context, issued *M
 		"TenantName":     tenantName,
 		"AccountAddress": issued.User.Email,
 		"Role":           inv.Role,
-		"ExpiresIn":      formatExpiresIn(s.invitationTTL()),
+		"ExpiresIn":      formatLinkLifetime(s.invitationTTL()),
 		"Link":           tenantInvitationLink(ctx, s.cfg, rawToken),
 	}))
 	if err != nil {

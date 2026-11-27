@@ -725,7 +725,9 @@ RestoreTenantMember(tenant_id, user_id)
     <code>&lt;account_username&gt;@&lt;account_domain&gt;</code>, and
     <code>display_name</code> (plain text, at most 100 characters) is its name.
     The account is created waiting to be set up, with no password, and the
-    link is mailed: its token goes only into the email, so a server without
+    link is mailed, saying that it works once, when it expires (in days for a
+    lifetime of whole days) and that the company's admin sent it to that
+    address: its token goes only into the email, so a server without
     mail refuses. Asking again for one of the tenant's accounts that has not
     been set up sends a new link, to the new <code>email</code> if it changed,
     and the earlier link stops working; the name stays as it was. The

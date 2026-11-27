@@ -721,6 +721,20 @@ func TestFormatExpiresIn(t *testing.T) {
 	}
 }
 
+func TestFormatLinkLifetime(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		7 * 24 * time.Hour: "7 days",
+		24 * time.Hour:     "1 day",
+		36 * time.Hour:     "36 hours",
+		2 * time.Hour:      "2 hours",
+		30 * time.Minute:   "30 minutes",
+	} {
+		if got := formatLinkLifetime(d); got != want {
+			t.Errorf("formatLinkLifetime(%v): got %q, want %q", d, got, want)
+		}
+	}
+}
+
 // ── fakeRepo helpers used by the tests above ───────────────────────────
 
 func (r *fakeRepo) refreshTokenSnapshot() ([]*RefreshTokenRecord, error) {
