@@ -10599,16 +10599,13 @@ components:
           type: string
           title: account_address
           description: |-
-            account_address, display_name and user_id describe the managed account
-             the link sets up. They are set only while the invitation is pending and
-             is the account's current set-up link; display_name is also withheld for
-             a tenant made through self-service CreateTenant, as tenant_name is.
+            account_address and display_name describe the managed account the link
+             sets up. They are set only while the invitation is pending and is the
+             account's current set-up link; display_name is also withheld for a
+             tenant made through self-service CreateTenant, as tenant_name is.
         displayName:
           type: string
           title: display_name
-        userId:
-          type: string
-          title: user_id
       title: GetTenantInvitationResponse
       additionalProperties: false
       description: |-
