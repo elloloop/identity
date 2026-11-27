@@ -46,6 +46,12 @@ func (s *TeammateKeyService) CreateHireGrant(ctx context.Context, callerID strin
 	if !isActivePerson(caller) {
 		return nil, refuse("caller_not_active_person")
 	}
+	if err := s.standing.refuse(ctx, project, caller); err != nil {
+		if isManagedStandingUnread(err) {
+			return nil, err
+		}
+		return nil, refuse("caller_not_in_standing")
+	}
 	teammate, err := users.GetUser(ctx, teammateID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err

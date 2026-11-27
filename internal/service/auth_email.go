@@ -138,6 +138,10 @@ func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string
 		s.logger.Info("password_reset_unknown_email", zap.String("email", redactEmail(emailAddr)))
 		return
 	}
+	if user.ManagedByTenantID != "" && user.Status == StatusInvited {
+		_ = refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, "password_reset_send:invited")
+		return
+	}
 
 	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
 		s.logger.Info("password_reset_throttled", zap.String("email", redactEmail(emailAddr)))
@@ -247,6 +251,9 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	}
 	if user == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if user.ManagedByTenantID != "" && user.Status == StatusInvited {
+		return refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, "password_reset_confirm:invited")
 	}
 	if !resetTokenBindsAddress(rec.Email, user.Email) {
 		if err := s.repo(ctx).MarkPasswordResetTokenConsumed(ctx, rec.NodeID, s.nowMs()); err != nil {

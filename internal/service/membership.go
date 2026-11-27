@@ -56,6 +56,10 @@ type TenantMembership struct {
 	Status      string
 	CreatedAtMs int64
 	UpdatedAtMs int64
+	// AccountKind is AccountKindManaged when the tenant manages the member's
+	// account and AccountKindPersonal otherwise. Only ListTenantMembers sets
+	// it; it is "" elsewhere.
+	AccountKind string
 }
 
 // TenantInvitation is a pending offer to join a Tenant, addressed to an

@@ -2,7 +2,6 @@ package connect
 
 import (
 	"context"
-	"errors"
 
 	"connectrpc.com/connect"
 
@@ -10,7 +9,9 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// CreateTenantInvitation invites an email to join a tenant. Owner/admin only.
+// CreateTenantInvitation invites an email to join a tenant, or, with
+// account_username, account_domain or display_name, creates or resends the
+// set-up link of an account the tenant manages. Owner/admin only.
 // Available only on the postgres control-plane driver; nil service
 // (memory) returns Unimplemented.
 func (h *IdentityHandler) CreateTenantInvitation(
@@ -24,11 +25,16 @@ func (h *IdentityHandler) CreateTenantInvitation(
 	if userID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
-	if err := refuseManagedAccountRequest(req.Msg); err != nil {
-		return nil, err
+	var created *service.CreatedInvitation
+	var err error
+	if m := req.Msg; m.GetAccountUsername() != "" || m.GetAccountDomain() != "" || m.GetDisplayName() != "" {
+		created, err = h.members.CreateManagedSetupInvitation(ctx, userID, authenticatedSignIn(req.Header()), service.ManagedAccountRequest{
+			TenantID: m.GetTenantId(), Username: m.GetAccountUsername(), Domain: m.GetAccountDomain(),
+			DisplayName: m.GetDisplayName(), DeliveryEmail: m.GetEmail(), Role: m.GetRole(),
+		}, clientIP(req.Header()), clientUserAgent(req.Header()))
+	} else {
+		created, err = h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId, req.Msg.Email, req.Msg.Role)
 	}
-
-	created, err := h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId, req.Msg.Email, req.Msg.Role)
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -37,22 +43,6 @@ func (h *IdentityHandler) CreateTenantInvitation(
 		RawToken:        created.RawToken,
 		EmailSendStatus: emailSendStatusToProto(created.EmailStatus),
 	}), nil
-}
-
-// refuseManagedAccountRequest refuses a request for a tenant-managed
-// account, which this server does not create yet, so that the request never
-// falls through to an ordinary invitation sent to its delivery address.
-func refuseManagedAccountRequest(msg *identitypb.CreateTenantInvitationRequest) error {
-	if msg.GetAccountUsername() == "" && msg.GetAccountDomain() == "" && msg.GetDisplayName() == "" {
-		return nil
-	}
-	refused := connect.NewError(connect.CodeFailedPrecondition, errors.New("managed accounts are not available on this server"))
-	detail, err := connect.NewErrorDetail(&identitypb.ManagedAccountRefusedDetails{Reason: identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_POLICY})
-	if err != nil {
-		return connect.NewError(connect.CodeInternal, err)
-	}
-	refused.AddDetail(detail)
-	return refused
 }
 
 func emailSendStatusToProto(s service.EmailSendStatus) identitypb.EmailSendStatus {
@@ -278,7 +268,7 @@ func invitationToProto(inv *service.TenantInvitation) *identitypb.TenantInvitati
 	if inv == nil {
 		return nil
 	}
-	return &identitypb.TenantInvitation{
+	out := &identitypb.TenantInvitation{
 		Id:         inv.ID,
 		TenantId:   inv.TenantID,
 		Email:      inv.Email,
@@ -289,6 +279,13 @@ func invitationToProto(inv *service.TenantInvitation) *identitypb.TenantInvitati
 		AcceptedAt: msToTimestamp(inv.AcceptedAtMs),
 		CreatedAt:  msToTimestamp(inv.CreatedAtMs),
 	}
+	if inv.IsManagedSetup() {
+		out.IsManagedSetup = true
+		out.Email = inv.DeliveryEmail
+		out.AccountAddress = inv.Email
+		out.UserId = inv.UserID
+	}
+	return out
 }
 
 // membershipToProto converts a service-layer TenantMembership to the proto
@@ -298,14 +295,26 @@ func membershipToProto(m *service.TenantMembership) *identitypb.TenantMembership
 		return nil
 	}
 	return &identitypb.TenantMembership{
-		Id:        m.ID,
-		TenantId:  m.TenantID,
-		UserId:    m.UserID,
-		Source:    m.Source,
-		Role:      m.Role,
-		Status:    m.Status,
-		CreatedAt: msToTimestamp(m.CreatedAtMs),
-		UpdatedAt: msToTimestamp(m.UpdatedAtMs),
+		Id:          m.ID,
+		TenantId:    m.TenantID,
+		UserId:      m.UserID,
+		Source:      m.Source,
+		Role:        m.Role,
+		Status:      m.Status,
+		CreatedAt:   msToTimestamp(m.CreatedAtMs),
+		UpdatedAt:   msToTimestamp(m.UpdatedAtMs),
+		AccountKind: accountKindToProto(m.AccountKind),
+	}
+}
+
+func accountKindToProto(kind string) identitypb.AccountKind {
+	switch kind {
+	case service.AccountKindPersonal:
+		return identitypb.AccountKind_ACCOUNT_KIND_PERSONAL
+	case service.AccountKindManaged:
+		return identitypb.AccountKind_ACCOUNT_KIND_MANAGED
+	default:
+		return identitypb.AccountKind_ACCOUNT_KIND_UNSPECIFIED
 	}
 }
 
@@ -406,11 +415,52 @@ func (h *IdentityHandler) JoinTenantByDomain(
 	}), nil
 }
 
+// CheckManagedAddresses says whether managed accounts of a tenant could be
+// created at the addresses asked about. Owner/admin only.
 func (h *IdentityHandler) CheckManagedAddresses(
-	context.Context,
-	*connect.Request[identitypb.CheckManagedAddressesRequest],
+	ctx context.Context,
+	req *connect.Request[identitypb.CheckManagedAddressesRequest],
 ) (*connect.Response[identitypb.CheckManagedAddressesResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	queries := make([]service.ManagedAddressQuery, 0, len(req.Msg.GetAddresses()))
+	for _, a := range req.Msg.GetAddresses() {
+		queries = append(queries, service.ManagedAddressQuery{Username: a.GetUsername(), Domain: a.GetDomain()})
+	}
+	checks, err := h.members.CheckManagedAddresses(ctx, userID, req.Msg.GetTenantId(), queries)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	out := make([]*identitypb.ManagedAddressCheck, 0, len(checks))
+	for _, c := range checks {
+		out = append(out, &identitypb.ManagedAddressCheck{
+			Address: &identitypb.ManagedAddress{Username: c.Query.Username, Domain: c.Query.Domain},
+			Status:  managedAddressStatusToProto(c.Status),
+		})
+	}
+	return connect.NewResponse(&identitypb.CheckManagedAddressesResponse{Results: out}), nil
+}
+
+func managedAddressStatusToProto(status string) identitypb.ManagedAddressStatus {
+	switch status {
+	case service.ManagedAddressFree:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_FREE
+	case service.ManagedAddressManagedByThis:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_MANAGED_BY_THIS_TENANT
+	case service.ManagedAddressHeldOutsideTheTenant:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_ADDRESS_UNAVAILABLE
+	case service.ManagedAddressDomainUnverified:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_DOMAIN_UNVERIFIED
+	case service.ManagedAddressInvalid:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_INVALID
+	default:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_UNSPECIFIED
+	}
 }
 
 func (h *IdentityHandler) ResetManagedAccount(

@@ -84,10 +84,12 @@ type ManagedSetup struct {
 	TokenHash   string
 	ExpiresAtMs int64
 	// Limits apply as InvitationStore.CreateInvitation applies them, with
-	// Address as the recipient.
+	// Address as the recipient; the resend cooldown applies to DeliveryEmail
+	// too, across the project.
 	Limits InvitationLimits
-	// MaxPerDeliveryEmail caps the set-up links sent to DeliveryEmail as
-	// ManagedReset.MaxPerDeliveryEmail does. Zero applies no cap.
+	// MaxPerDeliveryEmail caps the set-up links sent to DeliveryEmail, under
+	// FoldEmail, across the project at or after Limits.WindowStartMs: past it
+	// the link is ErrManagedResetLimited. Zero applies no cap.
 	MaxPerDeliveryEmail int
 }
 
@@ -234,7 +236,9 @@ type ManagedSetupStore interface {
 	// invitationID, if pending, and, at any status of the link, deletes its
 	// account while that account is still invited and has never been set up,
 	// revoking its other pending links. by must be an active owner or admin of
-	// tenantID where the revoke is written (ErrPermissionDenied). An accepted
+	// tenantID where the revoke is written, and an owner when the link, or
+	// the account's pending link, grants the owner role
+	// (ErrPermissionDenied). An accepted
 	// link is ErrInvitationUsed; an id that is not one of the tenant's managed
 	// set-up links is ErrNotFound.
 	RevokeManagedSetup(ctx context.Context, projectID, tenantID, invitationID, by string) (*ManagedSetupRevoked, error)
@@ -246,6 +250,13 @@ type ManagedSetupStore interface {
 	// who holds addresses on another's domain. It locks nothing; the answer
 	// may be stale by the time it is read.
 	ManagedAddressHolders(ctx context.Context, projectID, tenantID string, addresses []string) (map[string]string, error)
+	// ManagedAccountsAmong reports which of userIDs are accounts tenantID
+	// manages: the returned set holds exactly those. It locks nothing.
+	ManagedAccountsAmong(ctx context.Context, projectID, tenantID string, userIDs []string) (map[string]bool, error)
+	// RevokeSetupLinksOf revokes every pending set-up link of userID, as
+	// RevokeManagedSetup does for an account it deletes. Revoking none is
+	// not an error.
+	RevokeSetupLinksOf(ctx context.Context, projectID, userID string) error
 }
 
 // ManagedMemberStore changes the membership and the account of a managed

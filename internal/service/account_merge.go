@@ -248,6 +248,9 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, sign
 	if err := checkSurvivor(ctx, repo, survivor); err != nil {
 		return nil, err
 	}
+	if err := refuseManagedMerge(ctx, s.logger, s.projectID(ctx), survivor); err != nil {
+		return nil, err
+	}
 	if survivor.ExternalID != "" {
 		return nil, errIDPManaged
 	}
@@ -262,6 +265,10 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, sign
 	if other.TotpRequired || decision.RequireSecondFactor {
 		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "second_factor_required")
 		return nil, fmt.Errorf("%w: the other account requires a second factor; turn two-step verification off there first", ErrMergeRefused)
+	}
+	if err := refuseManagedMerge(ctx, s.logger, s.projectID(ctx), other); err != nil {
+		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "managed_account")
+		return nil, err
 	}
 	s.resetFailedLogin(ctx, other)
 	merged, retired, err := mergeAccounts(ctx, repo, survivor, other, takeAddress, s.nowMs())
@@ -318,6 +325,9 @@ func (s *AdminService) MergeUsers(ctx context.Context, actorID string, signIn Se
 	}
 	if survivor == nil || other == nil {
 		return nil, ErrNotFound
+	}
+	if err := refuseManagedMerge(ctx, s.logger, s.projectID(ctx), survivor, other); err != nil {
+		return nil, err
 	}
 	merged, retired, err := mergeAccounts(ctx, repo, survivor, other, takeAddress, nowMs())
 	if err != nil {

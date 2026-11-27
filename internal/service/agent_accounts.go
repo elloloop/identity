@@ -132,11 +132,13 @@ func isActivePerson(u *User) bool {
 }
 
 // isEligibleAgentOwner reports whether u may own an agent: an active
-// permanent person. The same rule backs creation, transfer and the standing
-// check, so an agent can never be handed to an account it would be unusable
-// under.
+// permanent person whose account no tenant manages (a tenant's account owns
+// no agent until its tenant can govern them). The same rule backs creation,
+// transfer, an offer's acceptance, an orphan's reassignment, agent OAuth and
+// machine validity, and the standing check, so an agent can never be handed
+// to an account it would be unusable under.
 func isEligibleAgentOwner(u *User) bool {
-	return isActivePerson(u)
+	return isActivePerson(u) && u.ManagedByTenantID == ""
 }
 
 // checkAgentStanding returns nil when the agent may hold a session now. It
@@ -170,8 +172,7 @@ func (s *AuthService) checkAgentStanding(ctx context.Context, agent *User) error
 }
 
 // agentOwner returns the agent's owner when that owner may stand behind a
-// session now (an active permanent person), and errAgentOwnerNotActive
-// otherwise.
+// session now (agentOwnerStanding), and its refusal otherwise.
 func (s *AuthService) agentOwner(ctx context.Context, agent *User) (*User, error) {
 	if agent.OwnerUserID == "" {
 		return nil, errAgentOwnerNotActive
@@ -180,8 +181,8 @@ func (s *AuthService) agentOwner(ctx context.Context, agent *User) (*User, error
 	if err != nil {
 		return nil, fmt.Errorf("fetch agent owner: %w", err)
 	}
-	if !isEligibleAgentOwner(owner) {
-		return nil, errAgentOwnerNotActive
+	if err := s.agentOwnerStanding(ctx, owner); err != nil {
+		return nil, err
 	}
 	return owner, nil
 }
@@ -300,7 +301,8 @@ func (s *AuthService) emitAgentEvent(ctx context.Context, t events.EventType, ag
 
 // CreateAgent creates an agent account owned by ownerUserID, which defaults
 // to the caller. Naming another owner requires a project admin, and that
-// owner must be an active person in this project.
+// owner must be an active person in this project. An account a tenant
+// manages owns no agent (ErrManagedAccount).
 func (s *AuthService) CreateAgent(
 	ctx context.Context, callerID, name, avatarURL, ownerUserID, ip, userAgent, clientRequestID string,
 ) (*User, error) {
@@ -323,11 +325,22 @@ func (s *AuthService) CreateAgent(
 		if owner, err = repo.GetUser(ctx, id); err != nil {
 			return nil, fmt.Errorf("fetch owner: %w", err)
 		}
-		if !isEligibleAgentOwner(owner) {
+	}
+	if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), owner, "create_agent"); err != nil {
+		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
+			map[string]any{"step": "owner_managed", "owner_user_id": owner.ID})
+		return nil, err
+	}
+	if owner != caller {
+		if s.agentOwnerStanding(ctx, owner) != nil {
 			s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
-				map[string]any{"step": "owner_not_eligible", "owner_user_id": id})
+				map[string]any{"step": "owner_not_eligible", "owner_user_id": strings.TrimSpace(ownerUserID)})
 			return nil, errAgentOwnerNotEligible
 		}
+	} else if err := s.agentOwnerStanding(ctx, owner); err != nil {
+		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
+			map[string]any{"step": "owner_not_eligible"})
+		return nil, err
 	}
 	if err := validateAgentCreationKey(clientRequestID); err != nil {
 		return nil, err
@@ -463,7 +476,7 @@ func (s *AuthService) TransferAgent(
 	if err != nil {
 		return nil, fmt.Errorf("fetch new owner: %w", err)
 	}
-	if !isEligibleAgentOwner(newOwner) {
+	if s.agentOwnerStanding(ctx, newOwner) != nil {
 		s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
 			map[string]any{"step": "owner_not_eligible"})
 		return nil, errAgentOwnerNotEligible
@@ -607,6 +620,11 @@ func (s *AuthService) AcceptAgentTransfer(ctx context.Context, callerID, agentID
 	caller, agent, err := s.pendingTransferTo(ctx, agentOpTransfer, callerID, agentID, ip, userAgent)
 	if err != nil {
 		return nil, err
+	}
+	if s.agentOwnerStanding(ctx, caller) != nil {
+		s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
+			map[string]any{"step": "owner_not_eligible", "owner_user_id": caller.ID})
+		return nil, errAgentOwnerNotEligible
 	}
 	if err := s.checkAgentCapacity(ctx, caller.ID); err != nil {
 		s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,

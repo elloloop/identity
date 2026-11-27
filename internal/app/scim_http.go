@@ -338,6 +338,20 @@ func (s *repoSCIMStore) CreateUser(ctx context.Context, u scim.User) (scim.User,
 	return toSCIMUser(su), nil
 }
 
+// refuseManaged refuses, with scim.ErrForbidden, a SCIM write to an account
+// a tenant manages: the tenant owns its lifecycle and its address, so an
+// identity provider may read it but not replace, patch, deactivate or delete
+// it. Each refusal is logged as managed_account_refused with the operation.
+func (s *repoSCIMStore) refuseManaged(u *service.User, op string) error {
+	if u.ManagedByTenantID == "" {
+		return nil
+	}
+	s.logger.Info("managed_account_refused",
+		zap.String("project_id", s.projectID), zap.String("tenant_id", u.ManagedByTenantID),
+		zap.String("user_id", u.ID), zap.String("path", "scim:"+op))
+	return fmt.Errorf("%w: a tenant manages this account", scim.ErrForbidden)
+}
+
 // loadSCIMAddressable resolves the user behind a SCIM id, or ErrNotFound.
 //
 // Anonymous accounts are deliberately absent from this surface. They hold no
@@ -376,6 +390,9 @@ func (s *repoSCIMStore) GetUser(ctx context.Context, id string) (scim.User, erro
 func (s *repoSCIMStore) ReplaceUser(ctx context.Context, id string, u scim.User) (scim.User, error) {
 	existing, err := s.loadSCIMAddressable(ctx, id)
 	if err != nil {
+		return scim.User{}, err
+	}
+	if err := s.refuseManaged(existing, "ReplaceUser"); err != nil {
 		return scim.User{}, err
 	}
 	status := statusActive
@@ -485,6 +502,9 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 	if err != nil {
 		return scim.User{}, err
 	}
+	if err := s.refuseManaged(existing, "PatchUser"); err != nil {
+		return scim.User{}, err
+	}
 
 	fields := map[string]any{}
 	unverified := false
@@ -562,6 +582,9 @@ func (s *repoSCIMStore) PatchUser(ctx context.Context, id string, patch scim.Use
 func (s *repoSCIMStore) DeleteUser(ctx context.Context, id string) error {
 	existing, err := s.loadSCIMAddressable(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := s.refuseManaged(existing, "DeleteUser"); err != nil {
 		return err
 	}
 	// Before the delete, so the agents the user owns are cut off too: the

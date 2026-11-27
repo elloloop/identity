@@ -42,7 +42,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAssuranceFailed),
 		errors.Is(err, service.ErrAgentSignIn),
 		errors.Is(err, service.ErrRemovedFromTenant),
-		errors.Is(err, service.ErrMemberSuspended):
+		errors.Is(err, service.ErrMemberSuspended),
+		errors.Is(err, service.ErrManagedAccount):
 		return connect.NewError(connect.CodePermissionDenied, err)
 
 	// Unimplemented: the capability is absent from this deployment, not
@@ -105,7 +106,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrInvitationRecipientLimited),
 		errors.Is(err, service.ErrDomainAttemptsLimited),
 		errors.Is(err, service.ErrRecoveryEmailLimit),
-		errors.Is(err, service.ErrPhoneMatchLimited):
+		errors.Is(err, service.ErrPhoneMatchLimited),
+		errors.Is(err, service.ErrManagedAddressCheckLimited):
 		// CodeResourceExhausted: lockout is a per-account quota of failed
 		// attempts. ResourceExhausted matches gRPC's documented semantics
 		// for "the resource is exhausted" / rate-limit-style failures and
@@ -167,7 +169,8 @@ func toConnectError(err error) *connect.Error {
 	case errors.Is(err, service.ErrInvitationUsed),
 		errors.Is(err, service.ErrInvitationExpired),
 		errors.Is(err, service.ErrInvitationRevoked),
-		errors.Is(err, service.ErrInvitationSignupUnavailable):
+		errors.Is(err, service.ErrInvitationSignupUnavailable),
+		errors.Is(err, service.ErrManagedSetupStale):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrLastOwner),
@@ -247,6 +250,9 @@ func toConnectError(err error) *connect.Error {
 // typedRefusalConnectError maps the refusals that carry their own detail,
 // and returns nil for any other error.
 func typedRefusalConnectError(err error) *connect.Error {
+	if cerr := managedAccountRefusedConnectError(err); cerr != nil {
+		return cerr
+	}
 	var refusal *service.TenantSelectionRefusedError
 	if errors.As(err, &refusal) {
 		return tenantSelectionRefusedConnectError(refusal)
@@ -338,4 +344,29 @@ func containsAny(s string, substrs ...string) bool {
 		}
 	}
 	return false
+}
+
+// managedAccountRefusedConnectError maps a refused managed-account write to
+// its code with a ManagedAccountRefusedDetails naming the reason, or returns
+// nil for any other error.
+func managedAccountRefusedConnectError(err error) *connect.Error {
+	var code connect.Code
+	var reason identitypb.ManagedAccountRefusal
+	switch {
+	case errors.Is(err, service.ErrManagedByThisTenant):
+		code, reason = connect.CodeAlreadyExists, identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_MANAGED_BY_THIS_TENANT
+	case errors.Is(err, service.ErrManagedAddressUnavailable):
+		code, reason = connect.CodeAlreadyExists, identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_ADDRESS_UNAVAILABLE
+	case errors.Is(err, service.ErrManagedDomainUnverified):
+		code, reason = connect.CodeFailedPrecondition, identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_DOMAIN_UNVERIFIED
+	case errors.Is(err, service.ErrManagedAccountsNotAdmitted):
+		code, reason = connect.CodeFailedPrecondition, identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_POLICY
+	default:
+		return nil
+	}
+	cerr := connect.NewError(code, err)
+	if detail, detErr := connect.NewErrorDetail(&identitypb.ManagedAccountRefusedDetails{Reason: reason}); detErr == nil {
+		cerr.AddDetail(detail)
+	}
+	return cerr
 }

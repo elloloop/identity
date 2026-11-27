@@ -120,6 +120,47 @@ func TestRenderTenantInvitation_WithoutTenantName(t *testing.T) {
 	}
 }
 
+// TestRenderManagedAccountSetup: the set-up email names the account, its
+// tenant and role, and carries the link; the name the tenant gave is escaped
+// in the HTML part, and a missing tenant name reads as the organization.
+func TestRenderManagedAccountSetup(t *testing.T) {
+	t.Parallel()
+	html, text, err := Render(TemplateManagedAccountSetup, map[string]any{
+		"UserName":       "Ann <b>Lee</b>",
+		"TenantName":     "Acme",
+		"AccountAddress": "ann@acme.example.com",
+		"Role":           "member",
+		"ExpiresIn":      "7 days",
+		"Link":           "https://example.com/invite?t=baz",
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, want := range []string{"Acme", "ann@acme.example.com", "member", "7 days", "https://example.com/invite?t=baz"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("html missing %q", want)
+		}
+		if !strings.Contains(text, want) {
+			t.Errorf("text missing %q", want)
+		}
+	}
+	if strings.Contains(html, "<b>Lee</b>") || !strings.Contains(html, "Ann &lt;b&gt;Lee&lt;/b&gt;") {
+		t.Errorf("html did not escape the name: %s", html)
+	}
+	html, text, err = Render(TemplateManagedAccountSetup, map[string]any{
+		"UserName": "Ann", "AccountAddress": "ann@acme.example.com", "Role": "member",
+		"ExpiresIn": "7 days", "Link": "https://example.com/invite?t=baz",
+	})
+	if err != nil {
+		t.Fatalf("Render without a tenant name: %v", err)
+	}
+	for name, body := range map[string]string{"html": html, "text": text} {
+		if !strings.Contains(body, "Your organization has created an account for you") {
+			t.Errorf("%s does not fall back to the organization: %s", name, body)
+		}
+	}
+}
+
 func TestRenderHTMLAutoEscaping(t *testing.T) {
 	t.Parallel()
 	html, _, err := Render(TemplatePasswordReset, map[string]any{

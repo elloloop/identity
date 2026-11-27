@@ -740,39 +740,42 @@ func TestListMyTenants_Handler(t *testing.T) {
 	}
 }
 
-func TestManagedAccountRPCs_ReturnUnimplemented(t *testing.T) {
+func TestResetManagedAccount_ReturnsUnimplemented(t *testing.T) {
 	t.Parallel()
 	for _, svc := range []*service.MembershipService{nil, newMembershipSvc(nil, nil, nil, nil)} {
 		srv := startMembershipServer(t, svc)
 		ctx := context.Background()
 
-		_, err := srv.client.CheckManagedAddresses(ctx,
-			withAuth(&identitypb.CheckManagedAddressesRequest{TenantId: "t", Addresses: []*identitypb.ManagedAddress{{Username: "ann", Domain: "acme.example.com"}}}, "u1"))
-		requireCode(t, err, connect.CodeUnimplemented)
-
-		_, err = srv.client.ResetManagedAccount(ctx,
+		_, err := srv.client.ResetManagedAccount(ctx,
 			withAuth(&identitypb.ResetManagedAccountRequest{TenantId: "t", UserId: "u2", DeliveryAddress: "ann@example.com"}, "u1"))
 		requireCode(t, err, connect.CodeUnimplemented)
 	}
 }
 
-// A request for a tenant-managed account is refused with POLICY, so it never
-// becomes an ordinary invitation to its delivery address; with no membership
-// service the call is Unimplemented, as every membership call is.
+// A request for a tenant-managed account is refused with POLICY wherever
+// the server or the project does not admit managed accounts, so it never
+// becomes an ordinary invitation to its delivery address; a server with no
+// managed store answers Unimplemented, and with no membership service the
+// call is Unimplemented, as every membership call is.
 func TestCreateTenantInvitation_ManagedAccountFieldsRefused(t *testing.T) {
 	t.Parallel()
 	_, err := startMembershipServer(t, nil).client.CreateTenantInvitation(context.Background(),
 		withAuth(&identitypb.CreateTenantInvitationRequest{TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann"}, "u1"))
 	requireCode(t, err, connect.CodeUnimplemented)
-	{
-		srv := startMembershipServer(t, newMembershipSvc(nil, nil, nil, nil))
-		for name, req := range map[string]*identitypb.CreateTenantInvitationRequest{
-			"all":              {TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann", AccountDomain: "acme.example.com", DisplayName: "Ann"},
-			"account_username": {TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann"},
-			"account_domain":   {TenantId: "t", Email: "ann.home@example.com", AccountDomain: "acme.example.com"},
-			"display_name":     {TenantId: "t", Email: "ann.home@example.com", DisplayName: "Ann"},
-		} {
-			_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(req, "u1"))
+
+	admin := &connectMembershipStore{member: &service.TenantMembership{Role: service.RoleOwner, Status: service.MembershipStatusActive}}
+	requests := map[string]*identitypb.CreateTenantInvitationRequest{
+		"all": {TenantId: "tenant-1", Email: "ann.home@example.com", AccountUsername: "ann", AccountDomain: "acme.example.com", DisplayName: "Ann"},
+	}
+	for dark, cfg := range map[string]*config.Config{
+		"server flag off":                {},
+		"project not opted in (flag on)": {ManagedAccountsEnabled: true},
+	} {
+		svc := service.NewMembershipService(newConnectInvitationStore(), admin, claimedTenantStore(), &connectUserDirectory{},
+			email.NewLogOnly(zap.NewNop()), true, cfg, zap.NewNop()).WithManagedSetups(unusedManagedSetups{})
+		srv := startMembershipServer(t, svc)
+		for name, req := range requests {
+			_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(req, "admin-1"))
 			requireCode(t, err, connect.CodeFailedPrecondition)
 			var cerr *connect.Error
 			require.ErrorAs(t, err, &cerr, name)
@@ -784,7 +787,84 @@ func TestCreateTenantInvitation_ManagedAccountFieldsRefused(t *testing.T) {
 					reasons = append(reasons, refused.GetReason())
 				}
 			}
-			require.Equal(t, []identitypb.ManagedAccountRefusal{identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_POLICY}, reasons, name)
+			require.Equal(t, []identitypb.ManagedAccountRefusal{identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_POLICY}, reasons, "%s: %s", dark, name)
+		}
+	}
+}
+
+// unusedManagedSetups is a managed store no test call reaches: a dark
+// server refuses before it writes.
+type unusedManagedSetups struct{ service.ManagedSetupStore }
+
+// A request naming any of the managed-account fields is a managed account's
+// set-up link, which a server without the managed store cannot write.
+func TestCreateTenantInvitation_ManagedFieldsRouteToTheManagedSetup(t *testing.T) {
+	t.Parallel()
+	srv := startMembershipServer(t, newMembershipSvc(nil, nil, nil, nil))
+	for _, req := range []*identitypb.CreateTenantInvitationRequest{
+		{TenantId: "t", Email: "a@example.com", AccountUsername: "ann"},
+		{TenantId: "t", Email: "a@example.com", AccountDomain: "acme.example.com"},
+		{TenantId: "t", Email: "a@example.com", DisplayName: "Ann"},
+	} {
+		_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(req, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+	}
+}
+
+func TestInvitationToProto_ManagedSetupLink(t *testing.T) {
+	t.Parallel()
+	got := invitationToProto(&service.TenantInvitation{
+		ID: "inv", TenantID: "t", Email: "ann@acme.example.com", UserID: "u", DeliveryEmail: "ann@example.net",
+	})
+	if !got.GetIsManagedSetup() || got.GetEmail() != "ann@example.net" || got.GetAccountAddress() != "ann@acme.example.com" || got.GetUserId() != "u" {
+		t.Fatalf("managed = %+v", got)
+	}
+	plain := invitationToProto(&service.TenantInvitation{ID: "inv", TenantID: "t", Email: "bob@example.com"})
+	if plain.GetIsManagedSetup() || plain.GetEmail() != "bob@example.com" || plain.GetAccountAddress() != "" || plain.GetUserId() != "" {
+		t.Fatalf("ordinary = %+v", plain)
+	}
+}
+
+func TestAccountKindToProto(t *testing.T) {
+	t.Parallel()
+	for kind, want := range map[string]identitypb.AccountKind{
+		service.AccountKindPersonal: identitypb.AccountKind_ACCOUNT_KIND_PERSONAL,
+		service.AccountKindManaged:  identitypb.AccountKind_ACCOUNT_KIND_MANAGED,
+		"":                          identitypb.AccountKind_ACCOUNT_KIND_UNSPECIFIED,
+	} {
+		if got := accountKindToProto(kind); got != want {
+			t.Fatalf("%q = %v, want %v", kind, got, want)
+		}
+	}
+}
+
+// Without a membership service, or without the managed store behind one,
+// the address check is unimplemented; with no caller it is unauthenticated.
+func TestCheckManagedAddresses_Unavailable(t *testing.T) {
+	t.Parallel()
+	req := &identitypb.CheckManagedAddressesRequest{TenantId: "t", Addresses: []*identitypb.ManagedAddress{{Username: "ann", Domain: "acme.example.com"}}}
+	for _, svc := range []*service.MembershipService{nil, newMembershipSvc(nil, nil, nil, nil)} {
+		srv := startMembershipServer(t, svc)
+		_, err := srv.client.CheckManagedAddresses(context.Background(), withAuth(req, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+	}
+	srv := startMembershipServer(t, newMembershipSvc(nil, nil, nil, nil))
+	_, err := srv.client.CheckManagedAddresses(context.Background(), connect.NewRequest(req))
+	requireCode(t, err, connect.CodeUnauthenticated)
+}
+
+func TestManagedAddressStatusToProto(t *testing.T) {
+	t.Parallel()
+	for status, want := range map[string]identitypb.ManagedAddressStatus{
+		service.ManagedAddressFree:                 identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_FREE,
+		service.ManagedAddressManagedByThis:        identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_MANAGED_BY_THIS_TENANT,
+		service.ManagedAddressHeldOutsideTheTenant: identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_ADDRESS_UNAVAILABLE,
+		service.ManagedAddressDomainUnverified:     identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_DOMAIN_UNVERIFIED,
+		service.ManagedAddressInvalid:              identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_INVALID,
+		"something else":                           identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_UNSPECIFIED,
+	} {
+		if got := managedAddressStatusToProto(status); got != want {
+			t.Fatalf("%q = %v, want %v", status, got, want)
 		}
 	}
 }

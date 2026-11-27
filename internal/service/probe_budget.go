@@ -41,6 +41,13 @@ func (b *probeBudget) disabled(key string) bool {
 // reserve takes one unit for key, or reports false when its budget for the
 // current window is spent. A disabled budget and an empty key always pass.
 func (b *probeBudget) reserve(key string, nowMs int64) bool {
+	return b.reserveUnits(key, 1, nowMs)
+}
+
+// reserveUnits takes n units for key at once, or none, reporting false, when
+// fewer than n are left in the current window. A disabled budget and an
+// empty key always pass.
+func (b *probeBudget) reserveUnits(key string, n int, nowMs int64) bool {
 	if b.disabled(key) {
 		return true
 	}
@@ -53,10 +60,10 @@ func (b *probeBudget) reserve(key string, nowMs int64) bool {
 		}
 		w = probeWindow{startMs: nowMs}
 	}
-	if w.count >= b.limit {
+	if w.count+n > b.limit {
 		return false
 	}
-	w.count++
+	w.count += n
 	b.spent[key] = w
 	return true
 }

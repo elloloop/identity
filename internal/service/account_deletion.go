@@ -74,7 +74,8 @@ func (s *ProfileService) graceDays() int {
 // action takes precedence. The household/teardown concern for a sole admin lives
 // in the relay, not here.
 //
-// A session a recovery hold binds is refused (RecoveryHoldError).
+// A session a recovery hold binds is refused (RecoveryHoldError). An
+// account a tenant manages is the tenant's to end (ErrManagedAccount).
 //
 // Returns the epoch-ms instant the account is scheduled to be purged.
 func (s *ProfileService) DeleteMyAccount(ctx context.Context, actorID string, signIn SessionSignIn, reason string) (int64, error) {
@@ -95,6 +96,9 @@ func (s *ProfileService) DeleteMyAccount(ctx context.Context, actorID string, si
 	}
 	if user == nil {
 		return 0, fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, "delete_my_account"); err != nil {
+		return 0, err
 	}
 
 	switch {
@@ -249,8 +253,12 @@ func (s *AdminService) PurgeManagedChildAccount(ctx context.Context, guardianUse
 // admin DeleteUser RPC and the account-deletion sweeper: neither reimplements
 // the cascade. Callers own the authorization / eligibility checks before calling
 // it. Sessions and refresh tokens are revoked BEFORE the cascade so any in-flight
-// access token dies immediately.
+// access token dies immediately. A managed account's set-up links end first
+// (endManagedSetupLinks), so none is left to name a deleted account.
 func (s *AdminService) purgeUser(ctx context.Context, auditActorID string, u *User, guardianReceipt bool) error {
+	if err := s.endManagedSetupLinks(ctx, u); err != nil {
+		return err
+	}
 	now := nowMs()
 	if err := RevokeUserAccess(ctx, s.repo(ctx), u.ID, now); err != nil {
 		return fmt.Errorf("delete user: %w", err)
