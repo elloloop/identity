@@ -720,7 +720,11 @@ RestoreTenantMember(tenant_id, user_id)
   </p>
   <p id="managed-account-sign-in">
     A managed account holds a session only while it is active, has been set
-    up, and its membership of the tenant that manages it is active. Every way
+    up, its membership of the tenant that manages it is active, and that
+    tenant is claimed or latent (a suspended tenant's accounts sign nothing
+    in). The same rule decides whether it may stand behind an agent: an agent
+    it owns gets no session, refresh or OAuth exchange while its owner is out
+    of standing, and gets them again once the owner is restored. Every way
     of signing in, a two-step code and a refresh included, checks this when it
     mints tokens, whether or not <code>GATEWAY_MANAGED_ACCOUNTS_ENABLED</code>
     is on, and refuses with <code>FAILED_PRECONDITION</code> otherwise. So an

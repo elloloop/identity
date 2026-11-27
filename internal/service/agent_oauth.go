@@ -199,8 +199,8 @@ func (s *AgentOAuthService) human(ctx context.Context, human AgentOAuthHuman, gr
 	if err != nil {
 		return nil, err
 	}
-	if !isEligibleAgentOwner(user) {
-		return nil, ErrPermissionDenied
+	if err := s.ownerStanding(ctx, user); err != nil {
+		return nil, err
 	}
 	session, err := s.base.WithProject(s.auth.projectID(ctx)).GetSessionBySid(ctx, human.SignIn.SessionID)
 	if err != nil {
@@ -218,8 +218,8 @@ func (s *AgentOAuthService) admitOwner(ctx context.Context, user *User, product 
 	if err != nil {
 		return err
 	}
-	if !isEligibleAgentOwner(user) {
-		return ErrPermissionDenied
+	if err := s.ownerStanding(ctx, user); err != nil {
+		return err
 	}
 	if s.auth.needsEmailVerification(user) {
 		return ErrEmailVerificationRequired
@@ -461,7 +461,25 @@ func (s *AgentOAuthService) admittedAuthority(ctx context.Context, request *Agen
 	return a, currentExpiry, nil
 }
 
+// ownerStanding is agentOwnerStanding for an agent's OAuth or machine
+// exchange: an owner who may not own an agent is ErrPermissionDenied, and a
+// managed owner out of standing in its tenant is refused as
+// refuseManagedAccount refuses it.
+func (s *AgentOAuthService) ownerStanding(ctx context.Context, owner *User) error {
+	err := s.auth.agentOwnerStanding(ctx, owner)
+	if errors.Is(err, errAgentOwnerNotActive) {
+		return ErrPermissionDenied
+	}
+	return err
+}
+
+// isAgentOAuthAdmissionRefusal reports whether err refuses the owner for
+// good, which ends the grant or machine. A managed owner whose standing
+// could not be read is not refused for good: its grant stays for a retry.
 func isAgentOAuthAdmissionRefusal(err error) bool {
+	if isManagedStandingUnread(err) {
+		return false
+	}
 	return errors.Is(err, ErrPermissionDenied) || errors.Is(err, ErrAccountNotActive) || errors.Is(err, ErrEmailVerificationRequired) || errors.Is(err, ErrIDVRequired) || errors.Is(err, ErrDOBRequired) || errors.Is(err, ErrAccessNotAllowed) || errors.Is(err, ErrProductAgeRestricted)
 }
 

@@ -872,7 +872,7 @@ func New(deps Deps) (*Built, error) {
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
 		WithManagedAccounts(deps.ManagedSetups, deps.TenantStore).
-		WithManagedMemberships(managedMembershipReader(deps)).
+		WithManagedMemberships(managedMembershipReader(deps), managedTenantStatusReader(deps)).
 		WithDomainJoin(deps.DomainStore, deps.TenantStore).
 		WithMailDelivery(senders.mailDelivers).
 		WithTemplateMessages(senders.templates).
@@ -1763,4 +1763,14 @@ func managedMembershipReader(deps Deps) service.ManagedMembershipReader {
 		return nil
 	}
 	return deps.MembershipStore
+}
+
+// managedTenantStatusReader is the reader of a managed account's tenant's
+// status, alongside managedMembershipReader: the tenant store wherever there
+// is one.
+func managedTenantStatusReader(deps Deps) service.ManagedTenantStatusReader {
+	if deps.TenantStore == nil {
+		return nil
+	}
+	return deps.TenantStore
 }

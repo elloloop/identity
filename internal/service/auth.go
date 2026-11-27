@@ -1555,9 +1555,11 @@ type AuthService struct {
 	// links (WithManagedAccounts). Either nil sets none up.
 	managedSetups  ManagedSetupStore
 	managedTenants TenantStore
-	// managedMemberships decides whether a managed account may hold a
-	// session (WithManagedMemberships); nil refuses every managed account.
-	managedMemberships ManagedMembershipReader
+	// managedMemberships and managedTenantStatus decide whether a managed
+	// account may hold a session (WithManagedMemberships); either nil refuses
+	// every managed account.
+	managedMemberships  ManagedMembershipReader
+	managedTenantStatus ManagedTenantStatusReader
 	// joinDomains and joinTenants answer whether an address's domain lets an
 	// invite project with access.admit_domain_join create its account
 	// (WithDomainJoin). Either nil admits no such account.
@@ -2912,6 +2914,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, rawRefreshToken, tenantI
 		statusErr = s.refuseManagedAccount(ctx, timeoutUser)
 		if isManagedStandingUnread(statusErr) {
 			return nil, "", "", statusErr
+		}
+		if statusErr == nil && timeoutUser.ManagedByTenantID != "" {
+			ctx = withManagedStanding(ctx, timeoutUser.ID)
 		}
 	}
 
