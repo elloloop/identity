@@ -523,6 +523,7 @@ var categoryRules = []categoryRule{
 	{"GATEWAY_SELF_SERVICE_TENANTS_", "Projects & tenancy"},
 	{"GATEWAY_TENANT_DOMAIN_ATTEMPTS_", "Projects & tenancy"},
 	{"GATEWAY_TENANT_SELECTION_", "Projects & tenancy"},
+	{"GATEWAY_MANAGED_ACCOUNTS_", "Projects & tenancy"},
 	{"GATEWAY_TENANT_STATUS_CACHE_", "Projects & tenancy"},
 	{"GATEWAY_ADMIN_API_SECRET", "Projects & tenancy"},
 	{"GATEWAY_DISABLE_FIRST_ADMIN_BOOTSTRAP", "Projects & tenancy"},

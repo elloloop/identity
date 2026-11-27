@@ -237,6 +237,9 @@ func (s *TenantStore) CreateOwnedTenant(ctx context.Context, req service.OwnedTe
 	if req.MaxPerWindow <= 0 {
 		return nil, nil, fmt.Errorf("%w: max_per_window must be positive", service.ErrInvalidArgument)
 	}
+	if err := refuseManagedElsewhere(ctx, s.pool, "CreateOwnedTenant", req.ProjectID, "", req.OwnerID); err != nil {
+		return nil, nil, err
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"slices"
 	"strings"
@@ -18,9 +19,9 @@ import (
 // row-level security and these stores' pool is bound to the server's own
 // project. Every one takes its locks in the order service documents: the
 // membership's advisory lock, the account's users row (then its agents'
-// rows), the tenant's memberships in one ordered pass, then the
-// tenant_invitations rows. A write that also reads the account's domain
-// holds the domain row FOR SHARE right after the users rows.
+// rows), the domain row and then the tenants row FOR SHARE where read, the
+// tenant's memberships in one ordered pass, then the tenant_invitations
+// rows.
 
 var (
 	_ service.ManagedSetupStore  = (*InvitationStore)(nil)
@@ -32,6 +33,44 @@ var (
 func bindProject(ctx context.Context, tx pgx.Tx, projectID string) error {
 	_, err := tx.Exec(ctx, `SELECT set_config($1, $2, true)`, rlsGUC, projectID)
 	return err
+}
+
+// refuseManagedElsewhere refuses, with service.ErrManagedElsewhere, a
+// membership of userID in tenantID when the account is managed by another
+// tenant; tenantID "" is a tenant being created, which manages no account.
+// A managed account belongs to its tenant only. managed_by_tenant_id is fixed
+// when the account is created, so the read needs no lock and runs on its own
+// connection bound to projectID.
+func refuseManagedElsewhere(ctx context.Context, pool *tracedPool, op, projectID, tenantID, userID string) error {
+	managedBy, err := managingTenant(ctx, pool, op, projectID, userID)
+	if err != nil {
+		return err
+	}
+	if managedBy != "" && managedBy != tenantID {
+		return service.ErrManagedElsewhere
+	}
+	return nil
+}
+
+// managingTenant returns the tenant that manages userID's account, or, for
+// an agent, its owner's; "" for a personal account, an agent a person owns,
+// or none.
+func managingTenant(ctx context.Context, pool *tracedPool, op, projectID, userID string) (string, error) {
+	var managedBy string
+	err := pool.forProject(projectID).QueryRow(ctx, `
+		SELECT CASE WHEN u.managed_by_tenant_id <> '' THEN u.managed_by_tenant_id
+		            ELSE COALESCE(o.managed_by_tenant_id, '') END
+		FROM users u
+		LEFT JOIN users o ON u.kind = $3 AND u.owner_user_id <> ''
+		     AND o.project_id = u.project_id AND o.id = u.owner_user_id
+		WHERE u.project_id = $1 AND u.id = $2`, projectID, userID, service.UserKindAgent).Scan(&managedBy)
+	if noRows(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", wrapPgErr(op+"(managed)", err)
+	}
+	return managedBy, nil
 }
 
 // lockUserRow returns userID's account in projectID with its row held FOR
@@ -81,8 +120,10 @@ func addressDomain(address string) string {
 	return domain
 }
 
-// signOutEverywhere revokes every active session of userIDs and deletes
-// their refresh tokens. Returns the revoked sessions' ids.
+// signOutEverywhere revokes every active session of userIDs, deletes their
+// refresh tokens and pending sign-in challenges, expires their approved QR
+// hand-offs and spends their unredeemed OAuth one-time codes, so no sign-in
+// already under way completes. Returns the revoked sessions' ids.
 func signOutEverywhere(ctx context.Context, tx pgx.Tx, projectID string, userIDs []string, nowMs int64) ([]string, error) {
 	rows, err := tx.Query(ctx, `UPDATE sessions SET revoked_at_ms = $3
 		WHERE project_id = $1 AND user_id = ANY($2) AND revoked_at_ms = 0
@@ -95,6 +136,17 @@ func signOutEverywhere(ctx context.Context, tx pgx.Tx, projectID string, userIDs
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM refresh_tokens WHERE project_id = $1 AND user_id = ANY($2)`, projectID, userIDs); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE qr_login_sessions SET status = 'expired', updated_at_ms = $3
+		WHERE project_id = $1 AND user_id = ANY($2) AND status = 'approved'`, projectID, userIDs, nowMs); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE oauth_one_time_codes SET consumed_at_ms = $3
+		WHERE project_id = $1 AND user_id = ANY($2) AND consumed_at_ms = 0`, projectID, userIDs, nowMs); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM login_challenges WHERE project_id = $1 AND user_id = ANY($2)`, projectID, userIDs); err != nil {
 		return nil, err
 	}
 	slices.Sort(sids)
@@ -247,25 +299,35 @@ func governorOf(held map[string]*service.TenantMembership, by string) (*service.
 
 // ── ManagedSetupStore ───────────────────────────────────────────────────
 
+// managedSetupRole checks setup's required fields and returns the role its
+// link grants: setup.Role, member by default, and only member, admin or
+// owner.
+func managedSetupRole(setup service.ManagedSetup) (string, error) {
+	if setup.ProjectID == "" || setup.TenantID == "" || setup.Address == "" || setup.Domain == "" ||
+		setup.DeliveryEmail == "" || setup.InvitedBy == "" || setup.TokenHash == "" || setup.ExpiresAtMs == 0 {
+		return "", fmt.Errorf("%w: project, tenant, address, domain, delivery email, inviter, token hash and expiry are required", service.ErrInvalidArgument)
+	}
+	if !strings.EqualFold(addressDomain(setup.Address), setup.Domain) {
+		return "", fmt.Errorf("%w: the address is not on the domain", service.ErrInvalidArgument)
+	}
+	switch setup.Role {
+	case "":
+		return service.RoleMember, nil
+	case service.RoleMember, service.RoleAdmin, service.RoleOwner:
+		return setup.Role, nil
+	}
+	return "", fmt.Errorf("%w: role %q", service.ErrInvalidArgument, setup.Role)
+}
+
 // CreateManagedSetup implements service.ManagedSetupStore. The address's
 // lock (addressLockKey), which every write of an account's email or a
 // recovery email takes, comes before the users row, so no account or
 // recovery email can take the address between the check and the insert.
 func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.ManagedSetup) (*service.ManagedSetupIssued, error) {
 	const op = "CreateManagedSetup"
-	if setup.ProjectID == "" || setup.TenantID == "" || setup.Address == "" || setup.Domain == "" ||
-		setup.DeliveryEmail == "" || setup.InvitedBy == "" || setup.TokenHash == "" || setup.ExpiresAtMs == 0 {
-		return nil, fmt.Errorf("%w: project, tenant, address, domain, delivery email, inviter, token hash and expiry are required", service.ErrInvalidArgument)
-	}
-	if !strings.EqualFold(addressDomain(setup.Address), setup.Domain) {
-		return nil, fmt.Errorf("%w: the address is not on the domain", service.ErrInvalidArgument)
-	}
-	role := setup.Role
-	if role == "" {
-		role = service.RoleMember
-	}
-	if role != service.RoleMember && role != service.RoleAdmin && role != service.RoleOwner {
-		return nil, fmt.Errorf("%w: role %q", service.ErrInvalidArgument, role)
+	role, err := managedSetupRole(setup)
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -288,6 +350,13 @@ func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.
 	}
 	if !verified {
 		return nil, service.ErrManagedDomainUnverified
+	}
+	claimed, err := tenantClaimed(ctx, tx, setup.ProjectID, setup.TenantID)
+	if err != nil {
+		return nil, wrapPgErr(op+"(tenant)", err)
+	}
+	if !claimed {
+		return nil, fmt.Errorf("%w: the tenant cannot take members", service.ErrPermissionDenied)
 	}
 	held, err := lockGovernorsAnd(ctx, tx, setup.ProjectID, setup.TenantID, setup.InvitedBy)
 	if err != nil {
@@ -429,21 +498,27 @@ func lockInvitationRow(ctx context.Context, tx pgx.Tx, projectID, id string) (*s
 		FOR UPDATE`, projectID, id))
 }
 
-// tenantGovernable reports whether tenantID can still take a member: it is
-// claimed, and holds an active owner or admin other than userID. It holds the
-// tenant's row FOR SHARE, so a change of the tenant's status waits for tx;
-// the governors are held by the membership pass taken before it.
-func tenantGovernable(ctx context.Context, tx pgx.Tx, projectID, tenantID, userID string) (bool, error) {
+// tenantClaimed reports whether tenantID is a claimed tenant of projectID,
+// holding its row FOR SHARE so its status cannot change before tx ends.
+func tenantClaimed(ctx context.Context, tx pgx.Tx, projectID, tenantID string) (bool, error) {
+	var claimed bool
+	err := tx.QueryRow(ctx, `SELECT status = $3 FROM tenants WHERE project_id = $1 AND id = $2 FOR SHARE`,
+		projectID, tenantID, service.TenantStatusClaimed).Scan(&claimed)
+	if noRows(err) {
+		return false, nil
+	}
+	return claimed, err
+}
+
+// hasGovernorBesides reports whether tenantID has an active owner or admin
+// other than userID. It must run after the membership pass, which holds those
+// memberships, so it reads them as they stand.
+func hasGovernorBesides(ctx context.Context, tx pgx.Tx, projectID, tenantID, userID string) (bool, error) {
 	var governed bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS (
 			SELECT 1 FROM tenant_memberships
 			WHERE project_id = $1 AND tenant_id = $2 AND user_id <> $3
-			  AND status = 'active' AND role IN ('owner', 'admin'))
-		FROM tenants WHERE project_id = $1 AND id = $2 AND status = $4
-		FOR SHARE OF tenants`, projectID, tenantID, userID, service.TenantStatusClaimed).Scan(&governed)
-	if noRows(err) {
-		return false, nil
-	}
+			  AND status = 'active' AND role IN ('owner', 'admin'))`, projectID, tenantID, userID).Scan(&governed)
 	return governed, err
 }
 
@@ -536,7 +611,7 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 	if err != nil {
 		return nil, wrapPgErr(op+"(read)", err)
 	}
-	if link == nil || link.TokenHash != c.TokenHash {
+	if link == nil || subtle.ConstantTimeCompare([]byte(link.TokenHash), []byte(c.TokenHash)) != 1 {
 		return nil, fmt.Errorf("%w: set-up link", service.ErrNotFound)
 	}
 	if err := lockMembership(ctx, tx, op, c.ProjectID, link.TenantID, link.UserID); err != nil {
@@ -552,13 +627,19 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 			return nil, wrapPgErr(op+"(domain)", err)
 		}
 	}
+	claimed, err := tenantClaimed(ctx, tx, c.ProjectID, link.TenantID)
+	if err != nil {
+		return nil, wrapPgErr(op+"(tenant)", err)
+	}
 	held, err := lockGovernorsAnd(ctx, tx, c.ProjectID, link.TenantID, link.UserID, link.InvitedBy)
 	if err != nil {
 		return nil, wrapPgErr(op+"(lock)", err)
 	}
-	governed, err := tenantGovernable(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
-	if err != nil {
-		return nil, wrapPgErr(op+"(tenant)", err)
+	governed := false
+	if claimed {
+		if governed, err = hasGovernorBesides(ctx, tx, c.ProjectID, link.TenantID, link.UserID); err != nil {
+			return nil, wrapPgErr(op+"(governors)", err)
+		}
 	}
 	removed, err := isRemoved(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
 	if err != nil {
@@ -982,6 +1063,14 @@ func (s *MembershipStore) ResetManaged(ctx context.Context, reset service.Manage
 	}
 	if target.Role == service.RoleOwner && held[reset.By].Role != service.RoleOwner {
 		return nil, fmt.Errorf("%w: only an owner may reset an owner", service.ErrPermissionDenied)
+	}
+	var elsewhere bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tenant_memberships
+		WHERE project_id = $1 AND user_id = $2 AND tenant_id <> $3)`, reset.ProjectID, reset.UserID, reset.TenantID).Scan(&elsewhere); err != nil {
+		return nil, wrapPgErr(op+"(elsewhere)", err)
+	}
+	if elsewhere {
+		return nil, service.ErrManagedElsewhere
 	}
 	notices, err := noticeEmails(ctx, tx, reset.ProjectID, account)
 	if err != nil {

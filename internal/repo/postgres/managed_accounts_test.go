@@ -806,3 +806,168 @@ func TestManagedSetup_HolderRefusalComesLast(t *testing.T) {
 	_, err = f.is.CreateManagedSetup(ctx, f.setup("u1@acme.com", "x@example.com", f.other))
 	require.ErrorIs(t, err, service.ErrManagedDomainUnverified, "an unverified domain says nothing of its holders")
 }
+
+// A managed account holds a membership in its own tenant only: every write
+// that would give it one elsewhere is refused, and a reset refuses an
+// account that holds one.
+func TestManagedAccount_NoMembershipElsewhere(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	ann := f.setUpAccount(ctx, t, service.RoleMember)
+	other, err := f.tenants.CreateTenant(ctx, &service.Tenant{ProjectID: f.projectID, Status: service.TenantStatusClaimed})
+	require.NoError(t, err)
+
+	_, _, err = f.ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: f.projectID, TenantID: other, UserID: ann, Source: service.MembershipSourceInvited, Role: service.RoleMember})
+	require.ErrorIs(t, err, service.ErrManagedElsewhere, "an invitation accepted elsewhere")
+	_, _, err = f.ms.JoinByDomain(ctx, f.projectID, other, ann, f.domainID)
+	require.ErrorIs(t, err, service.ErrManagedElsewhere)
+	_, _, err = f.ms.AddMember(ctx, f.projectID, other, ann)
+	require.ErrorIs(t, err, service.ErrManagedElsewhere)
+	_, err = f.ms.UpsertMembership(ctx, &service.TenantMembership{ProjectID: f.projectID, TenantID: other, UserID: ann})
+	require.ErrorIs(t, err, service.ErrManagedElsewhere)
+	_, _, err = f.tenants.CreateOwnedTenant(ctx, service.OwnedTenantRequest{ProjectID: f.projectID, Name: "Side project", OwnerID: ann, MaxPerWindow: 10})
+	require.ErrorIs(t, err, service.ErrManagedElsewhere)
+	autoform := &AutoFormStore{pool: f.ms.pool}
+	joined, err := autoform.EnsureTenantForDomain(ctx, f.projectID, "other.example.com", ann)
+	require.NoError(t, err)
+	assert.Equal(t, f.tenantID, joined, "a managed account forms no tenant and joins only its own")
+	var elsewhere int
+	require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT count(*) FROM tenant_memberships WHERE project_id = $1 AND user_id = $2 AND tenant_id <> $3`, f.projectID, ann, f.tenantID).Scan(&elsewhere))
+	assert.Zero(t, elsewhere)
+	var latent int
+	require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT count(*) FROM domains WHERE project_id = $1 AND lower(domain) = 'other.example.com'`, f.projectID).Scan(&latent))
+	assert.Zero(t, latent, "the refused auto-formation created nothing")
+
+	_, _, err = f.ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: f.projectID, TenantID: other, UserID: f.user, Source: service.MembershipSourceInvited, Role: service.RoleMember})
+	require.NoError(t, err, "a personal account is unaffected")
+
+	_, err = f.accounts.pool.Exec(ctx, `INSERT INTO tenant_memberships (id, project_id, tenant_id, user_id, source, role, status, created_at_ms, updated_at_ms)
+		VALUES ('stray', $1, $2, $3, 'added', 'member', 'active', 0, 0)`, f.projectID, other, ann)
+	require.NoError(t, err)
+	_, err = f.ms.ResetManaged(ctx, f.reset(ann, "x@example.com", f.other))
+	require.ErrorIs(t, err, service.ErrManagedElsewhere)
+	assert.Equal(t, service.StatusActive, f.readUser(ctx, t, ann).Status)
+}
+
+// Suspend, remove and reset also end the sign-ins already under way: approved
+// QR hand-offs expire, unredeemed OAuth one-time codes are spent and pending
+// sign-in challenges are deleted.
+func TestManagedSignOut_EndsSignInsUnderWay(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	ann := f.setUpAccount(ctx, t, service.RoleMember)
+	now := time.Now()
+	seed := func(t *testing.T, suffix string) {
+		t.Helper()
+		_, err := f.accounts.pool.Exec(ctx, `
+			INSERT INTO qr_login_sessions (id, project_id, session_id, status, user_id, expires_at_ms, created_at_ms, updated_at_ms)
+			VALUES ('qr-'||$3, $1, 'qs-'||$3, 'approved', $2, $4, 0, 0);
+		`, f.projectID, ann, suffix, now.Add(time.Hour).UnixMilli())
+		require.NoError(t, err)
+		_, err = f.accounts.pool.Exec(ctx, `
+			INSERT INTO oauth_one_time_codes (id, project_id, code_hash, user_id, expires_at_ms, created_at_ms)
+			VALUES ('otc-'||$3, $1, 'code-'||$3, $2, $4, 0)`, f.projectID, ann, suffix, now.Add(time.Hour).UnixMilli())
+		require.NoError(t, err)
+		_, err = f.accounts.pool.Exec(ctx, `
+			INSERT INTO login_challenges (id, project_id, challenge_id, user_id, expires_at_ms, created_at_ms)
+			VALUES ('lc-'||$3, $1, 'ch-'||$3, $2, $4, 0)`, f.projectID, ann, suffix, now.Add(time.Hour).UnixMilli())
+		require.NoError(t, err)
+	}
+	assertEnded := func(t *testing.T, suffix string) {
+		t.Helper()
+		var qrStatus string
+		var consumed int64
+		var challenges int
+		require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT status FROM qr_login_sessions WHERE project_id = $1 AND id = 'qr-'||$2`, f.projectID, suffix).Scan(&qrStatus))
+		require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT consumed_at_ms FROM oauth_one_time_codes WHERE project_id = $1 AND id = 'otc-'||$2`, f.projectID, suffix).Scan(&consumed))
+		require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT count(*) FROM login_challenges WHERE project_id = $1 AND id = 'lc-'||$2`, f.projectID, suffix).Scan(&challenges))
+		assert.Equal(t, "expired", qrStatus, suffix)
+		assert.NotZero(t, consumed, suffix)
+		assert.Zero(t, challenges, suffix)
+	}
+
+	seed(t, "suspend")
+	_, err := f.ms.SuspendManaged(ctx, f.projectID, f.tenantID, ann, f.other)
+	require.NoError(t, err)
+	assertEnded(t, "suspend")
+
+	seed(t, "reset")
+	_, err = f.ms.ResetManaged(ctx, f.reset(ann, "x@example.com", f.other))
+	require.NoError(t, err)
+	assertEnded(t, "reset")
+
+	seed(t, "remove")
+	_, err = f.ms.RemoveManaged(ctx, f.projectID, f.tenantID, ann, f.other)
+	require.NoError(t, err)
+	assertEnded(t, "remove")
+}
+
+// The per-delivery-address cap holds for new set-up links too.
+func TestManagedSetup_CreateCapsTheDeliveryAddress(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	s := f.setup("ann@acme.com", "home@example.com", f.other)
+	s.MaxPerDeliveryEmail = 1
+	f.create(ctx, t, s)
+	s = f.setup("bob@acme.com", "Home@example.com", f.other)
+	s.MaxPerDeliveryEmail = 1
+	_, err := f.is.CreateManagedSetup(ctx, s)
+	require.ErrorIs(t, err, service.ErrManagedResetLimited)
+	bob, err := f.accounts.FindUserByEmail(ctx, "bob@acme.com")
+	require.NoError(t, err)
+	assert.Nil(t, bob, "a refused create writes nothing")
+}
+
+// An ordinary revoke does not touch a set-up link, and a tenant that is not
+// claimed issues none.
+func TestManagedSetup_OrdinaryRevokeAndTenantStatus(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	issued := f.create(ctx, t, f.setup("ann@acme.com", "x@example.com", f.other))
+	_, _, err := f.is.RevokeInvitation(ctx, f.projectID, f.tenantID, issued.Invitation.ID)
+	require.ErrorIs(t, err, service.ErrNotFound)
+	assert.Equal(t, service.InvitationStatusPending, f.invitation(ctx, t, issued.Invitation).Status)
+
+	_, err = f.accounts.pool.Exec(ctx, `UPDATE tenants SET status = $3 WHERE project_id = $1 AND id = $2`, f.projectID, f.tenantID, service.TenantStatusSuspended)
+	require.NoError(t, err)
+	_, err = f.is.CreateManagedSetup(ctx, f.setup("bob@acme.com", "x@example.com", f.other))
+	require.ErrorIs(t, err, service.ErrPermissionDenied)
+}
+
+// Auto-formation records a managed account's membership in the tenant that
+// manages it even while that tenant is suspended, and never forms or joins
+// another for it.
+func TestManagedAutoForm_SuspendedManagingTenant(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	ann := f.setUpAccount(ctx, t, service.RoleMember)
+	_, err := f.accounts.pool.Exec(ctx, `UPDATE tenants SET status = $3 WHERE project_id = $1 AND id = $2`, f.projectID, f.tenantID, service.TenantStatusSuspended)
+	require.NoError(t, err)
+	var tenantsBefore int
+	require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE project_id = $1`, f.projectID).Scan(&tenantsBefore))
+
+	joined, err := (&AutoFormStore{pool: f.ms.pool}).EnsureTenantForDomain(ctx, f.projectID, "acme.com", ann)
+	require.NoError(t, err)
+	assert.Equal(t, f.tenantID, joined)
+	var tenantsAfter int
+	require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE project_id = $1`, f.projectID).Scan(&tenantsAfter))
+	assert.Equal(t, tenantsBefore, tenantsAfter, "no tenant was formed")
+	m := f.membership(ctx, t, ann)
+	require.NotNil(t, m)
+	assert.Equal(t, service.MembershipSourceInvited, m.Source, "the membership it holds keeps its source")
+}
+
+// An agent a managed account owns is held to its owner's tenant, while an
+// agent a person owns is not.
+func TestManagedAccount_AgentsFollowTheirOwnersTenant(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	ann := f.setUpAccount(ctx, t, service.RoleMember)
+	annsAgent := f.agentOf(ctx, t, ann)
+	personsAgent := f.agentOf(ctx, t, f.user)
+	other, err := f.tenants.CreateTenant(ctx, &service.Tenant{ProjectID: f.projectID, Status: service.TenantStatusClaimed})
+	require.NoError(t, err)
+
+	_, _, err = f.ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: f.projectID, TenantID: other, UserID: annsAgent, Source: service.MembershipSourceAdded, Role: service.RoleMember})
+	require.ErrorIs(t, err, service.ErrManagedElsewhere)
+	_, _, err = f.ms.AddMember(ctx, f.projectID, other, annsAgent)
+	require.ErrorIs(t, err, service.ErrManagedElsewhere)
+	_, _, err = f.ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: f.projectID, TenantID: f.tenantID, UserID: annsAgent, Source: service.MembershipSourceAdded, Role: service.RoleMember})
+	require.NoError(t, err, "the managing tenant is the agent's own")
+	_, _, err = f.ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: f.projectID, TenantID: other, UserID: personsAgent, Source: service.MembershipSourceAdded, Role: service.RoleMember})
+	require.NoError(t, err, "a person's agent is unaffected")
+}

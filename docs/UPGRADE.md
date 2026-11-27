@@ -60,6 +60,24 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS tenant_invitations_pending_user_idx
     WHERE user_id <> '' AND status = 'pending';
 ```
 
+- **Migration 0069** adds partial indexes on `qr_login_sessions`,
+  `oauth_one_time_codes` and `login_challenges` by `(project_id, user_id)`,
+  which suspending, removing or resetting a managed account uses to end the
+  sign-ins under way for it. Each takes `SHARE` on its table while it builds.
+  To build them without blocking writes, run before upgrading; the migration
+  then does nothing:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS qr_login_sessions_approved_user_idx
+    ON qr_login_sessions (project_id, user_id)
+    WHERE status = 'approved';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS oauth_one_time_codes_unconsumed_user_idx
+    ON oauth_one_time_codes (project_id, user_id)
+    WHERE consumed_at_ms = 0;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS login_challenges_project_user_idx
+    ON login_challenges (project_id, user_id);
+```
+
 - **Do not roll migration 0068 back once managed accounts exist.** Its down
   migration drops the columns, which turns every managed account into a
   personal one that nothing then restricts, and every pending set-up link into

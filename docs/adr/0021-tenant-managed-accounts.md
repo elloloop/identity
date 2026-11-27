@@ -62,6 +62,27 @@ for the tenant.
   agents. The project's operator does not stop a single managed account
   (AdminService deactivate, reactivate, delete, password reset and update all
   refuse it): its tenant's owners and admins suspend or remove it.
+- **One tenant only.** A managed account, and an agent it owns, holds a
+  membership in its managing tenant only. `GrantMembership` (an invitation
+  accepted elsewhere), `JoinByDomain`, `AddMember`, `UpsertMembership`,
+  `CreateOwnedTenant` and auto-formation refuse any other with
+  `ErrManagedElsewhere`; auto-formation records the membership in the
+  managing tenant and forms none; `ResetManaged` refuses an account that holds
+  one. This may open later, as workspace guests do, through a decision of its
+  own: guest memberships would need their own suspension, removal and reset
+  rules.
+- **Ending sign-ins under way.** Suspend, remove and reset revoke the
+  account's and its agents' sessions and refresh tokens, expire approved QR
+  hand-offs, spend unredeemed OAuth one-time codes and delete pending sign-in
+  challenges in the same transaction. The server refuses managed accounts
+  unless `GATEWAY_SESSION_CACHE_TTL_SECONDS` is at most 60, the longest
+  another replica may serve a revoked session.
+- **Set-up links stay set-up links.** A set-up link is never an open
+  invitation and is never accepted as an ordinary one: `AcceptTenantInvitation`
+  refuses another account, and a link still pending, with `PERMISSION_DENIED`,
+  and for an accepted link only restores its own account's membership. It is
+  never revoked as an ordinary invitation, works only while its issuer may
+  still issue it, and never brings back a member the tenant removed.
 - **Purge order.** Purging a managed account revokes its pending set-up
   links first, in their own transaction, and then runs the erasure cascade.
   The order is intended: it fails safe, as a failure between the two leaves

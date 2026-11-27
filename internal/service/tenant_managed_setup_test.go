@@ -491,3 +491,25 @@ func TestGetTenantInvitation_ManagedSetupReadsTheTenantOnce(t *testing.T) {
 	require.Equal(t, "Ann Lee", view.DisplayName)
 	require.Equal(t, 1, counted.reads)
 }
+
+// Another account never accepts a set-up link as an ordinary invitation,
+// pending or accepted: it is refused and gains no membership.
+func TestAcceptTenantInvitation_ManagedSetupLinkRefusesAnotherAccount(t *testing.T) {
+	for _, status := range []string{InvitationStatusPending, InvitationStatusAccepted} {
+		f, _ := managedMembershipFixture(&managedSetupsMock{})
+		raw := "set-up-token-" + status
+		f.invitations.byID[f.invitations.key(mTestProject, "inv-ann")] = &TenantInvitation{
+			ID: "inv-ann", ProjectID: mTestProject, TenantID: mTestTenant, TokenHash: sha256Hex(raw),
+			Email: maAddress, Status: status, UserID: maUserID, DeliveryEmail: maDelivery, SetupEpoch: 1,
+			ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli(), TokenOnlyInEmail: true,
+		}
+		const other = "user-someone-else"
+		f.users.put(mTestProject, other, maAddress)
+		_, err := f.svc.AcceptTenantInvitation(managedScope(admitted()), other, raw)
+		require.ErrorIs(t, err, ErrPermissionDenied, status)
+		m, err := f.memberships.GetMembership(context.Background(), mTestProject, mTestTenant, other)
+		require.NoError(t, err, status)
+		require.Nil(t, m, "%s: the caller gains no membership", status)
+		require.Equal(t, status, f.invitations.byID[f.invitations.key(mTestProject, "inv-ann")].Status, "%s: the link is unchanged", status)
+	}
+}

@@ -346,7 +346,9 @@ type InvitationStore interface {
 	// reports a change. Returns the invitation as it now stands, and whether
 	// this call revoked it: a revoked or expired invitation is returned
 	// unchanged. An accepted invitation is ErrInvitationUsed, and an id that
-	// is not one of the tenant's invitations is ErrNotFound.
+	// is not one of the tenant's ordinary invitations is ErrNotFound: a
+	// managed account's set-up link is revoked by
+	// ManagedSetupStore.RevokeManagedSetup, never here.
 	RevokeInvitation(ctx context.Context, projectID, tenantID, invitationID string) (inv *TenantInvitation, changed bool, err error)
 	// ListInvitationsForTenant returns every invitation in a tenant,
 	// newest first.
