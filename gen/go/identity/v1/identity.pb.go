@@ -15279,7 +15279,10 @@ type CreateTenantInvitationResponse struct {
 	// response. The invitation records that its token was handed out, so it
 	// never creates an account (SignUpWithTenantInvitation), even once the
 	// server has mail settings; the invitee still accepts it after a sign-in
-	// that proves the address.
+	// that proves the address. It is always empty for a managed account's
+	// set-up link: such a link is created only where a mail provider delivers
+	// it, goes only to its delivery address, and its token only sets the
+	// account up (SignUpWithTenantInvitation), never accepts an invitation.
 	RawToken string `protobuf:"bytes,2,opt,name=raw_token,json=rawToken,proto3" json:"raw_token,omitempty"`
 	// email_send_status is what became of the one attempt this call made,
 	// synchronously, to send the invitation's email. It is reported here only
