@@ -125,11 +125,8 @@ func TestRedesign_ManagedAccounts_SignInNeedsAnActiveMembership(t *testing.T) {
 			t.Fatalf("%s while suspended = %v, want FailedPrecondition", name, err)
 		}
 	}
-	if _, err := refresh(h, rotated.GetRefreshToken()); connect.CodeOf(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("refresh while suspended = %v, want FailedPrecondition", err)
-	}
 	if _, err := refresh(h, rotated.GetRefreshToken()); connect.CodeOf(err) != connect.CodeUnauthenticated {
-		t.Fatalf("the refused refresh token again = %v, want Unauthenticated: it was spent", err)
+		t.Fatalf("refresh while suspended = %v, want Unauthenticated: the suspension deleted the account's refresh tokens", err)
 	}
 
 	if _, err := mt.owner.client.RestoreTenantMember(ctx, connect.NewRequest(&identitypb.RestoreTenantMemberRequest{TenantId: mt.tenantID, UserId: userID})); err != nil {

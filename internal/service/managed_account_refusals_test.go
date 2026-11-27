@@ -370,7 +370,7 @@ func TestAgentTransfer_ToAManagedAccountIsRefused(t *testing.T) {
 // token issued for it sets nothing.
 func TestPasswordReset_InvitedManagedAccountGetsNone(t *testing.T) {
 	repo := newFakeRepo()
-	svc := newTestAuthService(t, repo)
+	svc := newTestAuthService(t, repo).WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed))
 	mailer := &recordingMailer{}
 	svc.mailer = mailer
 	invited := seedManaged(repo, "ann@acme.example.com", StatusInvited)

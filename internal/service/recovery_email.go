@@ -491,9 +491,21 @@ func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, si
 }
 
 // accountNotice is a security notice to an account's addresses: the
-// dispatch's op label, the subject, and one sentence saying what happened.
+// dispatch's op label, the subject, one sentence saying what happened, and
+// what to do about it when the template's own advice to an account owner
+// does not fit ("" keeps it).
 type accountNotice struct {
-	op, headline, detail string
+	op, headline, detail, advice string
+}
+
+// renderAccountNotice renders notice, addressed to userName, under brand.
+func renderAccountNotice(brand resolvedBranding, userName string, notice accountNotice) (html, text string, err error) {
+	return email.Render(email.TemplateAccountNotice, brand.templateData(map[string]any{
+		"UserName": userName,
+		"Headline": notice.headline,
+		"Detail":   notice.detail,
+		"Advice":   notice.advice,
+	}))
 }
 
 // notifyAccountAddresses mails notice to the account's primary email and to
@@ -516,11 +528,7 @@ func (s *AuthService) notifyAccountAddresses(ctx context.Context, user *User, re
 	}
 	s.dispatchEmailSend(ctx, notice.op, func(ctx context.Context) {
 		brand := resolveBranding(ctx, s.cfg, "")
-		html, text, err := email.Render(email.TemplateAccountNotice, brand.templateData(map[string]any{
-			"UserName": displayNameOrEmail(user),
-			"Headline": notice.headline,
-			"Detail":   notice.detail,
-		}))
+		html, text, err := renderAccountNotice(brand, displayNameOrEmail(user), notice)
 		if err != nil {
 			s.logger.Warn("account_notice_render_failed", zap.String("op", notice.op), zap.Error(err))
 			return

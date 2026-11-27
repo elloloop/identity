@@ -125,7 +125,17 @@ type MembershipService struct {
 	// addressChecks caps CheckManagedAddresses calls per tenant
 	// (WithManagedAddressCheckBudget); nil leaves the check unimplemented.
 	addressChecks *probeBudget
-	nowFunc       func() time.Time
+	// managed suspends, removes and resets the tenant's managed accounts
+	// (WithManagedMembers); nil refuses each with ErrServiceUnavailable, and
+	// ResetManagedAccount with ErrUnimplemented.
+	managed ManagedMemberStore
+	// sessions is the session cache the sessions managed writes end are
+	// dropped from; nil drops none.
+	sessions SessionInvalidator
+	// notices sends a reset's notices off the request path
+	// (WithNoticeDispatch); nil sends them inline.
+	notices noticeDispatcher
+	nowFunc func() time.Time
 }
 
 // NewMembershipService wires a MembershipService. mailerDelivers tells the
@@ -565,8 +575,13 @@ func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, ten
 // owner remains, is allowed, including an owner removing themselves. The
 // store checks and removes in one step (MembershipStore.RemoveMembership),
 // so a concurrent removal or ownership transfer cannot slip between them.
-// An account a tenant manages cannot remove itself (ErrManagedAccount): it
-// exists only as the tenant's.
+//
+// An account the tenant manages is removed with its account
+// (ManagedMemberStore.RemoveManaged): it is deactivated, keeping its id and
+// address, signed out everywhere, its pending set-up links revoked and its
+// agents deactivated, in the same transaction, and the ended sessions are
+// dropped from the session cache after it commits. It cannot remove itself
+// (ErrManagedAccount): it exists only as the tenant's.
 func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, targetUserID, ip, userAgent string) error {
 	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
 	if err != nil {
@@ -582,6 +597,13 @@ func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID str
 		if err := s.refuseManagedLeave(ctx, projectID, callerID); err != nil {
 			return err
 		}
+	}
+	managed, err := s.managedByTenant(ctx, projectID, tenantID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if managed {
+		return s.removeManaged(ctx, callerID, projectID, tenantID, targetUserID, ip, userAgent)
 	}
 
 	removed, err := s.memberships.RemoveMembership(ctx, projectID, tenantID, targetUserID)
@@ -611,6 +633,11 @@ func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID str
 // A target that is not an active or suspended member is ErrNotFound.
 // Suspending a suspended member returns the membership unchanged and records
 // nothing; a suspension is audited as EventTenantMemberSuspended.
+//
+// An account the tenant manages is also signed out everywhere, its access
+// tokens included, and its agents deactivated, in the suspension's
+// transaction (ManagedMemberStore.SuspendManaged); the ended sessions are
+// dropped from the session cache after it commits.
 func (s *MembershipService) SuspendTenantMember(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, targetUserID, ip, userAgent string) (*TenantMembership, error) {
 	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
 	if err != nil {
@@ -624,6 +651,13 @@ func (s *MembershipService) SuspendTenantMember(ctx context.Context, callerID st
 	}
 	if targetUserID == callerID {
 		return nil, fmt.Errorf("%w: you cannot suspend yourself; remove yourself to leave the tenant", ErrInvalidArgument)
+	}
+	managed, err := s.managedByTenant(ctx, projectID, tenantID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if managed {
+		return s.suspendManaged(ctx, callerID, projectID, tenantID, targetUserID, ip, userAgent)
 	}
 	m, changed, err := s.memberships.SuspendMembership(ctx, projectID, tenantID, targetUserID)
 	if err != nil {

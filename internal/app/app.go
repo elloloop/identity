@@ -97,6 +97,12 @@ type Deps struct {
 	// the postgres driver; when nil no managed account is created or set up.
 	ManagedSetups service.ManagedSetupStore
 
+	// ManagedMembers suspends, removes and resets the accounts a tenant
+	// manages, with their memberships. Non-nil ONLY for the postgres driver;
+	// when nil, a managed account's suspension or removal is refused and
+	// ResetManagedAccount returns Unimplemented.
+	ManagedMembers service.ManagedMemberStore
+
 	// ControlPlaneStore is the project write-store backing the control-plane
 	// admin RPCs (AdminCreateProject and friends). Non-nil ONLY for the
 	// postgres driver; when nil (together with the tenant/membership stores)
@@ -950,7 +956,10 @@ func New(deps Deps) (*Built, error) {
 
 	domainSvc := buildDomainService(deps, repo, auditLog, logger)
 	users := service.RepositoryUserDirectory(repo)
-	membershipSvc := buildMembershipService(deps, repo, users, mailer, senders.mailDelivers, auditLog, logger)
+	membershipSvc := buildMembershipService(deps, repo, users, mailer, senders.mailDelivers, auditLog, logger, sessionInvalidator(sessionCache))
+	if membershipSvc != nil {
+		membershipSvc = membershipSvc.WithNoticeDispatch(authSvc)
+	}
 	controlAdminSvc := buildControlPlaneAdminService(deps, users, auditLog, logger)
 	directorySvc := buildDirectoryService(deps, repo, auditLog, logger)
 	handler := identityconnect.NewIdentityHandler(authSvc, adminSvc, groupsSvc, helpSvc, profileSvc, idvSvc, domainSvc, membershipSvc, controlAdminSvc, directorySvc, deps.Config)
@@ -1472,7 +1481,7 @@ func buildDomainService(deps Deps, accounts service.Repository, auditLog *audit.
 // hold on the caller is read from. deps.DomainStore, when present, backs
 // joining by domain. auditLog receives the CreateTenant, ownership-transfer
 // and join trail.
-func buildMembershipService(deps Deps, accounts service.Repository, users service.UserDirectory, mailer email.Transport, mailDelivers bool, auditLog *audit.Logger, logger *zap.Logger) *service.MembershipService {
+func buildMembershipService(deps Deps, accounts service.Repository, users service.UserDirectory, mailer email.Transport, mailDelivers bool, auditLog *audit.Logger, logger *zap.Logger, sessions service.SessionInvalidator) *service.MembershipService {
 	if !membershipServiceServed(deps) {
 		return nil
 	}
@@ -1487,7 +1496,17 @@ func buildMembershipService(deps Deps, accounts service.Repository, users servic
 		logger,
 	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts).WithActiveProjects(deps.ActiveProjects).
 		WithManagedSetups(deps.ManagedSetups).
-		WithManagedAddressCheckBudget(deps.Config.RateLimitManagedAddressCheckPerTenant, rateLimitWindow(deps.Config).Milliseconds())
+		WithManagedAddressCheckBudget(deps.Config.RateLimitManagedAddressCheckPerTenant, rateLimitWindow(deps.Config).Milliseconds()).
+		WithManagedMembers(deps.ManagedMembers, sessions)
+}
+
+// sessionInvalidator is cache as a service.SessionInvalidator, or a true nil
+// when there is no session cache (GATEWAY_REVOCATION_MODE=ttl).
+func sessionInvalidator(cache *middleware.SessionCache) service.SessionInvalidator {
+	if cache == nil {
+		return nil
+	}
+	return cache
 }
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService

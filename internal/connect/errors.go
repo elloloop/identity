@@ -43,7 +43,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAgentSignIn),
 		errors.Is(err, service.ErrRemovedFromTenant),
 		errors.Is(err, service.ErrMemberSuspended),
-		errors.Is(err, service.ErrManagedAccount):
+		errors.Is(err, service.ErrManagedAccount),
+		errors.Is(err, service.ErrManagedResetReauthenticationRequired):
 		return connect.NewError(connect.CodePermissionDenied, err)
 
 	// Unimplemented: the capability is absent from this deployment, not
@@ -107,7 +108,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrDomainAttemptsLimited),
 		errors.Is(err, service.ErrRecoveryEmailLimit),
 		errors.Is(err, service.ErrPhoneMatchLimited),
-		errors.Is(err, service.ErrManagedAddressCheckLimited):
+		errors.Is(err, service.ErrManagedAddressCheckLimited),
+		errors.Is(err, service.ErrManagedResetLimited):
 		// CodeResourceExhausted: lockout is a per-account quota of failed
 		// attempts. ResourceExhausted matches gRPC's documented semantics
 		// for "the resource is exhausted" / rate-limit-style failures and
@@ -163,7 +165,8 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAccountDeletionNotAllowed),
 		errors.Is(err, service.ErrDOBAlreadySet),
 		errors.Is(err, service.ErrMinorDataMinimized),
-		errors.Is(err, service.ErrAgentCredential):
+		errors.Is(err, service.ErrAgentCredential),
+		errors.Is(err, service.ErrManagedSetupNeedsMailer):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 
 	case errors.Is(err, service.ErrInvitationUsed),

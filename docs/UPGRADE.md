@@ -1,5 +1,86 @@
 # Upgrade guide
 
+## Next — a tenant takes back its managed accounts: `ResetManagedAccount`, and suspending or removing a managed account signs it out (additive RPC and audit event `managed_account_reset`; no migration; `MembershipService.WithManagedMembers` (Go API))
+
+An account a tenant manages (`managed_by_tenant_id`) belongs to the tenant, so
+its owners and admins can now act on the account itself, not only on its
+membership.
+
+- **`SuspendTenantMember` and `RemoveTenantMember` on a managed account** end
+  the account's sessions and refresh tokens, and deactivate its agents, in the
+  same transaction as the membership change, and drop the ended sessions from
+  this replica's session cache after it commits, so its access tokens stop
+  working on the next request. A removal also deactivates the account,
+  keeping its id and address, and revokes its pending set-up links; it is not
+  resettable or restorable afterwards. A managed account cannot remove itself
+  (`INVALID_ARGUMENT`). The audit entries gain `managed: true`,
+  `sessions_ended` and `agents_deactivated`. Personal members are unchanged:
+  their access tokens still last until they expire. This holds with
+  `GATEWAY_MANAGED_ACCOUNTS_ENABLED` off too: switching managed accounts off
+  stops new ones, but suspending or removing one that exists still ends its
+  sessions at once.
+- **`ResetManagedAccount(tenant_id, user_id, delivery_address)`** takes a
+  managed account back in one transaction: it signs the account out
+  everywhere, spends its outstanding password-reset, sign-in, email-change,
+  verification and recovery-email links and codes, clears its password,
+  passkeys, linked providers, recovery emails, TOTP, backup codes and phone,
+  resets its lockout, deactivates its agents, makes it `invited` with its
+  membership unchanged, and issues a new set-up link with the member's role,
+  mailed to `delivery_address`; `email_send_status` reports that send, made
+  on the request path. The notices, to every address the account had and to
+  the owners, go off the request path.
+- **Who may call it.** An active owner or admin of the managing tenant, a
+  tenant that is not suspended, from a session no recovery hold binds and
+  signed in within `GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS`
+  (`PERMISSION_DENIED`, the message leading with `reauthentication_required`,
+  otherwise). Only an owner resets an owner; an admin may reset another
+  admin, and then every active owner of the tenant is mailed who reset which
+  account, the admin named by address only (`owners_told` in the reset's
+  audit details, and `managed_account_reset_owners_notified` with the
+  owners the notice reached); naming yourself is `INVALID_ARGUMENT`. A `user_id` that is not one of the tenant's managed
+  accounts with an active or suspended membership is `NOT_FOUND`.
+- **What it needs.** `GATEWAY_MANAGED_ACCOUNTS_ENABLED`, the project's
+  `access.admit_managed_accounts` (and `access.admit_managed_accounts_self_service`
+  for a self-service tenant), and a mail provider, as the link's token travels
+  only by email: `FAILED_PRECONDITION` otherwise.
+- **Limits.** A reset is exempt from the resend cooldown and the
+  per-recipient cap, counts toward `GATEWAY_TENANT_INVITATION_MAX_PER_TENANT`
+  and `GATEWAY_TENANT_INVITATION_MAX_PER_INVITER`, and the set-up links sent
+  to one canonical delivery address across the project are capped at
+  `GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT` per invitation window
+  (`RESOURCE_EXHAUSTED`).
+- **Password reset of a managed account.** `RequestPasswordReset` mails a
+  managed account only while it is active, set up and an active member of a
+  tenant that is not suspended, and only at its own address;
+  `ConfirmPasswordReset` refuses, and spends, a link whose managed account is
+  no longer active, as an invalid token. A managed account is never
+  recovered through a recovery email: once it cannot sign in, only its
+  tenant brings it back, with a reset.
+- **Session cache across replicas.** The ended sessions leave the cache of
+  the replica that wrote the change at once; another replica may serve its
+  cached answer for up to `GATEWAY_SESSION_CACHE_TTL_SECONDS`, which boot
+  holds to 60 seconds or less while managed accounts are enabled.
+- **Audit and logs.** A reset records `managed_account_reset`: actor the
+  caller, target the account, the caller's IP address and user agent, and the
+  project and tenant ids, the `role`, the redacted `delivery_email`,
+  `sessions_ended`, `agents_deactivated` and a `review` note in the details:
+  whoever held the account may have invited people or made accounts, and the
+  responder should review them. Each call logs `managed_account_reset` or
+  `managed_account_reset_refused` with the `reason`: `no_project`,
+  `unauthenticated`, `unimplemented`, `held_session`,
+  `reauthentication_required`, `invalid_argument`, `own_account`,
+  `not_permitted`, `policy`, `no_mailer`, `email_delivery`, `not_found`,
+  `limited` or `store_error`. A managed suspension or removal logs
+  `managed_account_suspended` or `managed_account_removed`, and a refused
+  password reset `password_reset_refused_managed_not_active`.
+- **Postgres only**; the memory and SQLite drivers return `UNIMPLEMENTED`.
+- **Go API.** `MembershipService.WithManagedMembers(ManagedMemberStore,
+  SessionInvalidator)` wires the store and the session cache;
+  `MembershipService.ResetManagedAccount` serves the RPC, refusing with
+  `service.ErrManagedAccountsNotAdmitted`, `ErrManagedSetupNeedsMailer`,
+  `ErrManagedResetReauthenticationRequired` and `ErrManagedResetLimited`
+  among the existing errors. `app.Deps` gains `ManagedMembers`.
+
 ## Next — the default project can admit tenant-managed accounts: `GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS` and `GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE` (off by default; no migration)
 
 The environment-configured default project had no way to set

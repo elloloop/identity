@@ -240,3 +240,31 @@ func TestRender_Branded_IncludesProductLogoAndSupport(t *testing.T) {
 		t.Fatalf("branded text missing product name/support:\n%s", text)
 	}
 }
+
+func TestRenderAccountNotice_AdviceReplacesTheOwnersAdvice(t *testing.T) {
+	t.Parallel()
+	const ownersAdvice = "If this was you, there is nothing to do."
+	for _, tc := range []struct {
+		name, advice, want string
+	}{
+		{name: "default", advice: "", want: ownersAdvice},
+		{name: "advice", advice: "Contact your organization's administrator.", want: "Contact your organization&#39;s administrator."},
+	} {
+		html, text, err := Render(TemplateAccountNotice, map[string]any{
+			"UserName": "Ann", "Headline": "Your account was reset", "Detail": "It was reset.", "Advice": tc.advice,
+		})
+		if err != nil {
+			t.Fatalf("%s: Render: %v", tc.name, err)
+		}
+		if !strings.Contains(html, tc.want) {
+			t.Errorf("%s: html missing %q", tc.name, tc.want)
+		}
+		wantText := strings.ReplaceAll(tc.want, "&#39;", "'")
+		if !strings.Contains(text, wantText) {
+			t.Errorf("%s: text missing %q", tc.name, wantText)
+		}
+		if tc.advice != "" && (strings.Contains(html, ownersAdvice) || strings.Contains(text, ownersAdvice)) {
+			t.Errorf("%s: the owner's advice is still there", tc.name)
+		}
+	}
+}

@@ -1097,3 +1097,77 @@ func TestDispatchEmailSend_CountsDropsAndPacesTheirLog(t *testing.T) {
 		t.Fatalf("counted %v magic_link drops, want 1", got)
 	}
 }
+
+// An account a tenant manages is mailed a reset only while it is active and
+// its membership of the tenant is, and only at its own address; a link
+// mailed while it was stops working once it is not, and is spent.
+func TestPasswordReset_ManagedAccountOnlyWhileActive(t *testing.T) {
+	for _, status := range []string{StatusInvited, StatusDeactivated, StatusPendingDeletion, MembershipStatusSuspended} {
+		t.Run(status, func(t *testing.T) {
+			svc, repo, rec := newAuthSvcWithMailer(t)
+			memberships := &managedMembershipsMock{get: membershipIn(MembershipStatusActive)}
+			svc.WithManagedMemberships(memberships, tenantIn(TenantStatusClaimed))
+			user := seedUserWithPassword(t, repo, "ann@acme.example.com", "OldStr0ng!Pass")
+			repo.mu.Lock()
+			repo.users[user.ID].ManagedByTenantID, repo.users[user.ID].SetUpAtMs = "t-acme", 1
+			repo.mu.Unlock()
+
+			tok := requestAndExtractResetToken(t, svc, rec, "ann@acme.example.com")
+			if sent := rec.Sent(); len(sent) != 1 || sent[0].To != "ann@acme.example.com" {
+				t.Fatalf("an active managed account's reset went to %+v, want its own address once", sent)
+			}
+
+			if status == MembershipStatusSuspended {
+				memberships.get = membershipIn(MembershipStatusSuspended)
+			} else {
+				repo.mu.Lock()
+				repo.users[user.ID].Status = status
+				repo.mu.Unlock()
+			}
+			rec.Reset()
+			if err := svc.RequestPasswordReset(context.Background(), "ann@acme.example.com", EmailLinkParams{}); err != nil {
+				t.Fatalf("RequestPasswordReset: %v", err)
+			}
+			if sent := rec.Sent(); len(sent) != 0 {
+				t.Fatalf("a %s managed account was mailed a reset: %+v", status, sent)
+			}
+
+			err := svc.ConfirmPasswordReset(context.Background(), tok, "NewStr0ng!Pass")
+			if status == StatusInvited {
+				if !errors.Is(err, ErrManagedAccount) {
+					t.Fatalf("an invited managed account's reset = %v, want ErrManagedAccount", err)
+				}
+				return
+			}
+			invalid := svc.ConfirmPasswordReset(context.Background(), "deadbeef", "NewStr0ng!Pass")
+			if !errors.Is(err, ErrUnauthenticated) || err.Error() != invalid.Error() {
+				t.Fatalf("want the invalid-token error %q, got %v", invalid, err)
+			}
+			got, _ := repo.GetUser(context.Background(), user.ID)
+			if !passwords.Verify("OldStr0ng!Pass", got.PasswordHash) {
+				t.Errorf("a %s managed account's password was reset", status)
+			}
+			if stored, _ := repo.FindPasswordResetTokenByHash(context.Background(), sha256Hex(tok)); stored == nil || stored.ConsumedAt == 0 {
+				t.Errorf("the refused token should be consumed; stored=%+v", stored)
+			}
+		})
+	}
+}
+
+func TestPasswordReset_ActiveManagedAccountResets(t *testing.T) {
+	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed))
+	user := seedUserWithPassword(t, repo, "ann@acme.example.com", "OldStr0ng!Pass")
+	repo.mu.Lock()
+	repo.users[user.ID].ManagedByTenantID, repo.users[user.ID].SetUpAtMs = "t-acme", 1
+	repo.mu.Unlock()
+
+	tok := requestAndExtractResetToken(t, svc, rec, "ann@acme.example.com")
+	if err := svc.ConfirmPasswordReset(context.Background(), tok, "NewStr0ng!Pass"); err != nil {
+		t.Fatalf("ConfirmPasswordReset: %v", err)
+	}
+	got, _ := repo.GetUser(context.Background(), user.ID)
+	if !passwords.Verify("NewStr0ng!Pass", got.PasswordHash) {
+		t.Errorf("an active managed account's password was not reset")
+	}
+}

@@ -4,7 +4,7 @@
 
 {{.Detail}}
 
-If this was you, there is nothing to do. If it was not, sign in and review your account, or contact support: your account may be compromised.
+{{if .Advice}}{{.Advice}}{{else}}If this was you, there is nothing to do. If it was not, sign in and review your account, or contact support: your account may be compromised.{{end}}
 {{if .SupportEmail}}
 Need help? Contact {{.SupportEmail}}.
 {{end}}

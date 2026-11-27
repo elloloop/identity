@@ -263,7 +263,9 @@ func (h *IdentityHandler) SetTenantMemberRole(
 }
 
 // invitationToProto converts a service-layer TenantInvitation to the proto
-// wire message. The token hash is never exposed.
+// wire message. The token hash is never exposed. A managed account's set-up
+// link carries the account's address as account_address and where the link
+// was sent as email.
 func invitationToProto(inv *service.TenantInvitation) *identitypb.TenantInvitation {
 	if inv == nil {
 		return nil
@@ -463,9 +465,27 @@ func managedAddressStatusToProto(status string) identitypb.ManagedAddressStatus 
 	}
 }
 
+// ResetManagedAccount takes back an account the caller's tenant manages and
+// sends it a new set-up link. Owner/admin only, with a recent sign-in.
 func (h *IdentityHandler) ResetManagedAccount(
-	context.Context,
-	*connect.Request[identitypb.ResetManagedAccountRequest],
+	ctx context.Context,
+	req *connect.Request[identitypb.ResetManagedAccountRequest],
 ) (*connect.Response[identitypb.ResetManagedAccountResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	reset, err := h.members.ResetManagedAccount(ctx, userID, authenticatedSignIn(req.Header()),
+		req.Msg.GetTenantId(), req.Msg.GetUserId(), req.Msg.GetDeliveryAddress(),
+		clientIP(req.Header()), clientUserAgent(req.Header()))
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	return connect.NewResponse(&identitypb.ResetManagedAccountResponse{
+		Invitation:      invitationToProto(reset.Invitation),
+		EmailSendStatus: emailSendStatusToProto(reset.EmailStatus),
+	}), nil
 }
