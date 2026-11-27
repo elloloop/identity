@@ -153,6 +153,8 @@ const (
 	IdentityService_RestoreTenantMember_FullMethodName                    = "/identity.v1.IdentityService/RestoreTenantMember"
 	IdentityService_TransferTenantOwnership_FullMethodName                = "/identity.v1.IdentityService/TransferTenantOwnership"
 	IdentityService_SetTenantMemberRole_FullMethodName                    = "/identity.v1.IdentityService/SetTenantMemberRole"
+	IdentityService_CheckManagedAddresses_FullMethodName                  = "/identity.v1.IdentityService/CheckManagedAddresses"
+	IdentityService_ResetManagedAccount_FullMethodName                    = "/identity.v1.IdentityService/ResetManagedAccount"
 	IdentityService_CreateTenant_FullMethodName                           = "/identity.v1.IdentityService/CreateTenant"
 	IdentityService_ListMyTenants_FullMethodName                          = "/identity.v1.IdentityService/ListMyTenants"
 	IdentityService_ListJoinableTenants_FullMethodName                    = "/identity.v1.IdentityService/ListJoinableTenants"
@@ -669,6 +671,35 @@ type IdentityServiceClient interface {
 	// Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	SetTenantMemberRole(ctx context.Context, in *SetTenantMemberRoleRequest, opts ...grpc.CallOption) (*SetTenantMemberRoleResponse, error)
+	// CheckManagedAddresses says, for each address, whether a managed account
+	// of tenant_id could be created there now (ManagedAddressStatus). It
+	// changes nothing. The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+	// Only addresses on domains verified for tenant_id are looked up; any
+	// other reads DOMAIN_UNVERIFIED, so no tenant can probe addresses on
+	// another tenant's domain. A missing tenant_id, no addresses or more than
+	// 100 is INVALID_ARGUMENT. FAILED_PRECONDITION with
+	// ManagedAccountRefusedDetails reason POLICY when the project or the
+	// server does not admit managed accounts for the tenant. Available only on
+	// the postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	CheckManagedAddresses(ctx context.Context, in *CheckManagedAddressesRequest, opts ...grpc.CallOption) (*CheckManagedAddressesResponse, error)
+	// ResetManagedAccount takes back a managed account its tenant can no
+	// longer trust: it signs the account out everywhere, ends its outstanding
+	// reset, sign-in and verification links, clears its password, passkeys,
+	// linked providers, recovery emails, two-step methods, backup codes and
+	// phone, deactivates its agents, and sends a new set-up link to
+	// delivery_address with the member's current role. The membership is
+	// unchanged. Notices go to every address the account had. The caller must
+	// be an active owner or admin of the managing tenant, a tenant that is not
+	// suspended, with a recent sign-in (PERMISSION_DENIED otherwise); only an
+	// owner may reset an owner, and naming the caller is INVALID_ARGUMENT. A
+	// user_id that is not a managed account of tenant_id with an active or
+	// suspended membership is NOT_FOUND. Resets are limited per delivery
+	// address (RESOURCE_EXHAUSTED). Audited. Available only on the postgres
+	// control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	ResetManagedAccount(ctx context.Context, in *ResetManagedAccountRequest, opts ...grpc.CallOption) (*ResetManagedAccountResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -2403,6 +2434,26 @@ func (c *identityServiceClient) SetTenantMemberRole(ctx context.Context, in *Set
 	return out, nil
 }
 
+func (c *identityServiceClient) CheckManagedAddresses(ctx context.Context, in *CheckManagedAddressesRequest, opts ...grpc.CallOption) (*CheckManagedAddressesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckManagedAddressesResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CheckManagedAddresses_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ResetManagedAccount(ctx context.Context, in *ResetManagedAccountRequest, opts ...grpc.CallOption) (*ResetManagedAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetManagedAccountResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ResetManagedAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) CreateTenant(ctx context.Context, in *CreateTenantRequest, opts ...grpc.CallOption) (*CreateTenantResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateTenantResponse)
@@ -3403,6 +3454,35 @@ type IdentityServiceServer interface {
 	// Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	SetTenantMemberRole(context.Context, *SetTenantMemberRoleRequest) (*SetTenantMemberRoleResponse, error)
+	// CheckManagedAddresses says, for each address, whether a managed account
+	// of tenant_id could be created there now (ManagedAddressStatus). It
+	// changes nothing. The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+	// Only addresses on domains verified for tenant_id are looked up; any
+	// other reads DOMAIN_UNVERIFIED, so no tenant can probe addresses on
+	// another tenant's domain. A missing tenant_id, no addresses or more than
+	// 100 is INVALID_ARGUMENT. FAILED_PRECONDITION with
+	// ManagedAccountRefusedDetails reason POLICY when the project or the
+	// server does not admit managed accounts for the tenant. Available only on
+	// the postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	CheckManagedAddresses(context.Context, *CheckManagedAddressesRequest) (*CheckManagedAddressesResponse, error)
+	// ResetManagedAccount takes back a managed account its tenant can no
+	// longer trust: it signs the account out everywhere, ends its outstanding
+	// reset, sign-in and verification links, clears its password, passkeys,
+	// linked providers, recovery emails, two-step methods, backup codes and
+	// phone, deactivates its agents, and sends a new set-up link to
+	// delivery_address with the member's current role. The membership is
+	// unchanged. Notices go to every address the account had. The caller must
+	// be an active owner or admin of the managing tenant, a tenant that is not
+	// suspended, with a recent sign-in (PERMISSION_DENIED otherwise); only an
+	// owner may reset an owner, and naming the caller is INVALID_ARGUMENT. A
+	// user_id that is not a managed account of tenant_id with an active or
+	// suspended membership is NOT_FOUND. Resets are limited per delivery
+	// address (RESOURCE_EXHAUSTED). Audited. Available only on the postgres
+	// control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	ResetManagedAccount(context.Context, *ResetManagedAccountRequest) (*ResetManagedAccountResponse, error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -4198,6 +4278,12 @@ func (UnimplementedIdentityServiceServer) TransferTenantOwnership(context.Contex
 }
 func (UnimplementedIdentityServiceServer) SetTenantMemberRole(context.Context, *SetTenantMemberRoleRequest) (*SetTenantMemberRoleResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetTenantMemberRole not implemented")
+}
+func (UnimplementedIdentityServiceServer) CheckManagedAddresses(context.Context, *CheckManagedAddressesRequest) (*CheckManagedAddressesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckManagedAddresses not implemented")
+}
+func (UnimplementedIdentityServiceServer) ResetManagedAccount(context.Context, *ResetManagedAccountRequest) (*ResetManagedAccountResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResetManagedAccount not implemented")
 }
 func (UnimplementedIdentityServiceServer) CreateTenant(context.Context, *CreateTenantRequest) (*CreateTenantResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTenant not implemented")
@@ -6794,6 +6880,42 @@ func _IdentityService_SetTenantMemberRole_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_CheckManagedAddresses_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckManagedAddressesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CheckManagedAddresses(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CheckManagedAddresses_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CheckManagedAddresses(ctx, req.(*CheckManagedAddressesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ResetManagedAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetManagedAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ResetManagedAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ResetManagedAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ResetManagedAccount(ctx, req.(*ResetManagedAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_CreateTenant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateTenantRequest)
 	if err := dec(in); err != nil {
@@ -8308,6 +8430,14 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetTenantMemberRole",
 			Handler:    _IdentityService_SetTenantMemberRole_Handler,
+		},
+		{
+			MethodName: "CheckManagedAddresses",
+			Handler:    _IdentityService_CheckManagedAddresses_Handler,
+		},
+		{
+			MethodName: "ResetManagedAccount",
+			Handler:    _IdentityService_ResetManagedAccount_Handler,
 		},
 		{
 			MethodName: "CreateTenant",

@@ -1508,6 +1508,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.ChangePasswordResponse'
+  /identity.v1.IdentityService/CheckManagedAddresses:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: CheckManagedAddresses
+      description: |-
+        CheckManagedAddresses says, for each address, whether a managed account
+         of tenant_id could be created there now (ManagedAddressStatus). It
+         changes nothing. The caller must be an active owner or admin of
+         tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+         Only addresses on domains verified for tenant_id are looked up; any
+         other reads DOMAIN_UNVERIFIED, so no tenant can probe addresses on
+         another tenant's domain. A missing tenant_id, no addresses or more than
+         100 is INVALID_ARGUMENT. FAILED_PRECONDITION with
+         ManagedAccountRefusedDetails reason POLICY when the project or the
+         server does not admit managed accounts for the tenant. Available only on
+         the postgres control-plane driver; the memory and SQLite drivers return
+         Unimplemented.
+      operationId: identity.v1.IdentityService.CheckManagedAddresses
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.CheckManagedAddressesRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.CheckManagedAddressesResponse'
   /identity.v1.IdentityService/ClassifyAccounts:
     post:
       tags:
@@ -5574,6 +5622,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/identity.v1.RequestRecoveryEmailResponse'
+  /identity.v1.IdentityService/ResetManagedAccount:
+    post:
+      tags:
+        - identity.v1.IdentityService
+      summary: ResetManagedAccount
+      description: |-
+        ResetManagedAccount takes back a managed account its tenant can no
+         longer trust: it signs the account out everywhere, ends its outstanding
+         reset, sign-in and verification links, clears its password, passkeys,
+         linked providers, recovery emails, two-step methods, backup codes and
+         phone, deactivates its agents, and sends a new set-up link to
+         delivery_address with the member's current role. The membership is
+         unchanged. Notices go to every address the account had. The caller must
+         be an active owner or admin of the managing tenant, a tenant that is not
+         suspended, with a recent sign-in (PERMISSION_DENIED otherwise); only an
+         owner may reset an owner, and naming the caller is INVALID_ARGUMENT. A
+         user_id that is not a managed account of tenant_id with an active or
+         suspended membership is NOT_FOUND. Resets are limited per delivery
+         address (RESOURCE_EXHAUSTED). Audited. Available only on the postgres
+         control-plane driver; the memory and SQLite drivers return
+         Unimplemented.
+      operationId: identity.v1.IdentityService.ResetManagedAccount
+      parameters:
+        - name: Connect-Protocol-Version
+          in: header
+          required: true
+          schema:
+            $ref: '#/components/schemas/connect-protocol-version'
+        - name: Connect-Timeout-Ms
+          in: header
+          schema:
+            $ref: '#/components/schemas/connect-timeout-header'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/identity.v1.ResetManagedAccountRequest'
+        required: true
+      responses:
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/connect.error'
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/identity.v1.ResetManagedAccountResponse'
   /identity.v1.IdentityService/ResetUserPassword:
     post:
       tags:
@@ -7671,6 +7770,14 @@ components:
       description: |-
         AccountClassification is coarse live standing, never a consent or contact grant.
          Unknown values and the omitted zero value must be treated as denied.
+    identity.v1.AccountKind:
+      type: string
+      title: AccountKind
+      enum:
+        - ACCOUNT_KIND_UNSPECIFIED
+        - ACCOUNT_KIND_PERSONAL
+        - ACCOUNT_KIND_MANAGED
+      description: AccountKind says who controls an account.
     identity.v1.AddGroupMemberRequest:
       type: object
       properties:
@@ -8767,6 +8874,34 @@ components:
       type: object
       title: ChangePasswordResponse
       additionalProperties: false
+    identity.v1.CheckManagedAddressesRequest:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          title: tenant_id
+        addresses:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.ManagedAddress'
+          title: addresses
+          description: addresses are checked in order, at most 100 of them.
+      title: CheckManagedAddressesRequest
+      additionalProperties: false
+      description: |-
+        CheckManagedAddressesRequest names addresses an owner or admin of
+         tenant_id may want to create as managed accounts.
+    identity.v1.CheckManagedAddressesResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/identity.v1.ManagedAddressCheck'
+          title: results
+          description: results holds one entry per requested address, in the same order.
+      title: CheckManagedAddressesResponse
+      additionalProperties: false
     identity.v1.ClassifiedAccount:
       type: object
       properties:
@@ -9491,10 +9626,38 @@ components:
         email:
           type: string
           title: email
+          description: |-
+            email is the address the invitation is sent to. For an ordinary
+             invitation it is also the account that may accept it; with
+             account_username it is only where the set-up link goes.
         role:
           type: string
           title: role
           description: '"member" (default) | "admin" | "owner"'
+        accountUsername:
+          type: string
+          title: account_username
+          description: |-
+            account_username and account_domain, given together, ask for an account
+             the tenant manages, <account_username>@<account_domain>, on a domain
+             verified for tenant_id. A new account is created before its first
+             sign-in; for one of this tenant's managed accounts that has not been set
+             up yet, the set-up link is sent again and the earlier one stops working.
+             The project must admit managed accounts (access.admit_managed_accounts,
+             and access.admit_managed_accounts_self_service for a tenant made through
+             self-service CreateTenant), and the server must enable them
+             (GATEWAY_MANAGED_ACCOUNTS_ENABLED). A refusal carries
+             ManagedAccountRefusedDetails.
+        accountDomain:
+          type: string
+          title: account_domain
+        displayName:
+          type: string
+          title: display_name
+          description: |-
+            display_name is the managed account's name: required with
+             account_username, plain text, at most 100 characters, with no control or
+             invisible formatting characters.
       title: CreateTenantInvitationRequest
       additionalProperties: false
     identity.v1.CreateTenantInvitationResponse:
@@ -10424,6 +10587,28 @@ components:
              server recorded where an invitation's token went: CreateTenantInvitation
              then handed the token to the inviter, or may have, so holding it does
              not show that the caller owns the address.
+             It is false for a managed account's set-up link.
+        isManagedSetup:
+          type: boolean
+          title: is_managed_setup
+          description: |-
+            is_managed_setup marks the set-up link of an account the tenant
+             manages: the page shows a form that sets the account's password
+             (SignUpWithTenantInvitation) instead of a sign-up or sign-in.
+        accountAddress:
+          type: string
+          title: account_address
+          description: |-
+            account_address, display_name and user_id describe the managed account
+             the link sets up. They are set only while the invitation is pending and
+             is the account's current set-up link; display_name is also withheld for
+             a tenant made through self-service CreateTenant, as tenant_name is.
+        displayName:
+          type: string
+          title: display_name
+        userId:
+          type: string
+          title: user_id
       title: GetTenantInvitationResponse
       additionalProperties: false
       description: |-
@@ -11557,6 +11742,69 @@ components:
              requests it answers by its requested_emails, never by index or by email.
       title: LookupUsersResponse
       additionalProperties: false
+    identity.v1.ManagedAccountRefusal:
+      type: string
+      title: ManagedAccountRefusal
+      enum:
+        - MANAGED_ACCOUNT_REFUSAL_UNSPECIFIED
+        - MANAGED_ACCOUNT_REFUSAL_MANAGED_BY_THIS_TENANT
+        - MANAGED_ACCOUNT_REFUSAL_ADDRESS_UNAVAILABLE
+        - MANAGED_ACCOUNT_REFUSAL_DOMAIN_UNVERIFIED
+        - MANAGED_ACCOUNT_REFUSAL_POLICY
+      description: ManagedAccountRefusal says why a managed account was refused.
+    identity.v1.ManagedAccountRefusedDetails:
+      type: object
+      properties:
+        reason:
+          title: reason
+          $ref: '#/components/schemas/identity.v1.ManagedAccountRefusal'
+      title: ManagedAccountRefusedDetails
+      additionalProperties: false
+      description: |-
+        ManagedAccountRefusedDetails is the error detail on a refused request for
+         an account a tenant manages (CreateTenantInvitation with account_username).
+         It says only what the caller may know: a holder outside the caller's tenant
+         is never named.
+    identity.v1.ManagedAddress:
+      type: object
+      properties:
+        username:
+          type: string
+          title: username
+        domain:
+          type: string
+          title: domain
+      title: ManagedAddress
+      additionalProperties: false
+      description: |-
+        ManagedAddress is a managed account's address, as its username and
+         domain.
+    identity.v1.ManagedAddressCheck:
+      type: object
+      properties:
+        address:
+          title: address
+          $ref: '#/components/schemas/identity.v1.ManagedAddress'
+        status:
+          title: status
+          $ref: '#/components/schemas/identity.v1.ManagedAddressStatus'
+      title: ManagedAddressCheck
+      additionalProperties: false
+      description: ManagedAddressCheck is what CheckManagedAddresses found for one address.
+    identity.v1.ManagedAddressStatus:
+      type: string
+      title: ManagedAddressStatus
+      enum:
+        - MANAGED_ADDRESS_STATUS_UNSPECIFIED
+        - MANAGED_ADDRESS_STATUS_FREE
+        - MANAGED_ADDRESS_STATUS_MANAGED_BY_THIS_TENANT
+        - MANAGED_ADDRESS_STATUS_ADDRESS_UNAVAILABLE
+        - MANAGED_ADDRESS_STATUS_DOMAIN_UNVERIFIED
+        - MANAGED_ADDRESS_STATUS_INVALID
+      description: |-
+        ManagedAddressStatus is whether a managed account could be created at an
+         address now. It is a point-in-time answer: CreateTenantInvitation checks
+         again.
     identity.v1.MatchTenantMemberPhonesRequest:
       type: object
       properties:
@@ -13104,6 +13352,39 @@ components:
         Empty, and the same whether or not the address is free: the code is
          mailed to the address, and an address another account holds is refused
          only by VerifyRecoveryEmail, to whoever proves they control it.
+    identity.v1.ResetManagedAccountRequest:
+      type: object
+      properties:
+        tenantId:
+          type: string
+          title: tenant_id
+        userId:
+          type: string
+          title: user_id
+        deliveryAddress:
+          type: string
+          title: delivery_address
+          description: delivery_address is the email address the set-up link is sent to.
+      title: ResetManagedAccountRequest
+      additionalProperties: false
+      description: |-
+        ResetManagedAccountRequest names the managed account an owner or admin of
+         its managing tenant resets, and where its new set-up link goes.
+    identity.v1.ResetManagedAccountResponse:
+      type: object
+      properties:
+        invitation:
+          title: invitation
+          description: invitation is the account's new set-up link.
+          $ref: '#/components/schemas/identity.v1.TenantInvitation'
+        emailSendStatus:
+          title: email_send_status
+          description: |-
+            email_send_status is what became of the one attempt to send the set-up
+             link.
+          $ref: '#/components/schemas/identity.v1.EmailSendStatus'
+      title: ResetManagedAccountResponse
+      additionalProperties: false
     identity.v1.ResetUserPasswordRequest:
       type: object
       properties:
@@ -13859,6 +14140,26 @@ components:
         createdAt:
           title: created_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
+        isManagedSetup:
+          type: boolean
+          title: is_managed_setup
+          description: |-
+            is_managed_setup marks the set-up link of an account the tenant
+             manages: redeeming it sets the account's password rather than joining
+             an existing account.
+        accountAddress:
+          type: string
+          title: account_address
+          description: |-
+            account_address is the managed account's address, on a domain the
+             tenant has verified; email is then where the link was sent. Empty
+             unless is_managed_setup.
+        userId:
+          type: string
+          title: user_id
+          description: |-
+            user_id is the managed account the set-up link is for. Empty unless
+             is_managed_setup.
       title: TenantInvitation
       additionalProperties: false
       description: |-
@@ -13895,6 +14196,12 @@ components:
         updatedAt:
           title: updated_at
           $ref: '#/components/schemas/google.protobuf.Timestamp'
+        accountKind:
+          title: account_kind
+          description: |-
+            account_kind says whether the member's account is the person's own or
+             one the tenant manages. Set by ListTenantMembers; UNSPECIFIED elsewhere.
+          $ref: '#/components/schemas/identity.v1.AccountKind'
       title: TenantMembership
       additionalProperties: false
       description: |-

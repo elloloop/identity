@@ -385,3 +385,17 @@ func (h *IdentityHandler) JoinTenantByDomain(
 		Membership: membershipToProto(m),
 	}), nil
 }
+
+func (h *IdentityHandler) CheckManagedAddresses(
+	context.Context,
+	*connect.Request[identitypb.CheckManagedAddressesRequest],
+) (*connect.Response[identitypb.CheckManagedAddressesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+}
+
+func (h *IdentityHandler) ResetManagedAccount(
+	context.Context,
+	*connect.Request[identitypb.ResetManagedAccountRequest],
+) (*connect.Response[identitypb.ResetManagedAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+}

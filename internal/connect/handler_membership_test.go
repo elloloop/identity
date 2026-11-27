@@ -738,3 +738,19 @@ func TestListMyTenants_Handler(t *testing.T) {
 		t.Fatalf("tenants = %+v", got)
 	}
 }
+
+func TestManagedAccountRPCs_ReturnUnimplemented(t *testing.T) {
+	t.Parallel()
+	for _, svc := range []*service.MembershipService{nil, newMembershipSvc(nil, nil, nil, nil)} {
+		srv := startMembershipServer(t, svc)
+		ctx := context.Background()
+
+		_, err := srv.client.CheckManagedAddresses(ctx,
+			withAuth(&identitypb.CheckManagedAddressesRequest{TenantId: "t", Addresses: []*identitypb.ManagedAddress{{Username: "ann", Domain: "acme.example.com"}}}, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+
+		_, err = srv.client.ResetManagedAccount(ctx,
+			withAuth(&identitypb.ResetManagedAccountRequest{TenantId: "t", UserId: "u2", DeliveryAddress: "ann@example.com"}, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+	}
+}
