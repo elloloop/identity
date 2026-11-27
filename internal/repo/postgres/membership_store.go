@@ -1137,6 +1137,24 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 		return "", err
 	}
 
+	// A pending set-up link to the address is the tenant's own managed
+	// account's: an ordinary invitation must not replace it. The tenant's
+	// lock, which issueSetupLink takes too, orders the two.
+	var setupPending bool
+	if err := tx.QueryRow(
+		ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM tenant_invitations
+			WHERE project_id = $1 AND tenant_id = $2 AND user_id <> ''
+			  AND lower(email COLLATE "C") = $3 AND status = 'pending')`,
+		inv.ProjectID, inv.TenantID, key,
+	).Scan(&setupPending); err != nil {
+		return "", wrapPgErr("CreateInvitation(set-up link)", err)
+	}
+	if setupPending {
+		return "", service.ErrManagedByThisTenant
+	}
+
 	// Revoke any open invite for the same recipient first, so the new one
 	// is the only pending row — one open invite per (project, tenant, email).
 	if _, err := tx.Exec(

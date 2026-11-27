@@ -321,7 +321,9 @@ type InvitationStore interface {
 	// transaction it revokes any existing pending invitation for the same
 	// (project, tenant, lower(email)) and inserts the new one, with
 	// inv.TokenOnlyInEmail as given. A blank id is generated and written
-	// back. Returns the new invitation id.
+	// back. Returns the new invitation id. An address with a pending managed
+	// set-up link in the tenant is ErrManagedByThisTenant, and nothing is
+	// revoked.
 	//
 	// limits bounds how many invitations the tenant, the inviter and the
 	// recipient account for; the checks and the insert run serialised per

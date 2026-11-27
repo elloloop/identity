@@ -863,6 +863,19 @@ like any other, able to sign in under `invite`. Postgres only, as above: the
 default project's variable refuses to boot without the domain and tenant
 stores. See the multi-tenancy docs, "domain-join sign-up".
 
+**`access.admit_managed_accounts`** and
+**`access.admit_managed_accounts_self_service`** (off by default; a
+control-plane project's `config_json` only; valid with every mode) let the
+project's tenant owners and admins create **tenant-managed accounts**:
+accounts on a domain verified for the tenant, created before their first
+sign-in and belonging to that tenant only. The second extends the first to
+tenants made through self-service `CreateTenant`, and is refused without it.
+The server must also enable them with `GATEWAY_MANAGED_ACCOUNTS_ENABLED`, which
+needs the postgres driver and `GATEWAY_REVOCATION_MODE=session`. A managed
+account is a `users` row with `managed_by_tenant_id` set; its set-up link is a
+`tenant_invitations` row with its `user_id`, which never admits a sign-up or
+acceptance by email.
+
 ## Recovery emails
 
 A project can let its accounts keep **recovery emails**: additional addresses
