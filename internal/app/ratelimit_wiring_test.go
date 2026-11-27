@@ -764,3 +764,24 @@ func TestBuildRateLimits_RemovalsShareTheirSurfacesBudget(t *testing.T) {
 		assert.Equal(t, http.StatusTooManyRequests, call(request), "%s after %s spent the budget", request, remove)
 	}
 }
+
+// CheckManagedAddresses reads who holds the addresses named, so it carries a
+// per-IP budget of its own, the invitation budget's size: checking spends no
+// invitation budget, and inviting spends none of the check's.
+func TestBuildRateLimits_ManagedAddressCheckLimited(t *testing.T) {
+	const (
+		check  = "/identity.v1.IdentityService/CheckManagedAddresses"
+		invite = "/identity.v1.IdentityService/CreateTenantInvitation"
+	)
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitInvitationPerIP: 2}
+	limits := buildRateLimits(cfg)
+	pl, ok := middleware.MatchPathLimit(limits, check)
+	require.True(t, ok, "CheckManagedAddresses must carry a rate limit")
+	require.Equal(t, "managed_address_check", pl.Tag)
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, check, "198.51.100.12", 2)
+	assertQuotaExhausts(t, handler, invite, "198.51.100.12", 2)
+}

@@ -415,11 +415,52 @@ func (h *IdentityHandler) JoinTenantByDomain(
 	}), nil
 }
 
+// CheckManagedAddresses says whether managed accounts of a tenant could be
+// created at the addresses asked about. Owner/admin only.
 func (h *IdentityHandler) CheckManagedAddresses(
-	context.Context,
-	*connect.Request[identitypb.CheckManagedAddressesRequest],
+	ctx context.Context,
+	req *connect.Request[identitypb.CheckManagedAddressesRequest],
 ) (*connect.Response[identitypb.CheckManagedAddressesResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	if h.members == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+	}
+	userID := authenticatedUserID(req.Header())
+	if userID == "" {
+		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	queries := make([]service.ManagedAddressQuery, 0, len(req.Msg.GetAddresses()))
+	for _, a := range req.Msg.GetAddresses() {
+		queries = append(queries, service.ManagedAddressQuery{Username: a.GetUsername(), Domain: a.GetDomain()})
+	}
+	checks, err := h.members.CheckManagedAddresses(ctx, userID, req.Msg.GetTenantId(), queries)
+	if err != nil {
+		return nil, toConnectError(err)
+	}
+	out := make([]*identitypb.ManagedAddressCheck, 0, len(checks))
+	for _, c := range checks {
+		out = append(out, &identitypb.ManagedAddressCheck{
+			Address: &identitypb.ManagedAddress{Username: c.Query.Username, Domain: c.Query.Domain},
+			Status:  managedAddressStatusToProto(c.Status),
+		})
+	}
+	return connect.NewResponse(&identitypb.CheckManagedAddressesResponse{Results: out}), nil
+}
+
+func managedAddressStatusToProto(status string) identitypb.ManagedAddressStatus {
+	switch status {
+	case service.ManagedAddressFree:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_FREE
+	case service.ManagedAddressManagedByThis:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_MANAGED_BY_THIS_TENANT
+	case service.ManagedAddressHeldOutsideTheTenant:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_ADDRESS_UNAVAILABLE
+	case service.ManagedAddressDomainUnverified:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_DOMAIN_UNVERIFIED
+	case service.ManagedAddressInvalid:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_INVALID
+	default:
+		return identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_UNSPECIFIED
+	}
 }
 
 func (h *IdentityHandler) ResetManagedAccount(

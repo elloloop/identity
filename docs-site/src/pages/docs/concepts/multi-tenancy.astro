@@ -692,6 +692,37 @@ RestoreTenantMember(tenant_id, user_id)
     <code>managed_account_setup_resent</code> (with whether the delivery
     address changed), with no address in the trail.
   </p>
+  <p id="checking-managed-addresses">
+    Before creating accounts, an owner or admin can ask which addresses are
+    usable. The answer is a point in time: creation decides again.
+  </p>
+  <Code
+    code={`CheckManagedAddresses(tenant_id, addresses: [{ username, domain }, ...])   # 1 to 100
+  -> results, in order: { address, status }
+       FREE                     # no account or recovery email holds it
+       MANAGED_BY_THIS_TENANT   # already one of this tenant's accounts
+       ADDRESS_UNAVAILABLE      # held outside the tenant; which holder is not said
+       DOMAIN_UNVERIFIED        # not a domain verified for tenant_id; nothing looked up
+       INVALID                  # not a valid username or address, or one the project refuses
+  -> FAILED_PRECONDITION POLICY   # managed accounts not admitted for the tenant
+  -> PERMISSION_DENIED            # not an owner or admin of tenant_id, or the tenant is suspended
+  -> INVALID_ARGUMENT             # no tenant_id, no addresses, or more than 100
+  -> RESOURCE_EXHAUSTED           # past the tenant's or the client IP's budget`}
+    lang="bash"
+  />
+  <p>
+    Every lookup is confined to the request's project and the caller's
+    tenant: only addresses on domains verified for that tenant are looked up,
+    against that project's accounts and recovery emails, so no tenant learns
+    anything about another tenant's domain. Calls are limited per client IP on
+    a budget of their own, the size of
+    <code>GATEWAY_RATE_LIMIT_INVITATION_PER_IP</code>, and the addresses looked
+    up per tenant by <code>GATEWAY_RATE_LIMIT_MANAGED_ADDRESS_CHECK_PER_TENANT</code>
+    (default 1000 addresses per rate-limit window, counted per replica; it
+    cannot be switched off). A call that does not fit in what is left is
+    refused whole. Past either limit the call is
+    <code>RESOURCE_EXHAUSTED</code>.
+  </p>
   <p id="managed-account-set-up">
     <code>GetTenantInvitation</code> marks a set-up link
     <code>is_managed_setup</code>, with <code>email</code> the account's

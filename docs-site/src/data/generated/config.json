@@ -1656,6 +1656,15 @@
     "anchor": "rate-limiting"
   },
   {
+    "name": "GATEWAY_RATE_LIMIT_MANAGED_ADDRESS_CHECK_PER_TENANT",
+    "type": "integer",
+    "default": "1000",
+    "required": false,
+    "description": "is the cap per window on the addresses CheckManagedAddresses looks up for one tenant, each call spending one unit per address it looks up (up to 100), on top of the per-IP cap on calls.",
+    "category": "Rate limiting",
+    "anchor": "rate-limiting"
+  },
+  {
     "name": "GATEWAY_RATE_LIMIT_MANAGED_CHILD_AUTH_PER_IP",
     "type": "integer",
     "default": "1200",

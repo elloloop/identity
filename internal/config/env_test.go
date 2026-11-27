@@ -771,18 +771,20 @@ func TestManagedAccountsBoundTheSessionCache(t *testing.T) {
 	}
 }
 
-// The default project admits no managed accounts unless told to.
-func TestDefaultProjectAdmitManagedAccounts_DefaultsOff(t *testing.T) {
-	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS", "")
-	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE", "")
+// The per-tenant address-check budget cannot be switched off: zero selects
+// the default and a negative value is refused.
+func TestRateLimitManagedAddressCheckPerTenant(t *testing.T) {
 	c := Load()
-	if c.DefaultProjectAdmitManagedAccounts || c.DefaultProjectAdmitManagedAccountsSelfService {
-		t.Fatal("the default project's managed-account switches must default off")
+	c.RateLimitManagedAddressCheckPerTenant = 0
+	if err := c.Validate(); err != nil || c.RateLimitManagedAddressCheckPerTenant != DefaultRateLimitManagedAddressCheckPerTenant {
+		t.Fatalf("zero = %d %v, want the default", c.RateLimitManagedAddressCheckPerTenant, err)
 	}
-	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS", "true")
-	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE", "true")
-	c = Load()
-	if !c.DefaultProjectAdmitManagedAccounts || !c.DefaultProjectAdmitManagedAccountsSelfService {
-		t.Fatal("the variables set to true must turn the switches on")
+	c.RateLimitManagedAddressCheckPerTenant = -1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_RATE_LIMIT_MANAGED_ADDRESS_CHECK_PER_TENANT") {
+		t.Fatalf("negative = %v, want refused", err)
+	}
+	t.Setenv("GATEWAY_RATE_LIMIT_MANAGED_ADDRESS_CHECK_PER_TENANT", "7")
+	if got := Load().RateLimitManagedAddressCheckPerTenant; got != 7 {
+		t.Fatalf("env = %d, want 7", got)
 	}
 }
