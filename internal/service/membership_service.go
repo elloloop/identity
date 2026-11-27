@@ -199,6 +199,8 @@ const (
 // on a tenant a user created, allows them there too
 // (InvitationNotesSelfService): for the reason tenantDisplayName never names
 // such a tenant, its text is unvetted unless the project says otherwise.
+// The note is judged only once the caller is an owner or admin, so no one
+// else learns from a refusal whether the project allows notes.
 //
 // Every invitation sends an email, so the store refuses one past the limits
 // (see invitationLimits): ErrInvitationLimited past the per-tenant cap,
@@ -229,16 +231,16 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	if err != nil {
 		return nil, err
 	}
+
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+		return nil, err
+	}
 	note, err = normalizeInvitationNote(note)
 	if err != nil {
 		return nil, err
 	}
 	if note != "" && !ProjectScopeFromContext(ctx).Tenants.InvitationNotes {
 		return nil, fmt.Errorf("%w: the project does not allow notes on invitations", ErrInvitationNoteNotAllowed)
-	}
-
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
-		return nil, err
 	}
 	if note != "" && !ProjectScopeFromContext(ctx).Tenants.InvitationNotesSelfService {
 		if err := s.requireNoteableTenant(ctx, projectID, tenantID); err != nil {

@@ -30,9 +30,9 @@ invitation itself, such as the address their account will use.
   accepts that owners and admins the project never vetted, whoever signed up,
   can put a validated, link-free note in an email the service sends under its
   own name; the note is still labelled "A note from the administrator who
-  invited you", and the tenant's name stays out. The check follows the
-  owner-or-admin one, so only an owner or admin learns how the tenant was
-  made.
+  invited you", and the tenant's name stays out. Every note check follows
+  the owner-or-admin one, so only an owner or admin learns whether the
+  project allows notes or how the tenant was made.
 - **What a note may hold.** The note and each of its lines are trimmed and a
   CRLF break is read as LF. Then `INVALID_ARGUMENT` for: more than 280
   characters; more than 4 lines; a blank line; a control character other than

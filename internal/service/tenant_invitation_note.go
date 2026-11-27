@@ -75,8 +75,9 @@ func normalizeInvitationNote(note string) (string, error) {
 // client into, a link. It judges the note as foldNote spells it, so a
 // lookalike spelling (fullwidth letters, an ideographic full stop for a dot)
 // is judged as the text it imitates; a letter of another script that only
-// looks Latin is still a letter, so "exаmple.com" with a Cyrillic "а" reads
-// as a domain like any other. Refused:
+// looks Latin is still a letter, so "example.com" spelled with a Cyrillic
+// small letter a in place of the Latin one reads as a domain like any
+// other. Refused:
 //
 //   - "<" or ">", which HTML markup and autolinks need, and "](", which a
 //     markdown link needs;

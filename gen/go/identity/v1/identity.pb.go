@@ -14952,11 +14952,15 @@ type CreateTenantInvitationRequest struct {
 	// 4 lines, with a blank line, with a control character other than the line
 	// break or an invisible formatting character (a bidirectional control
 	// among them), or that reads as a link: "<", ">", "](", "://", a scheme
-	// such as "mailto:" or "tel:" directly followed by text, a domain or
-	// dotted IPv4 address ("www.example", "example.com", "exаmple.com" in a
-	// lookalike script, or the same in fullwidth letters), or an address that
-	// is not a plain ASCII email address. A plain email address such as
-	// "jane@example.com" is allowed. The note is not stored: a resend is a new
+	// such as "mailto:" or "tel:" directly followed by text, any word directly
+	// followed by ":" and an address ("sip:jane@example.com"), a domain or
+	// dotted IPv4 address ("www.example", "example.com", the same spelled with
+	// a Cyrillic small letter a in place of the Latin one, or in fullwidth
+	// letters), or an address that is not a plain ASCII email address as typed.
+	// A plain email address such as "jane@example.com" is allowed; one written
+	// with a fullwidth at sign or a fullwidth full stop is refused. A caller who
+	// is not an owner or admin of the tenant is PERMISSION_DENIED before any of
+	// these checks. The note is not stored: a resend is a new
 	// CreateTenantInvitation call, which carries its own note. A note goes only
 	// on an ordinary invitation: INVALID_ARGUMENT with account_username.
 	Note          string `protobuf:"bytes,7,opt,name=note,proto3" json:"note,omitempty"`

@@ -517,9 +517,13 @@ RestoreTenantMember(tenant_id, user_id)
     other than Chinese, Japanese or Korean as a dot. A plain email address
     such as <code>jane@example.com</code> is allowed, recognised in the note
     as sent rather than read that way, so one written with a fullwidth or
-    small at sign, or a fullwidth dot, is refused. The note is not stored:
-    a resend is a new <code>CreateTenantInvitation</code>, which carries its
-    own note.
+    small at sign, or a fullwidth dot, is refused. A caller who is not an
+    owner or admin of the tenant is <code>PERMISSION_DENIED</code> before any
+    of these checks, so a refusal tells no one else whether the Project
+    allows notes. A note goes only on an ordinary invitation: with
+    <code>account_username</code> it is <code>INVALID_ARGUMENT</code>. The
+    note is not stored: a resend is a new
+    <code>CreateTenantInvitation</code>, which carries its own note.
   </p>
   <p>
     An owner or admin withdraws a pending invitation, and its link stops

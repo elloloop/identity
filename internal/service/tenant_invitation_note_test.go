@@ -87,7 +87,7 @@ func TestNormalizeInvitationNote_Refused(t *testing.T) {
 		{"punycode domain", "xn--80ak6aa92e.xn--p1ai", "link"},
 		{"punycode top-level label", "acme.xn--p1ai", "link"},
 		{"IPv4 address", "use 192.168.0.1", "link"},
-		{"cyrillic lookalike letter", "Sign in at exаmple.com", "link"},
+		{"cyrillic lookalike letter", "Sign in at ex\u0430mple.com", "link"},
 		{"cyrillic domain", "пример.рф", "link"},
 		{"fullwidth domain", "ｅｘａｍｐｌｅ．ｃｏｍ", "link"},
 		{"mathematical bold domain", "𝐞𝐱𝐚𝐦𝐩𝐥𝐞.𝐜𝐨𝐦", "link"},
@@ -113,7 +113,7 @@ func TestNormalizeInvitationNote_Refused(t *testing.T) {
 		{"two at signs", "jane@@example.com", "email address is allowed"},
 		{"address with two at signs", "jane@bob@example.com", "email address is allowed"},
 		{"address with no domain dot", "jane@localhost", "email address is allowed"},
-		{"address with a lookalike domain", "jane@exаmple.com", "email address is allowed"},
+		{"address with a lookalike domain", "jane@ex\u0430mple.com", "email address is allowed"},
 		{"address with a non-ASCII local part", "jäne@example.com", "email address is allowed"},
 		{"address whose local part ends in a dot", "jane.@example.com", "email address is allowed"},
 		{"address with a one-letter top-level label", "jane@example.x", "email address is allowed"},
@@ -217,7 +217,8 @@ func TestCreateTenantInvitation_NoNoteNoNoteSection(t *testing.T) {
 // not allow notes, even if it allows them on self-service tenants; on a tenant
 // a user created unless the project allows notes there too; and when it reads
 // as a link, on any tenant. A caller who is not an owner or admin is refused
-// as one, so a note never tells them whether the tenant is one a user created.
+// as one, so a note never tells them whether the project allows notes or
+// whether the tenant is one a user created.
 func TestCreateTenantInvitation_NoteRefused(t *testing.T) {
 	off := ProjectTenantsConfig{}
 	notes := ProjectTenantsConfig{InvitationNotes: true}
@@ -238,11 +239,13 @@ func TestCreateTenantInvitation_NoteRefused(t *testing.T) {
 		{"link", notes, "", RoleOwner, "Sign in at example.com", ErrInvalidArgument},
 		{"link where notes are not allowed", off, "", RoleOwner, "Sign in at example.com", ErrInvalidArgument},
 		{"link on a self-service tenant allowed notes", both, "user-creator", RoleOwner, "Sign in at example.com", ErrInvalidArgument},
-		{"lookalike domain on a self-service tenant allowed notes", both, "user-creator", RoleOwner, "Sign in at exаmple.com", ErrInvalidArgument},
+		{"lookalike domain on a self-service tenant allowed notes", both, "user-creator", RoleOwner, "Sign in at ex\u0430mple.com", ErrInvalidArgument},
 		{"bidirectional override", notes, "", RoleOwner, "Hi \u202Emoc.elpmaxe", ErrInvalidArgument},
 		{"over the cap on a self-service tenant allowed notes", both, "user-creator", RoleOwner, strings.Repeat("a", maxInvitationNoteRunes+1), ErrInvalidArgument},
 		{"plain member of a self-service tenant", notes, "user-creator", RoleMember, "Welcome aboard", ErrPermissionDenied},
 		{"plain member where self-service tenants allow notes", both, "user-creator", RoleMember, "Welcome aboard", ErrPermissionDenied},
+		{"plain member where the project does not allow notes", off, "", RoleMember, "Welcome aboard", ErrPermissionDenied},
+		{"plain member with a link", off, "", RoleMember, "Sign in at example.com", ErrPermissionDenied},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newMembershipFixture()
