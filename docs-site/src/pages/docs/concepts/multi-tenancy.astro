@@ -718,6 +718,22 @@ RestoreTenantMember(tenant_id, user_id)
     <code>AcceptTenantInvitation</code> never redeems a set-up link: once it
     is used, it returns its own account's membership and refuses anyone else.
   </p>
+  <p id="managed-account-sign-in">
+    A managed account holds a session only while it is active, has been set
+    up, and its membership of the tenant that manages it is active. Every way
+    of signing in, a two-step code and a refresh included, checks this when it
+    mints tokens, whether or not <code>GATEWAY_MANAGED_ACCOUNTS_ENABLED</code>
+    is on, and refuses with <code>FAILED_PRECONDITION</code> otherwise. So an
+    owner or admin who suspends or removes a managed member stops the
+    account's next sign-in and its next refresh, which spends the refresh
+    token; restoring the membership lets it sign in again. Access tokens
+    already issued last until they expire. When the membership cannot be read
+    the account is refused too, and a refresh keeps its token for a retry.
+    Personal accounts are never read for. A managed account's access token
+    carries the claim <code>managed: true</code>, a JSON boolean; a personal
+    account's token has no <code>managed</code> claim. The claim says what the
+    account was when the token was minted: the account's record decides.
+  </p>
   <p>
     <code>RevokeTenantInvitation</code> on a set-up link also deletes its
     account while that account has never been set up, whatever the link's

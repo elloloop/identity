@@ -109,6 +109,29 @@ func TestCreateAndVerify_IsMinorClaim(t *testing.T) {
 	assert.False(t, gotAdult.IsMinor, "non-minor token verifies with IsMinor=false")
 }
 
+// A managed account's token carries managed=true, a JSON boolean, and
+// round-trips; a personal account's token has no managed claim at all.
+func TestCreateAndVerify_ManagedClaim(t *testing.T) {
+	s := newMemSigner(t, "test-kid")
+
+	managed := Claims{Sub: "ann", Email: "ann@acme.example.com", Role: "member", Tenant: "t", Managed: true}
+	require.Equal(t, true, managed.ClaimsMap(time.Now(), time.Minute)["managed"])
+	tok, err := s.SignAccessToken(context.Background(), managed, 15*time.Minute)
+	require.NoError(t, err)
+	got, err := VerifyAccessToken(tok, s, "", "", false)
+	require.NoError(t, err)
+	assert.True(t, got.Managed)
+
+	personal := Claims{Sub: "bob", Email: "bob@example.com", Role: "member", Tenant: "t"}
+	_, present := personal.ClaimsMap(time.Now(), time.Minute)["managed"]
+	require.False(t, present, "a personal account's token has no managed claim")
+	tok, err = s.SignAccessToken(context.Background(), personal, 15*time.Minute)
+	require.NoError(t, err)
+	got, err = VerifyAccessToken(tok, s, "", "", false)
+	require.NoError(t, err)
+	assert.False(t, got.Managed)
+}
+
 // A token minted before the project model (no Project claim) round-trips
 // with an empty Project — the claim is omitted, not a forced "".
 func TestCreateAndVerify_NoProjectClaim(t *testing.T) {

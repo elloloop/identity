@@ -50,3 +50,15 @@ func TestBuildMembershipService(t *testing.T) {
 		}
 	}
 }
+
+// Managed accounts' sessions are judged by the membership store wherever
+// there is one, whether or not managed accounts may be created.
+func TestManagedMembershipReader(t *testing.T) {
+	if got := managedMembershipReader(Deps{Config: &config.Config{}}); got != nil {
+		t.Fatalf("no membership store: want a nil reader, got %v", got)
+	}
+	store := &stubMembershipStore{}
+	if got := managedMembershipReader(Deps{Config: &config.Config{}, MembershipStore: store}); got != store {
+		t.Fatalf("membership store present with managed accounts off: want it as the reader, got %v", got)
+	}
+}

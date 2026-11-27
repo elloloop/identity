@@ -872,6 +872,7 @@ func New(deps Deps) (*Built, error) {
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
 		WithManagedAccounts(deps.ManagedSetups, deps.TenantStore).
+		WithManagedMemberships(managedMembershipReader(deps)).
 		WithDomainJoin(deps.DomainStore, deps.TenantStore).
 		WithMailDelivery(senders.mailDelivers).
 		WithTemplateMessages(senders.templates).
@@ -1751,4 +1752,15 @@ func warnMergeWithoutWebhooks(cfg *config.Config, logger *zap.Logger) {
 		logger.Warn("account_merge_without_webhooks",
 			zap.String("hint", "GATEWAY_ACCOUNT_MERGE_ENABLED is on but GATEWAY_WEBHOOKS_ENABLED is off: applications will not receive user.merged"))
 	}
+}
+
+// managedMembershipReader is the reader that decides whether a managed
+// account may hold a session: the membership store wherever there is one,
+// whatever the managed-account switch says, since accounts managed while it
+// was on stay managed. nil (memory, SQLite) has no managed accounts.
+func managedMembershipReader(deps Deps) service.ManagedMembershipReader {
+	if deps.MembershipStore == nil {
+		return nil
+	}
+	return deps.MembershipStore
 }
