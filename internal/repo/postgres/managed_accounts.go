@@ -260,26 +260,9 @@ func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.
 	if err := lockXact(ctx, tx, op, addressLockKey(setup.ProjectID, setup.Address)); err != nil {
 		return nil, err
 	}
-	account, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+`
-		FROM users WHERE project_id = $1 AND email <> '' AND email_fold = $2
-		FOR UPDATE`, setup.ProjectID, service.FoldEmail(setup.Address)))
-	if err != nil && !noRows(err) {
-		return nil, wrapPgErr(op+"(holder)", err)
-	}
-	if noRows(err) {
-		account = nil
-		var recovery bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_recovery_emails WHERE project_id = $1 AND email_fold = $2)`,
-			setup.ProjectID, service.FoldEmail(setup.Address)).Scan(&recovery); err != nil {
-			return nil, wrapPgErr(op+"(recovery holder)", err)
-		}
-		if recovery {
-			return nil, service.ErrManagedAddressUnavailable
-		}
-	} else if account.ManagedByTenantID != setup.TenantID {
-		return nil, service.ErrManagedAddressUnavailable
-	} else if account.Status != service.StatusInvited || account.SetUpAtMs != 0 {
-		return nil, service.ErrManagedByThisTenant
+	account, err := lockAddressHolder(ctx, tx, setup)
+	if err != nil {
+		return nil, err
 	}
 	verified, err := domainVerifiedFor(ctx, tx, setup.ProjectID, setup.TenantID, setup.Domain)
 	if err != nil {
@@ -299,19 +282,8 @@ func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.
 	now := nowMs()
 	created := account == nil
 	if created {
-		account = &service.User{
-			Email: setup.Address, Name: setup.DisplayName, Status: service.StatusInvited,
-			Kind: service.UserKindPerson, ManagedByTenantID: setup.TenantID, SetupEpoch: 1,
-			CreatedAt: time.UnixMilli(now),
-		}
-		id, userRole, status := defaultNewUserFields(account)
-		if _, err := tx.Exec(ctx, insertUserQuery, insertUserArgs(setup.ProjectID, id, userRole, status, account)...); err != nil {
-			return nil, wrapPgErr(op+"(create account)", err)
-		}
-		if account, err = scanUser(tx.QueryRow(ctx, `UPDATE users SET invited_by = $3, invited_at_ms = $4
-			WHERE project_id = $1 AND id = $2
-			RETURNING `+userColumns, setup.ProjectID, id, setup.InvitedBy, now)); err != nil {
-			return nil, wrapPgErr(op+"(create account)", err)
+		if account, err = createManagedAccount(ctx, tx, setup, now); err != nil {
+			return nil, err
 		}
 	}
 	var replacesOwnerLink bool
@@ -349,6 +321,60 @@ func (s *InvitationStore) CreateManagedSetup(ctx context.Context, setup service.
 		return nil, wrapPgErr(op+"(commit)", err)
 	}
 	return &service.ManagedSetupIssued{User: account, Invitation: issued, Created: created, PreviousDeliveryEmail: previousDelivery}, nil
+}
+
+// lockAddressHolder returns the managed account of setup.TenantID at
+// setup.Address that may be sent a new link, its row held FOR UPDATE, or nil
+// when nothing holds the address. Any other holder is refused:
+// service.ErrManagedByThisTenant for one of the tenant's accounts past
+// set-up, service.ErrManagedAddressUnavailable for anything outside it. It
+// must run under the address's lock.
+func lockAddressHolder(ctx context.Context, tx pgx.Tx, setup service.ManagedSetup) (*service.User, error) {
+	const op = "CreateManagedSetup(holder)"
+	fold := service.FoldEmail(setup.Address)
+	account, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+`
+		FROM users WHERE project_id = $1 AND email <> '' AND email_fold = $2
+		FOR UPDATE`, setup.ProjectID, fold))
+	switch {
+	case noRows(err):
+		var recovery bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_recovery_emails WHERE project_id = $1 AND email_fold = $2)`,
+			setup.ProjectID, fold).Scan(&recovery); err != nil {
+			return nil, wrapPgErr(op, err)
+		}
+		if recovery {
+			return nil, service.ErrManagedAddressUnavailable
+		}
+		return nil, nil
+	case err != nil:
+		return nil, wrapPgErr(op, err)
+	case account.ManagedByTenantID != setup.TenantID:
+		return nil, service.ErrManagedAddressUnavailable
+	case account.Status != service.StatusInvited || account.SetUpAtMs != 0:
+		return nil, service.ErrManagedByThisTenant
+	}
+	return account, nil
+}
+
+// createManagedAccount inserts setup's account: invited, never set up, at
+// set-up epoch 1, managed by setup.TenantID.
+func createManagedAccount(ctx context.Context, tx pgx.Tx, setup service.ManagedSetup, now int64) (*service.User, error) {
+	account := &service.User{
+		Email: setup.Address, Name: setup.DisplayName, Status: service.StatusInvited,
+		Kind: service.UserKindPerson, ManagedByTenantID: setup.TenantID, SetupEpoch: 1,
+		CreatedAt: time.UnixMilli(now),
+	}
+	id, role, status := defaultNewUserFields(account)
+	if _, err := tx.Exec(ctx, insertUserQuery, insertUserArgs(setup.ProjectID, id, role, status, account)...); err != nil {
+		return nil, wrapPgErr("CreateManagedSetup(create account)", err)
+	}
+	created, err := scanUser(tx.QueryRow(ctx, `UPDATE users SET invited_by = $3, invited_at_ms = $4
+		WHERE project_id = $1 AND id = $2
+		RETURNING `+userColumns, setup.ProjectID, id, setup.InvitedBy, now))
+	if err != nil {
+		return nil, wrapPgErr("CreateManagedSetup(create account)", err)
+	}
+	return created, nil
 }
 
 // managedSetupLink reads tenantID's invitation invitationID (any tenant when
