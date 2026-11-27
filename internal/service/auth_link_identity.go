@@ -25,7 +25,9 @@ import (
 // ErrAlreadyExists; the caller must not be able to steal another account's
 // provider identity, and a no-op re-link should not look like success. A
 // session a recovery hold binds is refused (RecoveryHoldError): a provider
-// it linked would sign in after the hold.
+// it linked would sign in after the hold. An account a tenant manages links
+// only a provider its tenant owns (tenantOwnsProvider), so none yet
+// (ErrManagedAccount).
 func (s *AuthService) LinkIdentity(
 	ctx context.Context,
 	userID string, signIn SessionSignIn, code, provider, redirectURI, codeVerifier, state, stateToken string,
@@ -60,6 +62,9 @@ func (s *AuthService) LinkIdentity(
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	provider = strings.ToLower(strings.TrimSpace(provider))
+	if err := refuseManagedProvider(ctx, s.logger, s.projectID(ctx), holder, provider); err != nil {
+		return nil, err
+	}
 
 	identity, err := s.verifyOAuthExchange(ctx, OAuthLoginParams{
 		Code:         code,

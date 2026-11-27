@@ -108,6 +108,9 @@ func (s *AuthService) sendEmailLoginCode(ctx context.Context, emailAddr string) 
 
 // sendEmailLoginCodeNow is the synchronous body of sendEmailLoginCode.
 func (s *AuthService) sendEmailLoginCodeNow(ctx context.Context, emailAddr string) {
+	if s.managedAccountWaiting(ctx, emailAddr) {
+		return
+	}
 	// Per-email send cooldown — a single inbox can't be flooded. Reuses
 	// the shared transactional-email throttle. A throttled request is
 	// silent (same response as success) so the cooldown can't be probed.
@@ -271,6 +274,9 @@ func (s *AuthService) RequestMagicLink(ctx context.Context, emailAddr, returnTo 
 // emails the link. Silent — throttle/create/render/send failures are logged,
 // never surfaced.
 func (s *AuthService) sendMagicLinkNow(ctx context.Context, emailAddr, returnTo string) {
+	if s.managedAccountWaiting(ctx, emailAddr) {
+		return
+	}
 	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
 		s.logger.Info("magic_link_throttled", zap.String("email", redactEmail(emailAddr)))
 		return
@@ -409,6 +415,9 @@ func (s *AuthService) completePasswordlessLogin(ctx context.Context, emailAddr c
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !isNew && user.ManagedByTenantID != "" && user.Status == StatusInvited {
+		return nil, refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, method+":invited")
 	}
 
 	// A pre-existing account resolved here was NOT created verified by the

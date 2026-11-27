@@ -393,3 +393,9 @@ func TestToConnectErrorManagedAccountRefusals(t *testing.T) {
 		t.Fatalf("stale set-up link = %v", cerr)
 	}
 }
+
+func TestToConnectErrorManagedAccount(t *testing.T) {
+	if got := connect.CodeOf(toConnectError(service.ErrManagedAccount)); got != connect.CodePermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", got)
+	}
+}

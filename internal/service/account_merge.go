@@ -414,6 +414,9 @@ func checkMergeable(ctx context.Context, repo Repository, survivor, other *User)
 	if other.IsAgent() {
 		return errAgentMerge
 	}
+	if !managedAccountsMayMerge(survivor, other) {
+		return ErrManagedAccount
+	}
 	// A password an administrator issued would arrive on the survivor as an
 	// ordinary one, skipping the change its user still owes.
 	if other.PasswordChangeRequired {
@@ -447,6 +450,9 @@ func checkSurvivor(ctx context.Context, repo Repository, survivor *User) error {
 	}
 	if survivor.IsAgent() {
 		return errAgentMerge
+	}
+	if survivor.ManagedByTenantID != "" {
+		return ErrManagedAccount
 	}
 	return refuseManagedChild(ctx, repo, survivor)
 }

@@ -741,6 +741,26 @@ RestoreTenantMember(tenant_id, user_id)
     account's token has no <code>managed</code> claim. The claim says what the
     account was when the token was minted: the account's record decides.
   </p>
+  <p id="managed-account-refusals">
+    A managed account is the tenant's, so what only a person's own account
+    may do is refused to it with <code>PERMISSION_DENIED</code>
+    (<code>managed_account</code>), each logged as
+    <code>managed_account_refused</code> with the path: creating a tenant,
+    joining one by domain, accepting any invitation, leaving its tenant,
+    changing its email, linking a provider, deleting itself, owning an agent,
+    and merging with another account on either side. It signs in through no
+    OAuth provider, since no tenant owns one yet: a provider account at the
+    same address would otherwise control it. While it waits to be set up it is
+    sent no sign-in code or link (the request answers as for any address), and
+    a code or link already sent signs nothing in. The admin
+    <code>DeactivateUser</code>, <code>ReactivateUser</code>,
+    <code>DeleteUser</code>, <code>ResetUserPassword</code> and
+    <code>UpdateUser</code> refuse it too, and SCIM may read it but not
+    replace, patch or delete it (<code>403</code>): its tenant manages it. A
+    purge ends
+    its set-up links first, the stored-email repair leaves it alone, and it
+    forms no tenant from its domain.
+  </p>
   <p>
     <code>RevokeTenantInvitation</code> on a set-up link also deletes its
     account while that account has never been set up, whatever the link's

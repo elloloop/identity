@@ -32,6 +32,18 @@ type AdminService struct {
 	// (deactivate, delete). nil disables emission (no-op). Set via
 	// WithEventPublisher by app.New. Best-effort: never fails the RPC.
 	publisher events.Publisher
+
+	// managedSetups ends a managed account's set-up links when the account
+	// is purged (WithManagedSetups); without one a managed account is not
+	// purged.
+	managedSetups ManagedSetupStore
+}
+
+// WithManagedSetups wires the store whose cleanup a managed account's purge
+// runs, and returns the service for chaining.
+func (s *AdminService) WithManagedSetups(store ManagedSetupStore) *AdminService {
+	s.managedSetups = store
+	return s
 }
 
 // WithEventPublisher wires the optional user-lifecycle event publisher and
@@ -303,6 +315,9 @@ func (s *AdminService) DeactivateUser(ctx context.Context, actorID, targetUserID
 	if node == nil {
 		return errors.New("user not found")
 	}
+	if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), userFromNode(node), "admin_deactivate_user"); err != nil {
+		return err
+	}
 
 	now := nowMs()
 	op := graph.Operation{
@@ -349,6 +364,9 @@ func (s *AdminService) ReactivateUser(ctx context.Context, actorID string, signI
 	}
 	if node == nil {
 		return errors.New("user not found")
+	}
+	if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), userFromNode(node), "admin_reactivate_user"); err != nil {
+		return err
 	}
 
 	// Refuse to move an account out of pending_parental_consent via the
@@ -401,6 +419,9 @@ func (s *AdminService) ResetUserPassword(
 	}
 	if node == nil {
 		return nil, errors.New("user not found")
+	}
+	if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), userFromNode(node), "admin_reset_user_password"); err != nil {
+		return nil, err
 	}
 	// An agent account has no sign-in method, and a password would be one.
 	if userFromNode(node).IsAgent() {

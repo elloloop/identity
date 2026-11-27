@@ -23,6 +23,7 @@ type managedSetupsMock struct {
 	revoke   func(projectID, tenantID, invitationID, by string) (*ManagedSetupRevoked, error)
 	holders  func(projectID, tenantID string, addresses []string) (map[string]string, error)
 	among    func(projectID, tenantID string, userIDs []string) (map[string]bool, error)
+	links    func(projectID, userID string) error
 }
 
 var errNotProgrammed = errors.New("managedSetupsMock: method not programmed")
@@ -60,6 +61,13 @@ func (m *managedSetupsMock) ManagedAccountsAmong(_ context.Context, projectID, t
 		return nil, errNotProgrammed
 	}
 	return m.among(projectID, tenantID, userIDs)
+}
+
+func (m *managedSetupsMock) RevokeSetupLinksOf(_ context.Context, projectID, userID string) error {
+	if m.links == nil {
+		return errNotProgrammed
+	}
+	return m.links(projectID, userID)
 }
 
 var _ ManagedSetupStore = (*managedSetupsMock)(nil)

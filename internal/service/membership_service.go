@@ -304,7 +304,9 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 // suspended is ErrMemberSuspended (MembershipStore.GrantMembership); the
 // invitation stays pending through each. An
 // expired invitation is marked expired and rejected; an
-// unknown/revoked/already-accepted token is rejected without mutation.
+// unknown/revoked/already-accepted token is rejected without mutation. An
+// account a tenant manages accepts no invitation (ErrManagedAccount): it
+// belongs to its own tenant only.
 //
 // A managed account's set-up link is redeemed by SignUpWithTenantInvitation,
 // never here: once it is accepted, accepting it again returns its own
@@ -361,6 +363,10 @@ func (s *MembershipService) AcceptTenantInvitation(ctx context.Context, callerID
 	if caller == nil {
 		s.logAcceptRefused(ctx, projectID, callerID, inv, "caller_not_found")
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
+	}
+	if err := refuseManagedAccountPath(ctx, s.logger, projectID, caller, "accept_invitation"); err != nil {
+		s.logAcceptRefused(ctx, projectID, callerID, inv, "managed_account")
+		return nil, err
 	}
 	if !emailaddr.SameMailbox(caller.Email, inv.Email) {
 		s.logAcceptRefused(ctx, projectID, callerID, inv, "email_mismatch")
@@ -556,6 +562,8 @@ func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, ten
 // owner remains, is allowed, including an owner removing themselves. The
 // store checks and removes in one step (MembershipStore.RemoveMembership),
 // so a concurrent removal or ownership transfer cannot slip between them.
+// An account a tenant manages cannot remove itself (ErrManagedAccount): it
+// exists only as the tenant's.
 func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, targetUserID, ip, userAgent string) error {
 	projectID, tenantID, targetUserID, err := s.memberChangeRef(ctx, callerID, tenantID, targetUserID)
 	if err != nil {
@@ -566,6 +574,11 @@ func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID str
 	}
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
 		return err
+	}
+	if targetUserID == callerID {
+		if err := s.refuseManagedLeave(ctx, projectID, callerID); err != nil {
+			return err
+		}
 	}
 
 	removed, err := s.memberships.RemoveMembership(ctx, projectID, tenantID, targetUserID)

@@ -891,7 +891,8 @@ func New(deps Deps) (*Built, error) {
 		}
 	}
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
-		WithEventPublisher(eventPublisher)
+		WithEventPublisher(eventPublisher).
+		WithManagedSetups(deps.ManagedSetups)
 	// Guardian-initiated erasure of a managed child account runs the admin
 	// service's hard-delete cascade rather than a second copy of it.
 	authSvc = authSvc.WithAccountPurger(adminSvc)

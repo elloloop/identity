@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/scim"
 )
@@ -346,4 +348,40 @@ func TestRepoSCIMStore_AnonymousUsersAreNotAddressable(t *testing.T) {
 			t.Fatalf("GetUser on a permanent account → %v", err)
 		}
 	})
+}
+
+// A tenant manages its accounts' lifecycle and address, so SCIM may read a
+// managed account but not replace, patch or delete it: each write is
+// forbidden and writes nothing, while a personal account is unchanged.
+func TestRepoSCIMStore_RefusesWritesToAManagedAccount(t *testing.T) {
+	ctx := context.Background()
+	managed := func() *scimFakeRepo {
+		return &scimFakeRepo{user: &service.User{ID: "u1", Email: "ann@acme.example.com", Status: "active", ManagedByTenantID: "tenant-acme"}}
+	}
+	active := false
+	for name, write := range map[string]func(*repoSCIMStore) error{
+		"PUT": func(s *repoSCIMStore) error {
+			_, err := s.ReplaceUser(ctx, "u1", scim.User{Email: "ann@acme.example.com", Active: true})
+			return err
+		},
+		"PATCH": func(s *repoSCIMStore) error {
+			_, err := s.PatchUser(ctx, "u1", scim.UserPatch{Active: &active})
+			return err
+		},
+		"DELETE": func(s *repoSCIMStore) error { return s.DeleteUser(ctx, "u1") },
+	} {
+		fr := managed()
+		s := &repoSCIMStore{repo: fr, logger: zap.NewNop()}
+		if err := write(s); !errors.Is(err, scim.ErrForbidden) {
+			t.Fatalf("%s on a managed account = %v, want ErrForbidden", name, err)
+		}
+		if fr.updateCalled || fr.deleteCalled || fr.revokeCalled {
+			t.Fatalf("%s on a managed account wrote", name)
+		}
+	}
+	fr := managed()
+	got, err := (&repoSCIMStore{repo: fr, logger: zap.NewNop()}).GetUser(ctx, "u1")
+	if err != nil || got.ID != "u1" {
+		t.Fatalf("reading a managed account = %+v %v, want it", got, err)
+	}
 }

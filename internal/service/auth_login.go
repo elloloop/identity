@@ -1051,7 +1051,13 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 
 	// 1. (provider, sub) lookup — survives provider-side email change.
 	if linked, err := s.findLinkedOAuthUser(ctx, identity, emailStr, now); err != nil || linked != nil {
-		return linked, false, err
+		if err == nil {
+			err = refuseManagedProvider(ctx, s.logger, s.projectID(ctx), linked, identity.Provider)
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		return linked, false, nil
 	}
 
 	// 2 & 3. Email-based lookup, then create. Shared with passwordless
@@ -1087,6 +1093,11 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 	}
 	if err != nil {
 		return nil, false, err
+	}
+	if !isNew {
+		if err := refuseManagedProvider(ctx, s.logger, s.projectID(ctx), user, identity.Provider); err != nil {
+			return nil, false, err
+		}
 	}
 	// An existing account is the provider's only when the provider proved the
 	// account's own address. A tagged address outside Gmail canonicalizes to

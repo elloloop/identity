@@ -299,7 +299,8 @@ func (s *AuthService) emitAgentEvent(ctx context.Context, t events.EventType, ag
 
 // CreateAgent creates an agent account owned by ownerUserID, which defaults
 // to the caller. Naming another owner requires a project admin, and that
-// owner must be an active person in this project.
+// owner must be an active person in this project. An account a tenant
+// manages owns no agent (ErrManagedAccount).
 func (s *AuthService) CreateAgent(
 	ctx context.Context, callerID, name, avatarURL, ownerUserID, ip, userAgent, clientRequestID string,
 ) (*User, error) {
@@ -330,6 +331,11 @@ func (s *AuthService) CreateAgent(
 	} else if err := s.agentOwnerStanding(ctx, owner); err != nil {
 		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
 			map[string]any{"step": "owner_not_eligible"})
+		return nil, err
+	}
+	if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), owner, "create_agent"); err != nil {
+		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
+			map[string]any{"step": "owner_managed", "owner_user_id": owner.ID})
 		return nil, err
 	}
 	if err := validateAgentCreationKey(clientRequestID); err != nil {

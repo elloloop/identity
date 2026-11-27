@@ -34,7 +34,8 @@ import (
 // by the other user, so we cannot reassign it).
 //
 // A session a recovery hold binds is refused (RecoveryHoldError): the
-// primary email is the owner's way back in.
+// primary email is the owner's way back in. An account a tenant manages
+// keeps the address the tenant gave it (ErrManagedAccount).
 func (s *AuthService) RequestEmailChange(ctx context.Context, userID string, signIn SessionSignIn, newEmail, currentPassword string) error {
 	if userID == "" {
 		return fmt.Errorf("%w: user id is required", ErrUnauthenticated)
@@ -64,6 +65,9 @@ func (s *AuthService) RequestEmailChange(ctx context.Context, userID string, sig
 	}
 	if user == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
+	}
+	if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, "email_change"); err != nil {
+		return err
 	}
 	if user.PasswordHash == "" || !passwords.Verify(currentPassword, user.PasswordHash) {
 		s.audit.Log(
