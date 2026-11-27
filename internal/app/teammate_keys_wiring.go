@@ -16,7 +16,7 @@ func buildTeammateKeys(deps Deps, auditLog *audit.Logger, logger *zap.Logger) (*
 		return nil, fmt.Errorf("teammate keys: %w", err)
 	}
 	logger.Info("teammate_keys_enabled", zap.String("audience", deps.Config.JWTAudience))
-	return keys, nil
+	return keys.WithManagedStanding(managedMembershipReader(deps), managedTenantStatusReader(deps)), nil
 }
 
 func configureTeammateKeySweep(sweep *sweeper, deps Deps, keys *service.TeammateKeyService) {

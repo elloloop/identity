@@ -826,6 +826,18 @@ type ProjectAccessConfig struct {
 	// joins no tenant until it calls JoinTenantByDomain. Valid with mode
 	// invite only; off by default.
 	AdmitDomainJoin bool `json:"admit_domain_join"`
+
+	// AdmitManagedAccounts lets the project's tenant owners and admins create
+	// accounts their tenant manages, on a domain verified for the tenant
+	// (ManagedSetupStore), where the server enables them
+	// (GATEWAY_MANAGED_ACCOUNTS_ENABLED). Valid with every mode; off by
+	// default.
+	AdmitManagedAccounts bool `json:"admit_managed_accounts"`
+
+	// AdmitManagedAccountsSelfService extends AdmitManagedAccounts to tenants
+	// made through self-service CreateTenant. Valid only with
+	// AdmitManagedAccounts; off by default.
+	AdmitManagedAccountsSelfService bool `json:"admit_managed_accounts_self_service"`
 }
 
 // hasDenyLayer reports whether any deny rule is configured. It is what makes
@@ -889,14 +901,16 @@ func (a ProjectAccessConfig) denies(cfg *config.Config, email canonicalEmail) bo
 // "spec" struct; a second copy of the field list is the same mistake one level up.
 func NewDefaultProjectAccess(cfg *config.Config) (ProjectAccessConfig, error) {
 	return NewProjectAccessConfig(ProjectAccessConfig{
-		Mode:                    cfg.DefaultProjectAccessMode,
-		AllowedEmails:           cfg.DefaultProjectAllowedEmailList(),
-		AllowedDomains:          cfg.DefaultProjectAllowedDomainList(),
-		BlockPublicEmailDomains: cfg.DefaultProjectBlockPublicEmailDomains,
-		BlockedDomains:          cfg.DefaultProjectBlockedEmailDomainList(),
-		ExemptEmails:            cfg.DefaultProjectExemptEmailList(),
-		AdmitTenantInvitations:  cfg.DefaultProjectAdmitTenantInvitations,
-		AdmitDomainJoin:         cfg.DefaultProjectAdmitDomainJoin,
+		Mode:                            cfg.DefaultProjectAccessMode,
+		AllowedEmails:                   cfg.DefaultProjectAllowedEmailList(),
+		AllowedDomains:                  cfg.DefaultProjectAllowedDomainList(),
+		BlockPublicEmailDomains:         cfg.DefaultProjectBlockPublicEmailDomains,
+		BlockedDomains:                  cfg.DefaultProjectBlockedEmailDomainList(),
+		ExemptEmails:                    cfg.DefaultProjectExemptEmailList(),
+		AdmitTenantInvitations:          cfg.DefaultProjectAdmitTenantInvitations,
+		AdmitDomainJoin:                 cfg.DefaultProjectAdmitDomainJoin,
+		AdmitManagedAccounts:            cfg.DefaultProjectAdmitManagedAccounts,
+		AdmitManagedAccountsSelfService: cfg.DefaultProjectAdmitManagedAccountsSelfService,
 	})
 }
 
@@ -952,6 +966,9 @@ func (a ProjectAccessConfig) validate() error {
 	}
 	if a.AdmitDomainJoin && a.mode() != AccessModeInvite {
 		return fmt.Errorf("access: admit_domain_join is only valid with mode %q (mode is %q)", AccessModeInvite, a.Mode)
+	}
+	if a.AdmitManagedAccountsSelfService && !a.AdmitManagedAccounts {
+		return errors.New("access: admit_managed_accounts_self_service is only valid with admit_managed_accounts")
 	}
 	return a.validateDenyLayer()
 }
@@ -1059,6 +1076,8 @@ func (a ProjectAccessConfig) canonicalized() ProjectAccessConfig {
 	out.BlockPublicEmailDomains = a.BlockPublicEmailDomains
 	out.AdmitTenantInvitations = a.AdmitTenantInvitations
 	out.AdmitDomainJoin = a.AdmitDomainJoin
+	out.AdmitManagedAccounts = a.AdmitManagedAccounts
+	out.AdmitManagedAccountsSelfService = a.AdmitManagedAccountsSelfService
 	if len(a.BlockedDomains) > 0 {
 		out.BlockedDomains = canonicalizeDomains(a.BlockedDomains)
 	}

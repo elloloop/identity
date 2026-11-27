@@ -52,6 +52,11 @@ type Claims struct {
 	// `email` is empty rather than absent-because-unverified. Firebase
 	// carries the same signal as sign_in_provider="anonymous".
 	Anonymous bool `json:"anonymous,omitempty"`
+	// Managed marks an account a tenant manages, a JSON boolean emitted only
+	// when true: a personal account's token has no managed claim. The claim
+	// says what the account was when the token was minted; the account's
+	// record, not the claim, decides what it may do.
+	Managed bool `json:"managed,omitempty"`
 	// Kind is "agent" on a token whose subject is an agent account (a
 	// non-human account a person owns) and absent otherwise: an absent kind
 	// means a person.
@@ -126,6 +131,9 @@ func (c Claims) ClaimsMap(now time.Time, expiry time.Duration) map[string]any {
 	}
 	if c.Anonymous {
 		m["anonymous"] = true
+	}
+	if c.Managed {
+		m["managed"] = true
 	}
 	if c.Kind != "" {
 		m["kind"] = c.Kind
@@ -314,6 +322,9 @@ func verifyTokenProfile(tokenStr string, kp KeyProvider, expectedTenant, expecte
 	}
 	if v, ok := tok.Get("anonymous"); ok {
 		claims.Anonymous, _ = v.(bool)
+	}
+	if v, ok := tok.Get("managed"); ok {
+		claims.Managed, _ = v.(bool)
 	}
 	if v, ok := tok.Get("kind"); ok {
 		claims.Kind, _ = v.(string)

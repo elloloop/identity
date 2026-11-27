@@ -531,6 +531,24 @@
     "anchor": "projects-and-tenancy"
   },
   {
+    "name": "GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "lets the default project's tenant owners and admins create accounts their tenant manages, where the server enables them ( ); it is the default project's access.admit_managed_accounts.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
+    "name": "GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "extends DefaultProjectAdmitManagedAccounts to tenants made through self-service CreateTenant: the default project's access.admit_managed_accounts_self_service.",
+    "category": "Projects \u0026 tenancy",
+    "anchor": "projects-and-tenancy"
+  },
+  {
     "name": "GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS",
     "type": "boolean",
     "default": "false",
@@ -934,6 +952,15 @@
     "description": "is the consecutive failed-login count that triggers a lockout.",
     "category": "Password \u0026 lockout",
     "anchor": "password-and-lockout"
+  },
+  {
+    "name": "GATEWAY_MANAGED_ACCOUNTS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "lets tenant owners and admins create accounts their tenant manages, on a domain verified for it.",
+    "category": "Other",
+    "anchor": "other"
   },
   {
     "name": "GATEWAY_METRICS_PORT",

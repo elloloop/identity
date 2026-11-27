@@ -214,6 +214,16 @@ func (b *Built) InvitationStoreIface() service.InvitationStore {
 	return b.InvitationStore
 }
 
+// ManagedSetupStore returns the invitation store as the managed accounts'
+// set-up store, or a true nil when this build has no control plane (memory,
+// SQLite) — avoiding the typed-nil trap.
+func (b *Built) ManagedSetupStore() service.ManagedSetupStore {
+	if b.InvitationStore == nil {
+		return nil
+	}
+	return b.InvitationStore
+}
+
 // PlatformAdminStoreIface returns the platform-admin store as a
 // driver-agnostic interface, or a true nil when this build has no control
 // plane (memory) — avoiding the typed-nil trap.

@@ -66,6 +66,17 @@ type TeammateKeyService struct {
 	logger         *zap.Logger
 	now            func() time.Time
 	metrics        teammateKeyMetrics
+	// standing judges a managed grantor's or owner's standing in its tenant
+	// (WithManagedStanding); its zero value refuses every managed account.
+	standing managedStanding
+}
+
+// WithManagedStanding wires the readers that judge whether a managed
+// account may grant a hire or stand behind a teammate's tokens, and returns
+// the service for chaining.
+func (s *TeammateKeyService) WithManagedStanding(memberships ManagedMembershipReader, tenants ManagedTenantStatusReader) *TeammateKeyService {
+	s.standing = managedStanding{memberships: memberships, tenants: tenants, logger: s.logger}
+	return s
 }
 
 type teammateKeyMetrics struct {
@@ -339,7 +350,10 @@ func (s *TeammateKeyService) activeKey(ctx context.Context, keyID string) (*Team
 // and the person who granted its hire may still grant it: an active person
 // who owns it now, or a project admin now. An agent can never do more than
 // the person named as its owner, so a transfer or a lost admin role ends the
-// key's tokens as the grant rule would refuse a new grant.
+// key's tokens as the grant rule would refuse a new grant. The grantor, and
+// the teammate's owner, must also be in standing in the tenant that manages
+// their account, if one does (managedStanding), so suspending or removing a
+// managed member stops the tokens at the next exchange.
 func (s *TeammateKeyService) ownerStandsBehind(ctx context.Context, project string, key *TeammateKey) error {
 	users := s.base.WithProject(project)
 	teammate, err := users.GetUser(ctx, key.TeammateID)
@@ -353,7 +367,26 @@ func (s *TeammateKeyService) ownerStandsBehind(ctx context.Context, project stri
 	if !mayGrantHire(owner, teammate) {
 		return ErrUnauthenticated
 	}
-	return nil
+	if err := standingRefusal(s.standing.refuse(ctx, project, owner)); err != nil {
+		return err
+	}
+	teammateOwner := owner
+	if teammate.OwnerUserID != owner.ID {
+		if teammateOwner, err = users.GetUser(ctx, teammate.OwnerUserID); err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
+	return standingRefusal(s.standing.ownerStands(ctx, project, teammateOwner))
+}
+
+// standingRefusal is err as a teammate exchange answers it: a standing
+// that could not be read stays a retryable error, and any other refusal is
+// ErrUnauthenticated, as every refusal of a teammate token is.
+func standingRefusal(err error) error {
+	if err == nil || isManagedStandingUnread(err) {
+		return err
+	}
+	return ErrUnauthenticated
 }
 
 // mayGrantHire is the rule every action on an agent follows: an active

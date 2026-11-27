@@ -92,6 +92,11 @@ type Deps struct {
 	// not constructed and the membership RPCs return Unimplemented.
 	InvitationStore service.InvitationStore
 
+	// ManagedSetups writes managed accounts' set-up links: creating, resending
+	// and revoking them, and setting an account up from one. Non-nil ONLY for
+	// the postgres driver; when nil no managed account is created or set up.
+	ManagedSetups service.ManagedSetupStore
+
 	// ControlPlaneStore is the project write-store backing the control-plane
 	// admin RPCs (AdminCreateProject and friends). Non-nil ONLY for the
 	// postgres driver; when nil (together with the tenant/membership stores)
@@ -866,6 +871,8 @@ func New(deps Deps) (*Built, error) {
 		// or the driver has no governance stores (memory, SQLite).
 		WithTenantSelection(tenantGov.selection).
 		WithOpenInvitations(deps.InvitationStore).
+		WithManagedAccounts(deps.ManagedSetups, deps.TenantStore).
+		WithManagedMemberships(managedMembershipReader(deps), managedTenantStatusReader(deps)).
 		WithDomainJoin(deps.DomainStore, deps.TenantStore).
 		WithMailDelivery(senders.mailDelivers).
 		WithTemplateMessages(senders.templates).
@@ -1031,6 +1038,7 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf(
 			"default project access config (check GATEWAY_DEFAULT_PROJECT_ACCESS_MODE, "+
 				"GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS, GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN, "+
+				"GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS, GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE, "+
 				"GATEWAY_DEFAULT_PROJECT_ALLOWED_EMAILS, GATEWAY_DEFAULT_PROJECT_ALLOWED_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS, "+
 				"GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS, "+
@@ -1353,6 +1361,9 @@ func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
 		logger.Info("invited_signup_disabled",
 			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)))
 	}
+	if cfg.DefaultProjectAdmitManagedAccounts && !membershipServiceServed(deps) {
+		return errors.New("app: GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS needs the tenant, membership and invitation stores, which only the postgres driver provides")
+	}
 	if cfg.DefaultProjectAdmitDomainJoin && !domainJoinServed(deps) {
 		return errors.New("app: GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN needs the domain and tenant stores, which only the postgres driver provides")
 	}
@@ -1472,7 +1483,8 @@ func buildMembershipService(deps Deps, accounts service.Repository, users servic
 		mailDelivers,
 		deps.Config,
 		logger,
-	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts).WithActiveProjects(deps.ActiveProjects)
+	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts).WithActiveProjects(deps.ActiveProjects).
+		WithManagedSetups(deps.ManagedSetups)
 }
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService
@@ -1751,4 +1763,25 @@ func warnMergeWithoutWebhooks(cfg *config.Config, logger *zap.Logger) {
 		logger.Warn("account_merge_without_webhooks",
 			zap.String("hint", "GATEWAY_ACCOUNT_MERGE_ENABLED is on but GATEWAY_WEBHOOKS_ENABLED is off: applications will not receive user.merged"))
 	}
+}
+
+// managedMembershipReader is the reader that decides whether a managed
+// account may hold a session: the membership store wherever there is one,
+// whatever the managed-account switch says, since accounts managed while it
+// was on stay managed. nil (memory, SQLite) has no managed accounts.
+func managedMembershipReader(deps Deps) service.ManagedMembershipReader {
+	if deps.MembershipStore == nil {
+		return nil
+	}
+	return deps.MembershipStore
+}
+
+// managedTenantStatusReader is the reader of a managed account's tenant's
+// status, alongside managedMembershipReader: the tenant store wherever there
+// is one.
+func managedTenantStatusReader(deps Deps) service.ManagedTenantStatusReader {
+	if deps.TenantStore == nil {
+		return nil
+	}
+	return deps.TenantStore
 }

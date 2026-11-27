@@ -499,6 +499,34 @@ const (
 	// invitation records nothing.
 	EventTenantInvitationRevoked EventType = "tenant_invitation_revoked"
 
+	// EventManagedAccountCreated records a tenant owner or admin creating an
+	// account the tenant manages (CreateTenantInvitation with
+	// account_username): actor the caller and target the new account, with
+	// the project and tenant ids, the role its set-up link grants and the
+	// link's invitation id in the details. No address is recorded.
+	EventManagedAccountCreated EventType = "managed_account_created"
+
+	// EventManagedAccountSetupResent records a tenant owner or admin sending
+	// a new set-up link to a managed account that has not been set up, which
+	// replaces its pending one: actor the caller and target the account, with
+	// the project and tenant ids, the role, the new link's invitation id and
+	// delivery_changed, whether the link went to another address than the
+	// link it replaced, in the details.
+	EventManagedAccountSetupResent EventType = "managed_account_setup_resent"
+
+	// EventManagedAccountSetUp records a managed account set up from its
+	// link (SignUpWithTenantInvitation): actor and target the account, with
+	// the project and tenant ids, the invitation id, the membership's status
+	// and first_set_up, whether the account had never been set up, in the
+	// details.
+	EventManagedAccountSetUp EventType = "managed_account_set_up"
+
+	// EventManagedAccountDeleted records a managed account deleted with its
+	// set-up link (RevokeTenantInvitation) before it was ever set up: actor
+	// the owner or admin and target the deleted account, with the project and
+	// tenant ids and the invitation id in the details.
+	EventManagedAccountDeleted EventType = "managed_account_deleted"
+
 	// EventTenantOperatorRefused records a tenant_operator credential of an
 	// active project being refused on a tenant operation, under its own
 	// project: actor the credential ("credential:<id>"), success=false, and a
@@ -620,6 +648,10 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantMemberRestored:          {},
 	EventTenantMemberRoleChanged:       {},
 	EventTenantInvitationRevoked:       {},
+	EventManagedAccountCreated:         {},
+	EventManagedAccountSetupResent:     {},
+	EventManagedAccountSetUp:           {},
+	EventManagedAccountDeleted:         {},
 	EventTenantOperatorRefused:         {},
 }
 

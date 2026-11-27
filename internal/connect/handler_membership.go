@@ -2,6 +2,8 @@ package connect
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"connectrpc.com/connect"
 
@@ -9,7 +11,9 @@ import (
 	"github.com/elloloop/identity/internal/service"
 )
 
-// CreateTenantInvitation invites an email to join a tenant. Owner/admin only.
+// CreateTenantInvitation invites an email to join a tenant, or, with
+// account_username, account_domain or display_name, creates or resends the
+// set-up link of an account the tenant manages. Owner/admin only.
 // Available only on the postgres control-plane driver; nil service
 // (memory) returns Unimplemented.
 func (h *IdentityHandler) CreateTenantInvitation(
@@ -23,8 +27,20 @@ func (h *IdentityHandler) CreateTenantInvitation(
 	if userID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
-
-	created, err := h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), req.Msg.GetEmail(), req.Msg.GetRole(), req.Msg.GetNote())
+	var created *service.CreatedInvitation
+	var err error
+	m := req.Msg
+	if m.GetAccountUsername() != "" || m.GetAccountDomain() != "" || m.GetDisplayName() != "" {
+		if strings.TrimSpace(m.GetNote()) != "" {
+			return nil, toConnectError(fmt.Errorf("%w: a note goes only on an ordinary invitation", service.ErrInvalidArgument))
+		}
+		created, err = h.members.CreateManagedSetupInvitation(ctx, userID, authenticatedSignIn(req.Header()), service.ManagedAccountRequest{
+			TenantID: m.GetTenantId(), Username: m.GetAccountUsername(), Domain: m.GetAccountDomain(),
+			DisplayName: m.GetDisplayName(), DeliveryEmail: m.GetEmail(), Role: m.GetRole(),
+		}, clientIP(req.Header()), clientUserAgent(req.Header()))
+	} else {
+		created, err = h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), m.GetTenantId(), m.GetEmail(), m.GetRole(), m.GetNote())
+	}
 	if err != nil {
 		return nil, toConnectError(err)
 	}
@@ -258,7 +274,7 @@ func invitationToProto(inv *service.TenantInvitation) *identitypb.TenantInvitati
 	if inv == nil {
 		return nil
 	}
-	return &identitypb.TenantInvitation{
+	out := &identitypb.TenantInvitation{
 		Id:         inv.ID,
 		TenantId:   inv.TenantID,
 		Email:      inv.Email,
@@ -269,6 +285,13 @@ func invitationToProto(inv *service.TenantInvitation) *identitypb.TenantInvitati
 		AcceptedAt: msToTimestamp(inv.AcceptedAtMs),
 		CreatedAt:  msToTimestamp(inv.CreatedAtMs),
 	}
+	if inv.IsManagedSetup() {
+		out.IsManagedSetup = true
+		out.Email = inv.DeliveryEmail
+		out.AccountAddress = inv.Email
+		out.UserId = inv.UserID
+	}
+	return out
 }
 
 // membershipToProto converts a service-layer TenantMembership to the proto
@@ -278,14 +301,26 @@ func membershipToProto(m *service.TenantMembership) *identitypb.TenantMembership
 		return nil
 	}
 	return &identitypb.TenantMembership{
-		Id:        m.ID,
-		TenantId:  m.TenantID,
-		UserId:    m.UserID,
-		Source:    m.Source,
-		Role:      m.Role,
-		Status:    m.Status,
-		CreatedAt: msToTimestamp(m.CreatedAtMs),
-		UpdatedAt: msToTimestamp(m.UpdatedAtMs),
+		Id:          m.ID,
+		TenantId:    m.TenantID,
+		UserId:      m.UserID,
+		Source:      m.Source,
+		Role:        m.Role,
+		Status:      m.Status,
+		CreatedAt:   msToTimestamp(m.CreatedAtMs),
+		UpdatedAt:   msToTimestamp(m.UpdatedAtMs),
+		AccountKind: accountKindToProto(m.AccountKind),
+	}
+}
+
+func accountKindToProto(kind string) identitypb.AccountKind {
+	switch kind {
+	case service.AccountKindPersonal:
+		return identitypb.AccountKind_ACCOUNT_KIND_PERSONAL
+	case service.AccountKindManaged:
+		return identitypb.AccountKind_ACCOUNT_KIND_MANAGED
+	default:
+		return identitypb.AccountKind_ACCOUNT_KIND_UNSPECIFIED
 	}
 }
 
@@ -384,4 +419,18 @@ func (h *IdentityHandler) JoinTenantByDomain(
 	return connect.NewResponse(&identitypb.JoinTenantByDomainResponse{
 		Membership: membershipToProto(m),
 	}), nil
+}
+
+func (h *IdentityHandler) CheckManagedAddresses(
+	context.Context,
+	*connect.Request[identitypb.CheckManagedAddressesRequest],
+) (*connect.Response[identitypb.CheckManagedAddressesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
+}
+
+func (h *IdentityHandler) ResetManagedAccount(
+	context.Context,
+	*connect.Request[identitypb.ResetManagedAccountRequest],
+) (*connect.Response[identitypb.ResetManagedAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 }

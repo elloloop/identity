@@ -45,6 +45,11 @@ const (
 	// `RevocationModeSession`, where cache TTL bounds the revocation
 	// latency.
 	RevocationModeTTLAccessTokenCap = 900
+
+	// MaxManagedAccountsSessionCacheTTLSeconds bounds how long another
+	// replica may keep serving a session a managed-account suspension,
+	// removal or reset revoked, from its in-process session cache.
+	MaxManagedAccountsSessionCacheTTLSeconds = 60
 )
 
 // Web-assurance provider names accepted in GATEWAY_ASSURANCE_WEB_PROVIDER.
@@ -454,6 +459,24 @@ type Config struct {
 	// postgres driver, which alone keeps tenant domains; the server refuses to
 	// boot otherwise.
 	DefaultProjectAdmitDomainJoin bool
+
+	// DefaultProjectAdmitManagedAccounts lets the default project's tenant
+	// owners and admins create accounts their tenant manages, where the
+	// server enables them (GATEWAY_MANAGED_ACCOUNTS_ENABLED); it is the
+	// default project's access.admit_managed_accounts. Set via
+	// GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS; off by default. It
+	// REQUIRES the postgres driver, which alone keeps tenants; the server
+	// refuses to boot otherwise.
+	DefaultProjectAdmitManagedAccounts bool
+
+	// DefaultProjectAdmitManagedAccountsSelfService extends
+	// DefaultProjectAdmitManagedAccounts to tenants made through self-service
+	// CreateTenant: the default project's
+	// access.admit_managed_accounts_self_service. Set via
+	// GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE; off by
+	// default. It REQUIRES GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS; the
+	// server refuses to boot otherwise.
+	DefaultProjectAdmitManagedAccountsSelfService bool
 
 	// DefaultProjectBlockedEmailDomains is the comma-separated list of extra
 	// email domains refused on the default project, in addition to the
@@ -1578,6 +1601,16 @@ type Config struct {
 	// rejects every outstanding one at once. Driven by
 	// GATEWAY_TENANT_SELECTION_ENABLED.
 	TenantSelectionEnabled bool
+	// ManagedAccountsEnabled lets tenant owners and admins create accounts
+	// their tenant manages, on a domain verified for it. Default off; it gates
+	// new managed-account writes only, while the restrictions on managed
+	// accounts that already exist always apply. Postgres only, and only with
+	// GATEWAY_REVOCATION_MODE=session and GATEWAY_SESSION_CACHE_TTL_SECONDS of
+	// at most MaxManagedAccountsSessionCacheTTLSeconds, as signing a managed
+	// account out must end its sessions on every replica within that bound. A project also opts in through its
+	// access.admit_managed_accounts config. Driven by
+	// GATEWAY_MANAGED_ACCOUNTS_ENABLED.
+	ManagedAccountsEnabled bool
 	// TenantStatusCacheTTLSeconds bounds how long the access-token check may
 	// serve a selected tenant's status from its in-process cache, from 0 to
 	// 300 (default 30), where 0 reads the tenant on every request that
@@ -1705,12 +1738,14 @@ func loadFromEnv() *Config {
 		// The deny layer is OFF by default: it subtracts from the configured
 		// mode, and a deployment that has not asked for it must keep exactly
 		// the access its mode already grants.
-		DefaultProjectBlockPublicEmailDomains: envBool("GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS", false),
-		DefaultProjectAdmitTenantInvitations:  envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS", false),
-		DefaultProjectAdmitDomainJoin:         envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN", false),
-		DefaultProjectBlockedEmailDomains:     envStr("GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS", ""),
-		DefaultProjectExemptEmails:            envStr("GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS", ""),
-		RequireVerifiedAuthDomain:             envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
+		DefaultProjectBlockPublicEmailDomains:         envBool("GATEWAY_DEFAULT_PROJECT_BLOCK_PUBLIC_EMAIL_DOMAINS", false),
+		DefaultProjectAdmitTenantInvitations:          envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_TENANT_INVITATIONS", false),
+		DefaultProjectAdmitDomainJoin:                 envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_DOMAIN_JOIN", false),
+		DefaultProjectAdmitManagedAccounts:            envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS", false),
+		DefaultProjectAdmitManagedAccountsSelfService: envBool("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE", false),
+		DefaultProjectBlockedEmailDomains:             envStr("GATEWAY_DEFAULT_PROJECT_BLOCKED_EMAIL_DOMAINS", ""),
+		DefaultProjectExemptEmails:                    envStr("GATEWAY_DEFAULT_PROJECT_EXEMPT_EMAILS", ""),
+		RequireVerifiedAuthDomain:                     envBool("GATEWAY_REQUIRE_VERIFIED_AUTH_DOMAIN", true),
 
 		EmailServiceHost: envStr("GATEWAY_EMAIL_SERVICE_HOST", "email-service"),
 		EmailServicePort: envInt("GATEWAY_EMAIL_SERVICE_PORT", 50053),
@@ -1998,6 +2033,7 @@ func loadFromEnv() *Config {
 		SelfServiceTenantsMaxPerUser:            envInt("GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", DefaultSelfServiceTenantsMaxPerUser),
 		SelfServiceTenantsWindowSeconds:         envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
 		TenantSelectionEnabled:                  envBool("GATEWAY_TENANT_SELECTION_ENABLED", false),
+		ManagedAccountsEnabled:                  envBool("GATEWAY_MANAGED_ACCOUNTS_ENABLED", false),
 		TenantStatusCacheTTLSeconds:             envInt("GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS", DefaultTenantStatusCacheTTLSeconds),
 		AuditRetentionDays:                      envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
 
@@ -3397,6 +3433,16 @@ func (c *Config) validateTenantGovernance() error {
 		if c.TenantSelectionEnabled {
 			return fmt.Errorf("config: GATEWAY_TENANT_SELECTION_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
 		}
+		if c.ManagedAccountsEnabled {
+			return fmt.Errorf("config: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
+		}
+	}
+	if c.ManagedAccountsEnabled && c.RevocationMode != RevocationModeSession {
+		return fmt.Errorf("config: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs GATEWAY_REVOCATION_MODE=session (got %q)", c.RevocationMode)
+	}
+	if c.ManagedAccountsEnabled && c.SessionCacheTTLSeconds > MaxManagedAccountsSessionCacheTTLSeconds {
+		return fmt.Errorf("config: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs GATEWAY_SESSION_CACHE_TTL_SECONDS at most %d (got %d), so a revoked session stops on every replica within it",
+			MaxManagedAccountsSessionCacheTTLSeconds, c.SessionCacheTTLSeconds)
 	}
 	return nil
 }

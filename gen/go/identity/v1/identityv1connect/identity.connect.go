@@ -437,6 +437,12 @@ const (
 	// IdentityServiceSetTenantMemberRoleProcedure is the fully-qualified name of the IdentityService's
 	// SetTenantMemberRole RPC.
 	IdentityServiceSetTenantMemberRoleProcedure = "/identity.v1.IdentityService/SetTenantMemberRole"
+	// IdentityServiceCheckManagedAddressesProcedure is the fully-qualified name of the
+	// IdentityService's CheckManagedAddresses RPC.
+	IdentityServiceCheckManagedAddressesProcedure = "/identity.v1.IdentityService/CheckManagedAddresses"
+	// IdentityServiceResetManagedAccountProcedure is the fully-qualified name of the IdentityService's
+	// ResetManagedAccount RPC.
+	IdentityServiceResetManagedAccountProcedure = "/identity.v1.IdentityService/ResetManagedAccount"
 	// IdentityServiceCreateTenantProcedure is the fully-qualified name of the IdentityService's
 	// CreateTenant RPC.
 	IdentityServiceCreateTenantProcedure = "/identity.v1.IdentityService/CreateTenant"
@@ -1068,6 +1074,39 @@ type IdentityServiceClient interface {
 	// Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	SetTenantMemberRole(context.Context, *connect.Request[v1.SetTenantMemberRoleRequest]) (*connect.Response[v1.SetTenantMemberRoleResponse], error)
+	// CheckManagedAddresses says, for each address, whether a managed account
+	// of tenant_id could be created there now (ManagedAddressStatus). It
+	// changes nothing. The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+	// Only addresses on domains verified for tenant_id are looked up; any
+	// other reads DOMAIN_UNVERIFIED, so no tenant can probe addresses on
+	// another tenant's domain. A missing tenant_id, no addresses or more than
+	// 100 is INVALID_ARGUMENT. FAILED_PRECONDITION with
+	// ManagedAccountRefusedDetails reason POLICY when the project or the
+	// server does not admit managed accounts for the tenant. Available only on
+	// the postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	CheckManagedAddresses(context.Context, *connect.Request[v1.CheckManagedAddressesRequest]) (*connect.Response[v1.CheckManagedAddressesResponse], error)
+	// ResetManagedAccount takes back a managed account its tenant can no
+	// longer trust: it signs the account out everywhere, ends its outstanding
+	// reset, sign-in and verification links, clears its password, passkeys,
+	// linked providers, recovery emails, two-step methods, backup codes and
+	// phone, deactivates its agents, and sends a new set-up link to
+	// delivery_address with the member's current role. The membership is
+	// unchanged. Notices go to every address the account had. The caller must
+	// be an active owner or admin of the managing tenant, a tenant that is not
+	// suspended, with a recent sign-in (PERMISSION_DENIED otherwise); only an
+	// owner may reset an owner, an admin may reset another admin's account, and
+	// naming the caller is INVALID_ARGUMENT. Every reset is audited. As with
+	// CreateTenantInvitation for a managed account, the new link's token goes
+	// only into its email and is never returned, so the call needs a mail
+	// provider (FAILED_PRECONDITION without one). A
+	// user_id that is not a managed account of tenant_id with an active or
+	// suspended membership is NOT_FOUND. Resets are limited per delivery
+	// address (RESOURCE_EXHAUSTED). Available only on the postgres
+	// control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	ResetManagedAccount(context.Context, *connect.Request[v1.ResetManagedAccountRequest]) (*connect.Response[v1.ResetManagedAccountResponse], error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -2269,6 +2308,18 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("SetTenantMemberRole")),
 			connect.WithClientOptions(opts...),
 		),
+		checkManagedAddresses: connect.NewClient[v1.CheckManagedAddressesRequest, v1.CheckManagedAddressesResponse](
+			httpClient,
+			baseURL+IdentityServiceCheckManagedAddressesProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CheckManagedAddresses")),
+			connect.WithClientOptions(opts...),
+		),
+		resetManagedAccount: connect.NewClient[v1.ResetManagedAccountRequest, v1.ResetManagedAccountResponse](
+			httpClient,
+			baseURL+IdentityServiceResetManagedAccountProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ResetManagedAccount")),
+			connect.WithClientOptions(opts...),
+		),
 		createTenant: connect.NewClient[v1.CreateTenantRequest, v1.CreateTenantResponse](
 			httpClient,
 			baseURL+IdentityServiceCreateTenantProcedure,
@@ -2733,6 +2784,8 @@ type identityServiceClient struct {
 	restoreTenantMember                    *connect.Client[v1.RestoreTenantMemberRequest, v1.RestoreTenantMemberResponse]
 	transferTenantOwnership                *connect.Client[v1.TransferTenantOwnershipRequest, v1.TransferTenantOwnershipResponse]
 	setTenantMemberRole                    *connect.Client[v1.SetTenantMemberRoleRequest, v1.SetTenantMemberRoleResponse]
+	checkManagedAddresses                  *connect.Client[v1.CheckManagedAddressesRequest, v1.CheckManagedAddressesResponse]
+	resetManagedAccount                    *connect.Client[v1.ResetManagedAccountRequest, v1.ResetManagedAccountResponse]
 	createTenant                           *connect.Client[v1.CreateTenantRequest, v1.CreateTenantResponse]
 	listMyTenants                          *connect.Client[v1.ListMyTenantsRequest, v1.ListMyTenantsResponse]
 	listJoinableTenants                    *connect.Client[v1.ListJoinableTenantsRequest, v1.ListJoinableTenantsResponse]
@@ -3457,6 +3510,16 @@ func (c *identityServiceClient) TransferTenantOwnership(ctx context.Context, req
 // SetTenantMemberRole calls identity.v1.IdentityService.SetTenantMemberRole.
 func (c *identityServiceClient) SetTenantMemberRole(ctx context.Context, req *connect.Request[v1.SetTenantMemberRoleRequest]) (*connect.Response[v1.SetTenantMemberRoleResponse], error) {
 	return c.setTenantMemberRole.CallUnary(ctx, req)
+}
+
+// CheckManagedAddresses calls identity.v1.IdentityService.CheckManagedAddresses.
+func (c *identityServiceClient) CheckManagedAddresses(ctx context.Context, req *connect.Request[v1.CheckManagedAddressesRequest]) (*connect.Response[v1.CheckManagedAddressesResponse], error) {
+	return c.checkManagedAddresses.CallUnary(ctx, req)
+}
+
+// ResetManagedAccount calls identity.v1.IdentityService.ResetManagedAccount.
+func (c *identityServiceClient) ResetManagedAccount(ctx context.Context, req *connect.Request[v1.ResetManagedAccountRequest]) (*connect.Response[v1.ResetManagedAccountResponse], error) {
+	return c.resetManagedAccount.CallUnary(ctx, req)
 }
 
 // CreateTenant calls identity.v1.IdentityService.CreateTenant.
@@ -4191,6 +4254,39 @@ type IdentityServiceHandler interface {
 	// Available only on the postgres control-plane driver; the memory and
 	// SQLite drivers return Unimplemented.
 	SetTenantMemberRole(context.Context, *connect.Request[v1.SetTenantMemberRoleRequest]) (*connect.Response[v1.SetTenantMemberRoleResponse], error)
+	// CheckManagedAddresses says, for each address, whether a managed account
+	// of tenant_id could be created there now (ManagedAddressStatus). It
+	// changes nothing. The caller must be an active owner or admin of
+	// tenant_id, a tenant that is not suspended (PERMISSION_DENIED otherwise).
+	// Only addresses on domains verified for tenant_id are looked up; any
+	// other reads DOMAIN_UNVERIFIED, so no tenant can probe addresses on
+	// another tenant's domain. A missing tenant_id, no addresses or more than
+	// 100 is INVALID_ARGUMENT. FAILED_PRECONDITION with
+	// ManagedAccountRefusedDetails reason POLICY when the project or the
+	// server does not admit managed accounts for the tenant. Available only on
+	// the postgres control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	CheckManagedAddresses(context.Context, *connect.Request[v1.CheckManagedAddressesRequest]) (*connect.Response[v1.CheckManagedAddressesResponse], error)
+	// ResetManagedAccount takes back a managed account its tenant can no
+	// longer trust: it signs the account out everywhere, ends its outstanding
+	// reset, sign-in and verification links, clears its password, passkeys,
+	// linked providers, recovery emails, two-step methods, backup codes and
+	// phone, deactivates its agents, and sends a new set-up link to
+	// delivery_address with the member's current role. The membership is
+	// unchanged. Notices go to every address the account had. The caller must
+	// be an active owner or admin of the managing tenant, a tenant that is not
+	// suspended, with a recent sign-in (PERMISSION_DENIED otherwise); only an
+	// owner may reset an owner, an admin may reset another admin's account, and
+	// naming the caller is INVALID_ARGUMENT. Every reset is audited. As with
+	// CreateTenantInvitation for a managed account, the new link's token goes
+	// only into its email and is never returned, so the call needs a mail
+	// provider (FAILED_PRECONDITION without one). A
+	// user_id that is not a managed account of tenant_id with an active or
+	// suspended membership is NOT_FOUND. Resets are limited per delivery
+	// address (RESOURCE_EXHAUSTED). Available only on the postgres
+	// control-plane driver; the memory and SQLite drivers return
+	// Unimplemented.
+	ResetManagedAccount(context.Context, *connect.Request[v1.ResetManagedAccountRequest]) (*connect.Response[v1.ResetManagedAccountResponse], error)
 	// Self-service tenants. Authenticated and project-scoped. CreateTenant
 	// makes a claimed tenant with the caller as its owner, in one transaction;
 	// it is FAILED_PRECONDITION unless the project's config sets
@@ -5388,6 +5484,18 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("SetTenantMemberRole")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceCheckManagedAddressesHandler := connect.NewUnaryHandler(
+		IdentityServiceCheckManagedAddressesProcedure,
+		svc.CheckManagedAddresses,
+		connect.WithSchema(identityServiceMethods.ByName("CheckManagedAddresses")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceResetManagedAccountHandler := connect.NewUnaryHandler(
+		IdentityServiceResetManagedAccountProcedure,
+		svc.ResetManagedAccount,
+		connect.WithSchema(identityServiceMethods.ByName("ResetManagedAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceCreateTenantHandler := connect.NewUnaryHandler(
 		IdentityServiceCreateTenantProcedure,
 		svc.CreateTenant,
@@ -5983,6 +6091,10 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceTransferTenantOwnershipHandler.ServeHTTP(w, r)
 		case IdentityServiceSetTenantMemberRoleProcedure:
 			identityServiceSetTenantMemberRoleHandler.ServeHTTP(w, r)
+		case IdentityServiceCheckManagedAddressesProcedure:
+			identityServiceCheckManagedAddressesHandler.ServeHTTP(w, r)
+		case IdentityServiceResetManagedAccountProcedure:
+			identityServiceResetManagedAccountHandler.ServeHTTP(w, r)
 		case IdentityServiceCreateTenantProcedure:
 			identityServiceCreateTenantHandler.ServeHTTP(w, r)
 		case IdentityServiceListMyTenantsProcedure:
@@ -6634,6 +6746,14 @@ func (UnimplementedIdentityServiceHandler) TransferTenantOwnership(context.Conte
 
 func (UnimplementedIdentityServiceHandler) SetTenantMemberRole(context.Context, *connect.Request[v1.SetTenantMemberRoleRequest]) (*connect.Response[v1.SetTenantMemberRoleResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.SetTenantMemberRole is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CheckManagedAddresses(context.Context, *connect.Request[v1.CheckManagedAddressesRequest]) (*connect.Response[v1.CheckManagedAddressesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CheckManagedAddresses is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ResetManagedAccount(context.Context, *connect.Request[v1.ResetManagedAccountRequest]) (*connect.Response[v1.ResetManagedAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ResetManagedAccount is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) CreateTenant(context.Context, *connect.Request[v1.CreateTenantRequest]) (*connect.Response[v1.CreateTenantResponse], error) {

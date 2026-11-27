@@ -5,12 +5,14 @@
 An administrator inviting someone had no way to tell them anything in the
 invitation itself, such as the address their account will use.
 
-- **`CreateTenantInvitationRequest.note`** (field 4) is optional plain text the
+- **`CreateTenantInvitationRequest.note`** (field 7) is optional plain text the
   invitation email shows, labelled "A note from the administrator who invited
   you" and set apart from the rest: quoted line by line in the text part, and
   escaped in a block of its own in the HTML part, after the invitation and
   before the link. An empty note, or one that is only whitespace, sends the
   email byte for byte as before.
+- **Ordinary invitations only.** A note with `account_username` (a
+  managed account's set-up link) is `INVALID_ARGUMENT`.
 - **Off by default.** A project turns it on with
   `{ "tenants": { "invitation_notes": true } }` in its `config_json`; the
   default project takes it from `GATEWAY_TENANT_INVITATION_NOTES_ENABLED`
@@ -58,6 +60,88 @@ invitation itself, such as the address their account will use.
   `InvitationNotesSelfService`, and `config.Config`
   `TenantInvitationNotesEnabled` and `TenantInvitationNotesSelfServiceEnabled`;
   `service.ErrInvitationNoteNotAllowed` is the new refusal.
+
+## Next — the default project can admit tenant-managed accounts: `GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS` and `GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE` (off by default; no migration)
+
+The environment-configured default project had no way to set
+`access.admit_managed_accounts`, which a control-plane project sets in its
+`config_json`.
+
+- **`GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS`** is the default project's
+  `access.admit_managed_accounts`, and
+  **`GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE`** its
+  `access.admit_managed_accounts_self_service`. Both default to `false`.
+- **Boot refuses** the self-service variable without the first, as
+  `config_json` refuses the key, and the first on the memory or SQLite driver,
+  which keep no tenants. The server must still enable managed accounts with
+  `GATEWAY_MANAGED_ACCOUNTS_ENABLED`.
+- **Go API.** `config.Config` gains `DefaultProjectAdmitManagedAccounts` and
+  `DefaultProjectAdmitManagedAccountsSelfService`, which
+  `service.NewDefaultProjectAccess` maps.
+
+## Next — data and store for tenant-managed accounts (migration `0068_add_managed_accounts`, schema 68; SQLite `0034`; `GATEWAY_MANAGED_ACCOUNTS_ENABLED`, `access.admit_managed_accounts`, `access.admit_managed_accounts_self_service` (all off by default); `ManagedSetupStore`, `ManagedMemberStore` (Go API))
+
+A tenant-managed account is an account a tenant owner or admin creates on a
+domain verified for the tenant, before its first sign-in, and that belongs to
+that tenant only. This release adds its data and store writes; nothing in the
+API creates one yet, and with the settings below off nothing changes.
+
+- **Settings.** `GATEWAY_MANAGED_ACCOUNTS_ENABLED` (default `false`) turns the
+  writes on for the server. Boot refuses it unless `GATEWAY_REPO_DRIVER` is
+  `postgres` and `GATEWAY_REVOCATION_MODE` is `session`, since suspending,
+  removing or resetting a managed account must end its sessions at once, and
+  refuses it with `GATEWAY_SESSION_CACHE_TTL_SECONDS` above `60`: a revoked
+  session is dropped at once only from the cache of the replica that revoked
+  it, so the setting bounds how long another replica still serves it.
+  A project opts in with `access.admit_managed_accounts`;
+  `access.admit_managed_accounts_self_service` extends it to tenants made
+  through self-service `CreateTenant`, and is refused without the first.
+- **Migration 0068** adds `users.managed_by_tenant_id` (`''` for a personal
+  account), `users.set_up_at_ms` and `users.setup_epoch`, and
+  `tenant_invitations.user_id`, `delivery_email` and `setup_epoch`, all with
+  constant defaults, so existing rows read as personal accounts and ordinary
+  invitations and nothing is rewritten. It also adds
+  `tenant_invitations_pending_user_idx`, which takes `SHARE` on
+  `tenant_invitations` while it builds, blocking invitation writes but not
+  reads; `lock_timeout` bounds the wait for each lock. To build it without
+  blocking writes, add the columns and the index before upgrading; the
+  migration then does nothing:
+
+```sql
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS managed_by_tenant_id TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS set_up_at_ms BIGINT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS setup_epoch BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE tenant_invitations
+    ADD COLUMN IF NOT EXISTS delivery_email TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS setup_epoch BIGINT NOT NULL DEFAULT 0;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS tenant_invitations_pending_user_idx
+    ON tenant_invitations (project_id, user_id)
+    WHERE user_id <> '' AND status = 'pending';
+```
+
+- **Do not roll migration 0068 back once managed accounts exist.** Its down
+  migration drops the columns, which turns every managed account into a
+  personal one that nothing then restricts, and every pending set-up link into
+  an ordinary invitation to the account's address.
+- **Set-up links are not invitations by email.** `OpenInvitationForEmail` and
+  `OpenInvitationForToken` never return an invitation with a `user_id`, so a
+  set-up link admits no sign-up or acceptance by email. `RemoveMembership`
+  revokes the removed account's pending set-up links, so no old link brings a
+  removed member back.
+- **Go API.** `service.ManagedSetupStore` (`CreateManagedSetup`,
+  `CompleteManagedSetup`, `RevokeManagedSetup`, `ManagedAddressHolders`) is
+  implemented by the postgres `InvitationStore`, and `service.ManagedMemberStore`
+  (`SuspendManaged`, `RemoveManaged`, `ResetManaged`) by the postgres
+  `MembershipStore`. Each write is one transaction that takes its locks in one
+  order: the membership's advisory lock, the account's `users` row (then its
+  agents' rows, and the domain row `FOR SHARE` where read), the tenant's
+  memberships in one ordered pass, then `tenant_invitations`. `User` gains
+  `ManagedByTenantID`, `SetUpAtMs` and `SetupEpoch`; `TenantInvitation` gains
+  `UserID`, `DeliveryEmail` and `SetupEpoch`; `ProjectAccessConfig` gains
+  `AdmitManagedAccounts` and `AdmitManagedAccountsSelfService`;
+  `config.Config` gains `ManagedAccountsEnabled`.
 
 ## Next — an owner or admin sets a member's role: `SetTenantMemberRole` (additive RPC and audit event `tenant_member_role_changed`; no migration; `MembershipStore.SetMemberRole` (Go API))
 

@@ -694,6 +694,10 @@ func TestTenantFeaturesNeedPostgres(t *testing.T) {
 		"GATEWAY_SELF_SERVICE_TENANTS_ENABLED":    func(c *Config) { c.SelfServiceTenantsEnabled = true },
 		"GATEWAY_TENANT_SELECTION_ENABLED":        func(c *Config) { c.TenantSelectionEnabled = true },
 		"GATEWAY_TENANT_INVITATION_NOTES_ENABLED": func(c *Config) { c.TenantInvitationNotesEnabled = true },
+		"GATEWAY_MANAGED_ACCOUNTS_ENABLED": func(c *Config) {
+			c.ManagedAccountsEnabled = true
+			c.RevocationMode = RevocationModeSession
+		},
 	} {
 		for _, driver := range []string{"memory", "sqlite"} {
 			c := Load()
@@ -753,5 +757,69 @@ func TestAccountClassificationBudget(t *testing.T) {
 	c.RateLimitAccountClassificationPerIP = -1
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP") {
 		t.Fatalf("negative classifier budget: %v", err)
+	}
+}
+
+// Managed accounts are opt-in.
+func TestManagedAccountsEnabled_DefaultsOff(t *testing.T) {
+	t.Setenv("GATEWAY_MANAGED_ACCOUNTS_ENABLED", "")
+	if Load().ManagedAccountsEnabled {
+		t.Fatal("managed accounts must default off")
+	}
+	t.Setenv("GATEWAY_MANAGED_ACCOUNTS_ENABLED", "true")
+	if !Load().ManagedAccountsEnabled {
+		t.Fatal("GATEWAY_MANAGED_ACCOUNTS_ENABLED=true must turn them on")
+	}
+}
+
+// Signing a managed account out must end its sessions at once, which only
+// session revocation does.
+func TestManagedAccountsNeedSessionRevocation(t *testing.T) {
+	c := Load()
+	c.ManagedAccountsEnabled = true
+	c.RevocationMode = RevocationModeTTL
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_REVOCATION_MODE=session") {
+		t.Fatalf("managed accounts under ttl revocation must be refused, got %v", err)
+	}
+	c.RevocationMode = RevocationModeSession
+	if err := c.Validate(); err != nil {
+		t.Fatalf("managed accounts under session revocation: %v", err)
+	}
+}
+
+// A revoked session must stop on every replica soon: with managed accounts on,
+// the session cache may hold one for at most a minute.
+func TestManagedAccountsBoundTheSessionCache(t *testing.T) {
+	c := Load()
+	c.ManagedAccountsEnabled = true
+	c.RevocationMode = RevocationModeSession
+	c.SessionCacheTTLSeconds = MaxManagedAccountsSessionCacheTTLSeconds + 1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_SESSION_CACHE_TTL_SECONDS") {
+		t.Fatalf("a session cache past the bound must be refused, got %v", err)
+	}
+	c.SessionCacheTTLSeconds = MaxManagedAccountsSessionCacheTTLSeconds
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a session cache at the bound: %v", err)
+	}
+	c.ManagedAccountsEnabled = false
+	c.SessionCacheTTLSeconds = 3600
+	if err := c.Validate(); err != nil {
+		t.Fatalf("the bound applies only with managed accounts on: %v", err)
+	}
+}
+
+// The default project admits no managed accounts unless told to.
+func TestDefaultProjectAdmitManagedAccounts_DefaultsOff(t *testing.T) {
+	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS", "")
+	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE", "")
+	c := Load()
+	if c.DefaultProjectAdmitManagedAccounts || c.DefaultProjectAdmitManagedAccountsSelfService {
+		t.Fatal("the default project's managed-account switches must default off")
+	}
+	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS", "true")
+	t.Setenv("GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE", "true")
+	c = Load()
+	if !c.DefaultProjectAdmitManagedAccounts || !c.DefaultProjectAdmitManagedAccountsSelfService {
+		t.Fatal("the variables set to true must turn the switches on")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
@@ -801,5 +802,126 @@ func TestListMyTenants_Handler(t *testing.T) {
 	if len(got) != 2 || got[0].GetTenantId() != "t-a" || got[0].GetName() != "Alpha" || got[0].GetRole() != service.RoleAdmin ||
 		got[1].GetTenantId() != "t-b" || got[1].GetRole() != service.RoleMember {
 		t.Fatalf("tenants = %+v", got)
+	}
+}
+
+func TestManagedAccountRPCs_ReturnUnimplemented(t *testing.T) {
+	t.Parallel()
+	for _, svc := range []*service.MembershipService{nil, newMembershipSvc(nil, nil, nil, nil)} {
+		srv := startMembershipServer(t, svc)
+		ctx := context.Background()
+
+		_, err := srv.client.CheckManagedAddresses(ctx,
+			withAuth(&identitypb.CheckManagedAddressesRequest{TenantId: "t", Addresses: []*identitypb.ManagedAddress{{Username: "ann", Domain: "acme.example.com"}}}, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+
+		_, err = srv.client.ResetManagedAccount(ctx,
+			withAuth(&identitypb.ResetManagedAccountRequest{TenantId: "t", UserId: "u2", DeliveryAddress: "ann@example.com"}, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+	}
+}
+
+// A request for a tenant-managed account is refused with POLICY wherever
+// the server or the project does not admit managed accounts, so it never
+// becomes an ordinary invitation to its delivery address; a server with no
+// managed store answers Unimplemented, and with no membership service the
+// call is Unimplemented, as every membership call is.
+func TestCreateTenantInvitation_ManagedAccountFieldsRefused(t *testing.T) {
+	t.Parallel()
+	_, err := startMembershipServer(t, nil).client.CreateTenantInvitation(context.Background(),
+		withAuth(&identitypb.CreateTenantInvitationRequest{TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+
+	admin := &connectMembershipStore{member: &service.TenantMembership{Role: service.RoleOwner, Status: service.MembershipStatusActive}}
+	requests := map[string]*identitypb.CreateTenantInvitationRequest{
+		"all": {TenantId: "tenant-1", Email: "ann.home@example.com", AccountUsername: "ann", AccountDomain: "acme.example.com", DisplayName: "Ann"},
+	}
+	for dark, cfg := range map[string]*config.Config{
+		"server flag off":                {},
+		"project not opted in (flag on)": {ManagedAccountsEnabled: true},
+	} {
+		svc := service.NewMembershipService(newConnectInvitationStore(), admin, claimedTenantStore(), &connectUserDirectory{},
+			email.NewLogOnly(zap.NewNop()), true, cfg, zap.NewNop()).WithManagedSetups(unusedManagedSetups{})
+		srv := startMembershipServer(t, svc)
+		for name, req := range requests {
+			_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(req, "admin-1"))
+			requireCode(t, err, connect.CodeFailedPrecondition)
+			var cerr *connect.Error
+			require.ErrorAs(t, err, &cerr, name)
+			var reasons []identitypb.ManagedAccountRefusal
+			for _, d := range cerr.Details() {
+				v, derr := d.Value()
+				require.NoError(t, derr, name)
+				if refused, ok := v.(*identitypb.ManagedAccountRefusedDetails); ok {
+					reasons = append(reasons, refused.GetReason())
+				}
+			}
+			require.Equal(t, []identitypb.ManagedAccountRefusal{identitypb.ManagedAccountRefusal_MANAGED_ACCOUNT_REFUSAL_POLICY}, reasons, "%s: %s", dark, name)
+		}
+	}
+}
+
+// unusedManagedSetups is a managed store no test call reaches: a dark
+// server refuses before it writes.
+type unusedManagedSetups struct{ service.ManagedSetupStore }
+
+// A request naming any of the managed-account fields is a managed account's
+// set-up link, which a server without the managed store cannot write.
+func TestCreateTenantInvitation_ManagedFieldsRouteToTheManagedSetup(t *testing.T) {
+	t.Parallel()
+	srv := startMembershipServer(t, newMembershipSvc(nil, nil, nil, nil))
+	for _, req := range []*identitypb.CreateTenantInvitationRequest{
+		{TenantId: "t", Email: "a@example.com", AccountUsername: "ann"},
+		{TenantId: "t", Email: "a@example.com", AccountDomain: "acme.example.com"},
+		{TenantId: "t", Email: "a@example.com", DisplayName: "Ann"},
+	} {
+		_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(req, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+	}
+}
+
+// A managed account's set-up email has no place for a note, so a request
+// naming any managed-account field with a note is refused before it is routed
+// rather than sent without the note; a note of only whitespace is none.
+func TestCreateTenantInvitation_NoteRefusedOnManagedSetup(t *testing.T) {
+	t.Parallel()
+	srv := startMembershipServer(t, newMembershipSvc(nil, nil, nil, nil))
+	for _, req := range []*identitypb.CreateTenantInvitationRequest{
+		{TenantId: "t", Email: "a@example.com", AccountUsername: "ann", Note: "Welcome aboard"},
+		{TenantId: "t", Email: "a@example.com", AccountDomain: "acme.example.com", Note: "Welcome aboard"},
+		{TenantId: "t", Email: "a@example.com", DisplayName: "Ann", Note: "Welcome aboard"},
+	} {
+		_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(req, "u1"))
+		requireCode(t, err, connect.CodeInvalidArgument)
+	}
+	_, err := srv.client.CreateTenantInvitation(context.Background(), withAuth(
+		&identitypb.CreateTenantInvitationRequest{TenantId: "t", Email: "a@example.com", AccountUsername: "ann", Note: " \n\t"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+}
+
+func TestInvitationToProto_ManagedSetupLink(t *testing.T) {
+	t.Parallel()
+	got := invitationToProto(&service.TenantInvitation{
+		ID: "inv", TenantID: "t", Email: "ann@acme.example.com", UserID: "u", DeliveryEmail: "ann@example.net",
+	})
+	if !got.GetIsManagedSetup() || got.GetEmail() != "ann@example.net" || got.GetAccountAddress() != "ann@acme.example.com" || got.GetUserId() != "u" {
+		t.Fatalf("managed = %+v", got)
+	}
+	plain := invitationToProto(&service.TenantInvitation{ID: "inv", TenantID: "t", Email: "bob@example.com"})
+	if plain.GetIsManagedSetup() || plain.GetEmail() != "bob@example.com" || plain.GetAccountAddress() != "" || plain.GetUserId() != "" {
+		t.Fatalf("ordinary = %+v", plain)
+	}
+}
+
+func TestAccountKindToProto(t *testing.T) {
+	t.Parallel()
+	for kind, want := range map[string]identitypb.AccountKind{
+		service.AccountKindPersonal: identitypb.AccountKind_ACCOUNT_KIND_PERSONAL,
+		service.AccountKindManaged:  identitypb.AccountKind_ACCOUNT_KIND_MANAGED,
+		"":                          identitypb.AccountKind_ACCOUNT_KIND_UNSPECIFIED,
+	} {
+		if got := accountKindToProto(kind); got != want {
+			t.Fatalf("%q = %v, want %v", kind, got, want)
+		}
 	}
 }

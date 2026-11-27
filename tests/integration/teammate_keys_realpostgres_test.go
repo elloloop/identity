@@ -107,6 +107,8 @@ func startTeammateHarness(t *testing.T, enabled bool, configure ...func(*config.
 		TOTPRecoveryPepper:   []byte("test-recovery-pepper!@#$%^&*()_+ABCDEFGH"),
 		EmailTransport:       issue3SilentMailer{},
 		DirectoryCredentials: built.DirectoryCredentialStore(),
+		MembershipStore:      built.MembershipStoreIface(),
+		TenantStore:          built.TenantStoreIface(),
 		MetricsRegistry:      metrics,
 	})
 	if err != nil {
@@ -784,4 +786,75 @@ func teammateCounter(t *testing.T, h *teammateHarness, name string, labels map[s
 		}
 	}
 	return 0
+}
+
+// manageOwner makes the fixture's lead an account a new tenant manages, set
+// up and an active member, and returns the tenant.
+func (f *teammateFixture) manageOwner(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	tenantID, err := f.h.Built.TenantStoreIface().CreateTenant(ctx, &service.Tenant{
+		ProjectID: f.h.ProjectID, Name: "Acme", PrimaryDomain: "acme-" + f.unique + ".example.com", Status: service.TenantStatusClaimed,
+	})
+	if err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	f.setOwnerMembership(t, tenantID, service.MembershipStatusActive)
+	conn, err := pgx.Connect(ctx, os.Getenv("GATEWAY_POSTGRES_DSN"))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	if _, err := conn.Exec(ctx, `UPDATE users SET managed_by_tenant_id = $3, set_up_at_ms = $4 WHERE project_id = $1 AND id = $2`,
+		f.h.ProjectID, f.ownerID, tenantID, time.Now().UnixMilli()); err != nil {
+		t.Fatalf("manage the lead: %v", err)
+	}
+	return tenantID
+}
+
+func (f *teammateFixture) setOwnerMembership(t *testing.T, tenantID, status string) {
+	t.Helper()
+	if _, err := f.h.Built.MembershipStoreIface().UpsertMembership(context.Background(), &service.TenantMembership{
+		ProjectID: f.h.ProjectID, TenantID: tenantID, UserID: f.ownerID,
+		Source: service.MembershipSourceAdded, Role: service.RoleOwner, Status: status,
+	}); err != nil {
+		t.Fatalf("UpsertMembership(%s): %v", status, err)
+	}
+}
+
+// exchangeOnce asks for one challenge and exchanges it, returning the error.
+func (f *teammateFixture) exchangeOnce(t *testing.T, keyID string, sign func([]byte) []byte) error {
+	t.Helper()
+	challenge, err := f.challenge(t, keyID)
+	if err != nil {
+		return err
+	}
+	_, err = f.exchange(t, keyID, challenge.ChallengeId, sign(challenge.Message))
+	return err
+}
+
+// TestTeammateKeys_ManagedLeadMustBeInStanding: a teammate whose lead is an
+// account a tenant manages gets tokens while the lead is an active member,
+// none while the lead is suspended in the tenant, and tokens again once the
+// lead is restored.
+func TestTeammateKeys_ManagedLeadMustBeInStanding(t *testing.T) {
+	f := newTeammateFixture(t)
+	private, public := p256Key(t)
+	claim := f.claim("claim-managed")
+	keyID, err := f.register(t, claim, public)
+	if err != nil {
+		t.Fatalf("RegisterTeammateKey: %v", err)
+	}
+	tenantID := f.manageOwner(t)
+	if err := f.exchangeOnce(t, keyID, signP256(t, private)); err != nil {
+		t.Fatalf("exchange while the managed lead is active: %v", err)
+	}
+	f.setOwnerMembership(t, tenantID, service.MembershipStatusSuspended)
+	if err := f.exchangeOnce(t, keyID, signP256(t, private)); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("exchange while the managed lead is suspended = %v, want Unauthenticated", err)
+	}
+	f.setOwnerMembership(t, tenantID, service.MembershipStatusActive)
+	if err := f.exchangeOnce(t, keyID, signP256(t, private)); err != nil {
+		t.Fatalf("exchange once the lead is restored: %v", err)
+	}
 }
