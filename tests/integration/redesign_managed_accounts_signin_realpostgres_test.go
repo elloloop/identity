@@ -262,8 +262,16 @@ func TestRedesign_ManagedAccounts_AgentsFollowTheirOwnersStanding(t *testing.T) 
 	if _, err := refresh(h, seedAgentRefresh(t, h, agentID)); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("agent refresh while the owner is suspended = %v, want FailedPrecondition", err)
 	}
-	if _, err := mt.owner.client.RestoreTenantMember(ctx, connect.NewRequest(&identitypb.RestoreTenantMemberRequest{TenantId: mt.tenantID, UserId: ownerID})); err != nil {
+	restored, err := mt.owner.client.RestoreTenantMember(ctx, connect.NewRequest(&identitypb.RestoreTenantMemberRequest{TenantId: mt.tenantID, UserId: ownerID}))
+	if err != nil {
 		t.Fatalf("RestoreTenantMember: %v", err)
+	}
+	if got := restored.Msg.GetAgentsLeftDeactivated(); got != 1 {
+		t.Fatalf("agents left deactivated = %d, want the one agent the suspension deactivated", got)
+	}
+	event := waitForAuditEvent(t, h, ownerID, "tenant_member_restored")
+	if event.Details["agents_left_deactivated"] != float64(1) || event.Details["managed"] != true {
+		t.Fatalf("restore audit details = %v, want the managed restore leaving one agent off", event.Details)
 	}
 	if _, err := refresh(h, seedAgentRefresh(t, h, agentID)); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("agent refresh once the owner is restored = %v, want FailedPrecondition: the suspension deactivated the agent", err)

@@ -16410,9 +16410,15 @@ type RestoreTenantMemberResponse struct {
 	// membership is the member's membership as it now stands: status
 	// "active", or "inactive" for one through the email's domain whose email
 	// is not on a domain the tenant has verified when it is restored.
-	Membership    *TenantMembership `protobuf:"bytes,1,opt,name=membership,proto3" json:"membership,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Membership *TenantMembership `protobuf:"bytes,1,opt,name=membership,proto3" json:"membership,omitempty"`
+	// agents_left_deactivated is how many of the member's agents stay
+	// deactivated: suspending, removing or resetting an account the tenant
+	// manages deactivates its agents, and a restore does not bring them back,
+	// so their owner reactivates each (ReactivateAgent). 0 for an account the
+	// tenant does not manage.
+	AgentsLeftDeactivated int32 `protobuf:"varint,2,opt,name=agents_left_deactivated,json=agentsLeftDeactivated,proto3" json:"agents_left_deactivated,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *RestoreTenantMemberResponse) Reset() {
@@ -16450,6 +16456,13 @@ func (x *RestoreTenantMemberResponse) GetMembership() *TenantMembership {
 		return x.Membership
 	}
 	return nil
+}
+
+func (x *RestoreTenantMemberResponse) GetAgentsLeftDeactivated() int32 {
+	if x != nil {
+		return x.AgentsLeftDeactivated
+	}
+	return 0
 }
 
 // TransferTenantOwnershipRequest names the member the caller, an owner of
@@ -27077,11 +27090,12 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"membership\"R\n" +
 	"\x1aRestoreTenantMemberRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\"\\\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"\x94\x01\n" +
 	"\x1bRestoreTenantMemberResponse\x12=\n" +
 	"\n" +
 	"membership\x18\x01 \x01(\v2\x1d.identity.v1.TenantMembershipR\n" +
-	"membership\"V\n" +
+	"membership\x126\n" +
+	"\x17agents_left_deactivated\x18\x02 \x01(\x05R\x15agentsLeftDeactivated\"V\n" +
 	"\x1eTransferTenantOwnershipRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\"\x9c\x01\n" +

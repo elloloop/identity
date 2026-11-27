@@ -67,9 +67,9 @@ func TestSuspendTenantMember_SuspendsAndRestoresAndAudits(t *testing.T) {
 
 	back, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "198.51.100.2", "other-agent")
 	require.NoError(t, err)
-	assert.Equal(t, MembershipStatusActive, back.Status)
-	assert.Equal(t, RoleMember, back.Role)
-	assert.Equal(t, MembershipSourceDomain, back.Source)
+	assert.Equal(t, MembershipStatusActive, back.Membership.Status)
+	assert.Equal(t, RoleMember, back.Membership.Role)
+	assert.Equal(t, MembershipSourceDomain, back.Membership.Source)
 	assert.Equal(t, 1, f.audit.countByEventTypeActorTarget(restored, ssOwnerID, joinerID))
 	assert.Equal(t, []map[string]any{{
 		"project_id": ssProject, "tenant_id": ownTenant,
@@ -81,9 +81,9 @@ func TestSuspendTenantMember_SuspendsAndRestoresAndAudits(t *testing.T) {
 	assert.Equal(t, ownTenant, mine[0].TenantID)
 
 	// Restoring an active member changes and records nothing.
-	again, err = f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
+	restoredAgain, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
-	assert.Equal(t, back, again)
+	assert.Equal(t, back, restoredAgain)
 	assert.Equal(t, 1, f.audit.countByEventType(restored))
 }
 
@@ -188,7 +188,7 @@ func TestRestoreTenantMember_ADomainMemberOffTheDomainEnds(t *testing.T) {
 
 	got, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, joinerID, "", "")
 	require.NoError(t, err)
-	assert.Equal(t, MembershipStatusInactive, got.Status)
+	assert.Equal(t, MembershipStatusInactive, got.Membership.Status)
 	assert.Equal(t, MembershipStatusInactive, f.membership(t, joinerID).Status)
 	assert.Equal(t, MembershipStatusInactive, f.audit.detailsOf(string(audit.EventTenantMemberRestored))[0]["status"])
 
@@ -200,7 +200,7 @@ func TestRestoreTenantMember_ADomainMemberOffTheDomainEnds(t *testing.T) {
 	f.users.set(ssProject, &User{ID: ssOtherID, Email: "other@elsewhere.test", Status: StatusActive, EmailVerified: true})
 	got, err = f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")
 	require.NoError(t, err)
-	assert.Equal(t, MembershipStatusActive, got.Status)
+	assert.Equal(t, MembershipStatusActive, got.Membership.Status)
 }
 
 func TestSuspendAndRestoreTenantMember_Refusals(t *testing.T) {

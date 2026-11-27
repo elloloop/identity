@@ -1,5 +1,25 @@
 # Upgrade guide
 
+## Next — restoring a managed account says how many of its agents stay off (additive field `RestoreTenantMemberResponse.agents_left_deactivated`; no migration; `MembershipService.RestoreTenantMember` returns a `RestoredMember` (Go API))
+
+Suspending, removing or resetting an account a tenant manages deactivates its
+agents, and restoring the membership does not bring them back: their owner
+reactivates each with `ReactivateAgent`. So the admin who restores knows that:
+
+- **`agents_left_deactivated`** on `RestoreTenantMemberResponse` counts the
+  managed account's agents that are still deactivated; it is 0 for a personal
+  member, whose agents a tenant never deactivates.
+- **Audit and logs.** A managed account's restore records
+  `tenant_member_restored` with `managed: true` and `agents_left_deactivated`
+  in the details, and logs `managed_account_restored` with the count. A
+  personal member's restore is audited as before.
+- **Refusal.** Where the account store is not wired, a managed account's
+  restore is refused (`INTERNAL`) before anything is written, as its agents
+  cannot be counted.
+- **Go API.** `MembershipService.RestoreTenantMember` returns
+  `*RestoredMember` (`Membership`, `AgentsLeftDeactivated`) in place of
+  `*TenantMembership`.
+
 ## Next — a managed account's credential and admin calls need a live session; managed accounts own agents (no migration; every tenant-admin call reads a managed caller's session; `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` (default 60); `MembershipService.ListTenantMembers`, `ListTenantInvitations`, `CheckManagedAddresses`, `DomainService.ListTenantDomains` and `AuthService.CreateAgent` take a `SessionSignIn` (Go API))
 
 A reset, suspension or removal ends a managed account's sessions at once on

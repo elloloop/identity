@@ -13468,6 +13468,16 @@ components:
              "active", or "inactive" for one through the email's domain whose email
              is not on a domain the tenant has verified when it is restored.
           $ref: '#/components/schemas/identity.v1.TenantMembership'
+        agentsLeftDeactivated:
+          type: integer
+          title: agents_left_deactivated
+          format: int32
+          description: |-
+            agents_left_deactivated is how many of the member's agents stay
+             deactivated: suspending, removing or resetting an account the tenant
+             manages deactivates its agents, and a restore does not bring them back,
+             so their owner reactivates each (ReactivateAgent). 0 for an account the
+             tenant does not manage.
       title: RestoreTenantMemberResponse
       additionalProperties: false
     identity.v1.RevokeAgentDelegationRequest:
