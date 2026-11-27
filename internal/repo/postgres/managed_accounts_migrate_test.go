@@ -103,3 +103,36 @@ func TestMigrate_0068AfterTheUpgradeGuidesPrebuild(t *testing.T) {
 	require.True(t, hasColumn(ctx, t, conn, "users", "managed_by_tenant_id"))
 	require.True(t, hasIndex(ctx, t, conn, "tenant_invitations_pending_user_idx"))
 }
+
+// TestMigrate_0069SignOutIndexes: 0069 adds the partial indexes the managed
+// sign-out reads, and its down migration drops them.
+func TestMigrate_0069SignOutIndexes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	conn, migrateTo := migrateTo67WithRows(ctx, t)
+	indexes := []string{"qr_login_sessions_approved_user_idx", "oauth_one_time_codes_unconsumed_user_idx", "login_challenges_project_user_idx"}
+	migrateTo(managedAccountsMigrationVersion + 1)
+	for _, name := range indexes {
+		require.True(t, hasIndex(ctx, t, conn, name), name)
+	}
+	migrateTo(managedAccountsMigrationVersion)
+	for _, name := range indexes {
+		require.False(t, hasIndex(ctx, t, conn, name), name)
+	}
+}
+
+// TestMigrate_0069AfterTheUpgradeGuidesPrebuild: the guide's CONCURRENTLY
+// statements leave 0069 nothing to do.
+func TestMigrate_0069AfterTheUpgradeGuidesPrebuild(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	conn, migrateTo := migrateTo67WithRows(ctx, t)
+	migrateTo(managedAccountsMigrationVersion)
+	recipe := upgradeSQL(t, "CREATE INDEX CONCURRENTLY IF NOT EXISTS qr_login_sessions_approved_user_idx")
+	for _, statement := range strings.Split(strings.TrimSuffix(recipe, ";\n"), ";\n") {
+		_, err := conn.Exec(ctx, statement)
+		require.NoError(t, err, statement)
+	}
+	migrateTo(managedAccountsMigrationVersion + 1)
+	require.True(t, hasIndex(ctx, t, conn, "login_challenges_project_user_idx"))
+}

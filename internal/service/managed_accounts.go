@@ -40,10 +40,11 @@ var (
 	// ErrManagedResetLimited refuses a reset past the per-delivery-address
 	// cap.
 	ErrManagedResetLimited = errors.New("too many set-up links sent to this address recently; try again later")
-	// ErrManagedElsewhere refuses a membership of a managed account in any
-	// tenant but the one that manages it, and a reset of a managed account
-	// that holds one. It is an ErrPermissionDenied.
-	ErrManagedElsewhere = fmt.Errorf("%w: this account belongs to another tenant", ErrPermissionDenied)
+	// ErrManagedElsewhere refuses a membership of a managed account, or of
+	// an agent one owns, in any tenant but the one that manages the account,
+	// and a reset of a managed account that holds one. It is an
+	// ErrPermissionDenied.
+	ErrManagedElsewhere = fmt.Errorf("%w: a managed account holds a membership only in the tenant that manages it", ErrPermissionDenied)
 )
 
 // Managed address holders, as ManagedSetupStore.ManagedAddressHolders reports

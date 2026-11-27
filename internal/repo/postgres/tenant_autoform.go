@@ -31,7 +31,9 @@ func NewAutoFormStore(r *pgRepository) *AutoFormStore {
 // Domain exist for (projectID, domain) and records a domain-derived
 // membership for userID. See the interface doc for the concurrency
 // contract: tenant+domain are created in one transaction so a lost race
-// leaves no orphan tenant.
+// leaves no orphan tenant. A managed account forms no tenant and joins no
+// other: its membership is recorded in the tenant that manages it, whatever
+// that tenant's status, and that tenant's id is returned.
 func (s *AutoFormStore) EnsureTenantForDomain(ctx context.Context, projectID, domain, userID string) (string, error) {
 	if projectID == "" {
 		return "", fmt.Errorf("%w: missing project_id", service.ErrInvalidArgument)
@@ -48,15 +50,10 @@ func (s *AutoFormStore) EnsureTenantForDomain(ctx context.Context, projectID, do
 		return "", err
 	}
 	if managedBy != "" {
-		// A managed account joins only the tenant that manages it, and never
-		// forms one.
-		existing, err := s.tenantIDForDomain(ctx, s.pool, projectID, domain)
-		if err != nil {
+		if err := s.upsertDerivedMembership(ctx, projectID, managedBy, userID); err != nil {
 			return "", err
 		}
-		if existing != managedBy {
-			return "", service.ErrManagedElsewhere
-		}
+		return managedBy, nil
 	}
 	tenantID, err := s.findOrCreateTenant(ctx, projectID, domain)
 	if err != nil {

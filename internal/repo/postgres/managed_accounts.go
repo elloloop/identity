@@ -52,12 +52,18 @@ func refuseManagedElsewhere(ctx context.Context, pool *tracedPool, op, projectID
 	return nil
 }
 
-// managingTenant returns the tenant that manages userID's account, "" for a
-// personal account or none.
+// managingTenant returns the tenant that manages userID's account, or, for
+// an agent, its owner's; "" for a personal account, an agent a person owns,
+// or none.
 func managingTenant(ctx context.Context, pool *tracedPool, op, projectID, userID string) (string, error) {
 	var managedBy string
-	err := pool.forProject(projectID).QueryRow(ctx, `SELECT managed_by_tenant_id FROM users
-		WHERE project_id = $1 AND id = $2`, projectID, userID).Scan(&managedBy)
+	err := pool.forProject(projectID).QueryRow(ctx, `
+		SELECT CASE WHEN u.managed_by_tenant_id <> '' THEN u.managed_by_tenant_id
+		            ELSE COALESCE(o.managed_by_tenant_id, '') END
+		FROM users u
+		LEFT JOIN users o ON u.kind = $3 AND u.owner_user_id <> ''
+		     AND o.project_id = u.project_id AND o.id = u.owner_user_id
+		WHERE u.project_id = $1 AND u.id = $2`, projectID, userID, service.UserKindAgent).Scan(&managedBy)
 	if noRows(err) {
 		return "", nil
 	}
@@ -613,11 +619,12 @@ func (s *InvitationStore) CompleteManagedSetup(ctx context.Context, c service.Ma
 	if err != nil {
 		return nil, wrapPgErr(op+"(lock)", err)
 	}
-	governed, err := hasGovernorBesides(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
-	if err != nil {
-		return nil, wrapPgErr(op+"(governors)", err)
+	governed := false
+	if claimed {
+		if governed, err = hasGovernorBesides(ctx, tx, c.ProjectID, link.TenantID, link.UserID); err != nil {
+			return nil, wrapPgErr(op+"(governors)", err)
+		}
 	}
-	governed = governed && claimed
 	removed, err := isRemoved(ctx, tx, c.ProjectID, link.TenantID, link.UserID)
 	if err != nil {
 		return nil, wrapPgErr(op+"(removal)", err)

@@ -827,11 +827,9 @@ func TestManagedAccount_NoMembershipElsewhere(t *testing.T) {
 	_, _, err = f.tenants.CreateOwnedTenant(ctx, service.OwnedTenantRequest{ProjectID: f.projectID, Name: "Side project", OwnerID: ann, MaxPerWindow: 10})
 	require.ErrorIs(t, err, service.ErrManagedElsewhere)
 	autoform := &AutoFormStore{pool: f.ms.pool}
-	_, err = autoform.EnsureTenantForDomain(ctx, f.projectID, "other.example.com", ann)
-	require.ErrorIs(t, err, service.ErrManagedElsewhere, "a managed account forms no tenant")
-	joined, err := autoform.EnsureTenantForDomain(ctx, f.projectID, "acme.com", ann)
+	joined, err := autoform.EnsureTenantForDomain(ctx, f.projectID, "other.example.com", ann)
 	require.NoError(t, err)
-	assert.Equal(t, f.tenantID, joined, "its own tenant's domain is fine")
+	assert.Equal(t, f.tenantID, joined, "a managed account forms no tenant and joins only its own")
 	var elsewhere int
 	require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT count(*) FROM tenant_memberships WHERE project_id = $1 AND user_id = $2 AND tenant_id <> $3`, f.projectID, ann, f.tenantID).Scan(&elsewhere))
 	assert.Zero(t, elsewhere)
@@ -930,4 +928,46 @@ func TestManagedSetup_OrdinaryRevokeAndTenantStatus(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.is.CreateManagedSetup(ctx, f.setup("bob@acme.com", "x@example.com", f.other))
 	require.ErrorIs(t, err, service.ErrPermissionDenied)
+}
+
+// Auto-formation records a managed account's membership in the tenant that
+// manages it even while that tenant is suspended, and never forms or joins
+// another for it.
+func TestManagedAutoForm_SuspendedManagingTenant(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	ann := f.setUpAccount(ctx, t, service.RoleMember)
+	_, err := f.accounts.pool.Exec(ctx, `UPDATE tenants SET status = $3 WHERE project_id = $1 AND id = $2`, f.projectID, f.tenantID, service.TenantStatusSuspended)
+	require.NoError(t, err)
+	var tenantsBefore int
+	require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE project_id = $1`, f.projectID).Scan(&tenantsBefore))
+
+	joined, err := (&AutoFormStore{pool: f.ms.pool}).EnsureTenantForDomain(ctx, f.projectID, "acme.com", ann)
+	require.NoError(t, err)
+	assert.Equal(t, f.tenantID, joined)
+	var tenantsAfter int
+	require.NoError(t, f.accounts.pool.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE project_id = $1`, f.projectID).Scan(&tenantsAfter))
+	assert.Equal(t, tenantsBefore, tenantsAfter, "no tenant was formed")
+	m := f.membership(ctx, t, ann)
+	require.NotNil(t, m)
+	assert.Equal(t, service.MembershipSourceInvited, m.Source, "the membership it holds keeps its source")
+}
+
+// An agent a managed account owns is held to its owner's tenant, while an
+// agent a person owns is not.
+func TestManagedAccount_AgentsFollowTheirOwnersTenant(t *testing.T) {
+	ctx, f := newManagedFixture(t)
+	ann := f.setUpAccount(ctx, t, service.RoleMember)
+	annsAgent := f.agentOf(ctx, t, ann)
+	personsAgent := f.agentOf(ctx, t, f.user)
+	other, err := f.tenants.CreateTenant(ctx, &service.Tenant{ProjectID: f.projectID, Status: service.TenantStatusClaimed})
+	require.NoError(t, err)
+
+	_, _, err = f.ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: f.projectID, TenantID: other, UserID: annsAgent, Source: service.MembershipSourceAdded, Role: service.RoleMember})
+	require.ErrorIs(t, err, service.ErrManagedElsewhere)
+	_, _, err = f.ms.AddMember(ctx, f.projectID, other, annsAgent)
+	require.ErrorIs(t, err, service.ErrManagedElsewhere)
+	_, _, err = f.ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: f.projectID, TenantID: f.tenantID, UserID: annsAgent, Source: service.MembershipSourceAdded, Role: service.RoleMember})
+	require.NoError(t, err, "the managing tenant is the agent's own")
+	_, _, err = f.ms.GrantMembership(ctx, &service.TenantMembership{ProjectID: f.projectID, TenantID: other, UserID: personsAgent, Source: service.MembershipSourceAdded, Role: service.RoleMember})
+	require.NoError(t, err, "a person's agent is unaffected")
 }
