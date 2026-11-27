@@ -62,6 +62,14 @@ status or credential changes, guardian loss, client edits and project changes
 invalidate old grants. Restoring a previous owner or enabling a client again
 never restores the old grant. Product and age policy derives from the current
 human owner and the registered product, never a caller-supplied age claim.</p>
+<p>When a tenant manages the owner's account, the owner's standing in that
+tenant is checked at every exchange too: a grant or a machine whose owner is
+suspended or removed from the tenant, or whose tenant is suspended, is
+revoked at that exchange and stays revoked; once the owner is reinstated they
+authorize the agent again, as after any loss of authority. When the owner's
+standing cannot be read, the exchange answers <code>server_error</code>
+(<code>UNAVAILABLE</code> on the Connect RPCs) and nothing is revoked, so the
+client may retry.</p>
 <p>Only GET authorization and form-encoded POST token/introspection/revocation
 are exposed. Requests are limited to 64 KiB and compact access JWTs to 32 KiB;
 the configured issuer is at most 2048 bytes. The <code>openid</code> scope is
@@ -201,7 +209,13 @@ and <code>claim_id</code>, <code>workstation_id</code> and <code>company_id</cod
 read from the key, never from the request. Every exchange applies the grant
 rule again, so it is refused once that person is no longer active, or neither
 owns the teammate (after a transfer) nor is a project admin (after a
-demotion). The token has no client, scope or grant id, so a
+demotion). The teammate's owner, whoever granted the hire, must be an active
+person: an owner who is suspended, deactivated or deleted stands behind no
+token, so a project admin's grant does not outlive the owner. When the
+teammate's owner or the person who granted the hire is an account a tenant
+manages, they must also be in standing in that tenant; a standing that
+cannot be read answers <code>UNAVAILABLE</code>, mints nothing and may be
+retried. The token has no client, scope or grant id, so a
 delegated-access verifier refuses it; verify it with
 <code>VerifyTeammateAccessToken</code> or an equivalent check of
 <code>typ</code>, issuer, project and audience.</p>

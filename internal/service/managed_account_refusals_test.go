@@ -330,16 +330,19 @@ func TestLinkIdentity_RefusesAManagedAccount(t *testing.T) {
 	require.Empty(t, links)
 }
 
-// A managed account comes to own no agent by any path: an offer to it, its
-// acceptance of an offer, or an admin's reassignment of an orphan to it.
-func TestAgentTransfer_ToAManagedAccountIsRefused(t *testing.T) {
+// A managed account out of standing in its tenant comes to own no agent by
+// any path: an offer to it, its acceptance of an offer, or an admin's
+// reassignment of an orphan to it.
+func TestAgentTransfer_ToAManagedAccountOutOfStandingIsRefused(t *testing.T) {
 	ctx := context.Background()
+	suspended := &managedMembershipsMock{get: membershipIn(MembershipStatusSuspended)}
 
 	f := newAgentFixture(t)
+	f.svc.WithManagedMemberships(suspended, tenantIn(TenantStatusClaimed))
 	managed := seedManaged(f.repo, "ann@acme.example.com", StatusActive)
 	agent := seedAgent(f.repo, f.owner.ID)
 	_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, managed.ID, "", "")
-	require.ErrorIs(t, err, ErrInvalidArgument, "an offer to a managed account")
+	require.ErrorIs(t, err, ErrInvalidArgument, "an offer to a managed account out of standing")
 	stored, _ := f.repo.GetUser(ctx, agent.ID)
 	require.Empty(t, stored.PendingOwnerUserID)
 
@@ -347,18 +350,44 @@ func TestAgentTransfer_ToAManagedAccountIsRefused(t *testing.T) {
 	f.repo.users[agent.ID].PendingOwnerUserID = managed.ID
 	f.repo.mu.Unlock()
 	_, err = f.svc.AcceptAgentTransfer(ctx, managed.ID, agent.ID, "", "")
-	require.ErrorIs(t, err, ErrInvalidArgument, "a managed account accepting an offer")
+	require.ErrorIs(t, err, ErrInvalidArgument, "a managed account out of standing accepting an offer")
 	stored, _ = f.repo.GetUser(ctx, agent.ID)
 	require.Equal(t, f.owner.ID, stored.OwnerUserID)
 
 	g := newAgentFixture(t)
+	g.svc.WithManagedMemberships(suspended, tenantIn(TenantStatusClaimed))
 	managed = seedManaged(g.repo, "ann@acme.example.com", StatusActive)
 	orphan := seedAgent(g.repo, g.owner.ID)
 	require.NoError(t, g.repo.DeleteUser(ctx, g.owner.ID))
 	_, err = g.svc.TransferAgent(ctx, g.admin.ID, SessionSignIn{}, orphan.ID, managed.ID, "", "")
-	require.ErrorIs(t, err, ErrInvalidArgument, "an orphan reassigned to a managed account")
+	require.ErrorIs(t, err, ErrInvalidArgument, "an orphan reassigned to a managed account out of standing")
 	stored, _ = g.repo.GetUser(ctx, orphan.ID)
 	require.Equal(t, g.owner.ID, stored.OwnerUserID)
+}
+
+// When a managed owner's standing cannot be read, creating an agent for it,
+// offering it one and accepting one return that refusal as it is,
+// retryable, rather than as an owner not eligible, and change nothing.
+func TestAgentOwnership_StandingUnreadPassesThrough(t *testing.T) {
+	ctx := context.Background()
+	f := newAgentFixture(t)
+	f.svc.WithManagedMemberships(&managedMembershipsMock{get: func(string, string, string) (*TenantMembership, error) {
+		return nil, errors.New("db down")
+	}}, tenantIn(TenantStatusClaimed))
+	managed := seedManaged(f.repo, "ann@acme.example.com", StatusActive)
+	agent := seedAgent(f.repo, f.owner.ID)
+
+	_, err := f.svc.CreateAgent(ctx, f.admin.ID, SessionSignIn{}, "Helper", "", managed.ID, "", "", "unread-key")
+	require.ErrorIs(t, err, ErrUnavailable, "creating an agent for it")
+	_, err = f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, managed.ID, "", "")
+	require.ErrorIs(t, err, ErrUnavailable, "offering it an agent")
+	f.repo.mu.Lock()
+	f.repo.users[agent.ID].PendingOwnerUserID = managed.ID
+	f.repo.mu.Unlock()
+	_, err = f.svc.AcceptAgentTransfer(ctx, managed.ID, agent.ID, "", "")
+	require.ErrorIs(t, err, ErrUnavailable, "accepting an offer")
+	stored, _ := f.repo.GetUser(ctx, agent.ID)
+	require.Equal(t, f.owner.ID, stored.OwnerUserID)
 }
 
 // An account waiting for its set-up is sent no password reset, and a reset

@@ -138,6 +138,9 @@ func TestCreateManagedSetupInvitation_CreatesMailsAndAudits(t *testing.T) {
 	require.Positive(t, got.Limits.MaxPerTenant)
 	require.Equal(t, maDelivery, f.mailer.last().To)
 	require.Contains(t, f.mailer.last().Text, maAddress)
+	require.Contains(t, f.mailer.last().Text, "works once and expires in 7 days", "the default seven-day link reads in days")
+	require.NotContains(t, f.mailer.last().Text, "168 hours")
+	require.Contains(t, f.mailer.last().Text, "Your company admin sent your account's set-up link to this address.")
 	require.Equal(t, 1, w.countByEventTypeActorTarget(string(audit.EventManagedAccountCreated), mAdminID, maUserID))
 }
 

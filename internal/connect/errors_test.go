@@ -419,3 +419,15 @@ func TestToConnectErrorManagedAccountReset(t *testing.T) {
 		}
 	}
 }
+
+// A managed standing that could not be read is retryable: UNAVAILABLE, not
+// the FAILED_PRECONDITION an account that is not active gets.
+func TestToConnectErrorManagedStandingUnread(t *testing.T) {
+	unread := fmt.Errorf("%w: %w: standing unread", service.ErrUnavailable, service.ErrAccountNotActive)
+	if got := connect.CodeOf(toConnectError(unread)); got != connect.CodeUnavailable {
+		t.Fatalf("code = %v, want Unavailable", got)
+	}
+	if got := connect.CodeOf(toConnectError(fmt.Errorf("%w: suspended", service.ErrAccountNotActive))); got != connect.CodeFailedPrecondition {
+		t.Fatalf("not active = %v, want FailedPrecondition", got)
+	}
+}

@@ -51,6 +51,19 @@ func appBaseURL(ctx context.Context, cfg *config.Config) string {
 
 // formatExpiresIn renders a human-friendly "X hours" / "X minutes"
 // string for use inside email templates.
+// formatLinkLifetime is formatExpiresIn in whole days for a lifetime of a
+// day or more that is a whole number of days ("7 days", not "168 hours").
+func formatLinkLifetime(d time.Duration) string {
+	const day = 24 * time.Hour
+	if d < day || d%day != 0 {
+		return formatExpiresIn(d)
+	}
+	if d == day {
+		return "1 day"
+	}
+	return fmt.Sprintf("%d days", d/day)
+}
+
 func formatExpiresIn(d time.Duration) string {
 	if d >= time.Hour {
 		hours := int(d / time.Hour)
@@ -211,7 +224,7 @@ func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string
 // a reset by an owner or admin), and the reset link goes only to the
 // account's own address, never to a recovery email.
 func (s *AuthService) managedPasswordResettable(ctx context.Context, user *User) bool {
-	return user.ManagedByTenantID == "" || s.refuseManagedAccount(ctx, user) == nil
+	return user.ManagedByTenantID == "" || s.refuseManagedAccount(ctx, user, "password_reset") == nil
 }
 
 // resetTokenRefusal is the log event that refuses rec for user's password,

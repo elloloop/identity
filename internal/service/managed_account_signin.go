@@ -23,9 +23,10 @@ type ManagedTenantStatusReader interface {
 
 // errManagedStandingUnread is a managed account refused because its
 // standing in its tenant could not be read: fail closed, but over no fault
-// of the account's, so a refresh keeps its token and an agent's grant stays
+// of the account's, so it is ErrUnavailable (retryable) as well as
+// ErrAccountNotActive, a refresh keeps its token and an agent's grant stays
 // for a retry.
-var errManagedStandingUnread = fmt.Errorf("%w: the account's standing in its tenant could not be read", ErrAccountNotActive)
+var errManagedStandingUnread = fmt.Errorf("%w: %w: the account's standing in its tenant could not be read", ErrUnavailable, ErrAccountNotActive)
 
 // managedStanding judges whether a managed account may hold a session or
 // stand behind an agent: the one rule every service that mints a token for
@@ -41,8 +42,9 @@ type managedStanding struct {
 // and it is not active, has never been set up, its membership of the
 // managing tenant is not active, or that tenant is neither claimed nor
 // latent. A personal account is never read for. Missing readers or a failed
-// read refuse too (errManagedStandingUnread). Each refusal is logged.
-func (j managedStanding) refuse(ctx context.Context, projectID string, user *User) error {
+// read refuse too (errManagedStandingUnread). Each refusal is logged once,
+// as managed_account_refused with the calling surface.
+func (j managedStanding) refuse(ctx context.Context, projectID string, user *User, surface string) error {
 	if user.ManagedByTenantID == "" {
 		return nil
 	}
@@ -53,7 +55,7 @@ func (j managedStanding) refuse(ctx context.Context, projectID string, user *Use
 	refuse := func(reason string, err error) error {
 		logger.Info("managed_account_refused",
 			zap.String("project_id", projectID), zap.String("tenant_id", user.ManagedByTenantID),
-			zap.String("user_id", user.ID), zap.String("path", "session"), zap.String("reason", reason))
+			zap.String("user_id", user.ID), zap.String("surface", surface), zap.String("reason", reason))
 		return err
 	}
 	switch {
@@ -86,11 +88,11 @@ func (j managedStanding) refuse(ctx context.Context, projectID string, user *Use
 // ownerStands is the one rule for whether owner may stand behind an agent
 // now: an active permanent person (else errAgentOwnerNotActive) who, when a
 // tenant manages the account, is in standing in it (managedStanding).
-func (j managedStanding) ownerStands(ctx context.Context, projectID string, owner *User) error {
+func (j managedStanding) ownerStands(ctx context.Context, projectID string, owner *User, surface string) error {
 	if !isEligibleAgentOwner(owner) {
 		return errAgentOwnerNotActive
 	}
-	return j.refuse(ctx, projectID, owner)
+	return j.refuse(ctx, projectID, owner, surface)
 }
 
 // WithManagedMemberships wires the readers that decide whether a managed
@@ -122,12 +124,12 @@ func admittedEarlier(ctx context.Context, user *User) bool {
 }
 
 // refuseManagedAccount is managedStanding's refusal in the request's
-// project, skipping an account this request already admitted.
-func (s *AuthService) refuseManagedAccount(ctx context.Context, user *User) error {
+// project from surface, skipping an account this request already admitted.
+func (s *AuthService) refuseManagedAccount(ctx context.Context, user *User, surface string) error {
 	if admittedEarlier(ctx, user) {
 		return nil
 	}
-	return s.managedStanding.refuse(ctx, s.projectID(ctx), user)
+	return s.managedStanding.refuse(ctx, s.projectID(ctx), user, surface)
 }
 
 // isManagedStandingUnread reports whether err is a managed account refused
@@ -143,5 +145,5 @@ func (s *AuthService) agentOwnerStanding(ctx context.Context, owner *User) error
 	if !isEligibleAgentOwner(owner) {
 		return errAgentOwnerNotActive
 	}
-	return s.refuseManagedAccount(ctx, owner)
+	return s.refuseManagedAccount(ctx, owner, "agent_owner")
 }

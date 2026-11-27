@@ -360,8 +360,13 @@ func (s *TeammateKeyService) activeKey(ctx context.Context, keyID string) (*Team
 // key's tokens as the grant rule would refuse a new grant. The grantor, and
 // the teammate's owner, must also be in standing in the tenant that manages
 // their account, if one does (managedStanding), so suspending or removing a
-// managed member stops the tokens at the next exchange. It reports whether
-// either is an account a tenant manages, whose tokens are short-lived.
+// managed member stops the tokens at the next exchange. The teammate's
+// owner, whoever granted the hire, must be an active person
+// (isEligibleAgentOwner): an owner who is deactivated, suspended or deleted
+// stands behind no teammate token. A refusal is ErrUnauthenticated; a
+// standing that could not be read is errManagedStandingUnread, which mints
+// nothing and may be retried. It reports whether either is an account a
+// tenant manages, whose tokens are short-lived.
 func (s *TeammateKeyService) ownerStandsBehind(ctx context.Context, project string, key *TeammateKey) (bool, error) {
 	users := s.base.WithProject(project)
 	teammate, err := users.GetUser(ctx, key.TeammateID)
@@ -375,7 +380,7 @@ func (s *TeammateKeyService) ownerStandsBehind(ctx context.Context, project stri
 	if !mayGrantHire(owner, teammate) {
 		return false, ErrUnauthenticated
 	}
-	if err := standingRefusal(s.standing.refuse(ctx, project, owner)); err != nil {
+	if err := standingRefusal(s.standing.refuse(ctx, project, owner, "teammate_exchange")); err != nil {
 		return false, err
 	}
 	teammateOwner := owner
@@ -384,7 +389,7 @@ func (s *TeammateKeyService) ownerStandsBehind(ctx context.Context, project stri
 			return false, err
 		}
 	}
-	if err := standingRefusal(s.standing.ownerStands(ctx, project, teammateOwner)); err != nil {
+	if err := standingRefusal(s.standing.ownerStands(ctx, project, teammateOwner, "teammate_exchange")); err != nil {
 		return false, err
 	}
 	return owner.ManagedByTenantID != "" || (teammateOwner != nil && teammateOwner.ManagedByTenantID != ""), nil
