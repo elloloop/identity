@@ -953,7 +953,8 @@ func New(deps Deps) (*Built, error) {
 		WithMinorDataMinimizer(minorData).
 		WithLoginGovernance(deps.LoginGovernance).
 		WithAccountDeletionGraceDays(deps.Config.AccountDeletionGraceDays).
-		WithExportMaxAuditEvents(deps.Config.ExportMaxAuditEvents)
+		WithExportMaxAuditEvents(deps.Config.ExportMaxAuditEvents).
+		WithManagedStanding(managedMembershipReader(deps), managedTenantStatusReader(deps))
 
 	var idvSvc *service.IdentityVerificationService
 	if deps.IDVProvider != nil {

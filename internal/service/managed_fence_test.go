@@ -151,7 +151,9 @@ func TestManagedSessionFence_ChangePassword(t *testing.T) {
 	db.addUserWithPassword("user-1", "ann@acme.example.com", "Ann", "member", StatusActive, hashPW(t, issuedPW))
 	db.nodes["user-1"].Payload[ufManagedByTenantID] = mTestTenant
 	repo := newFakeRepo()
-	svc := NewProfileService(repo, db, "test-tenant", audit.NewLogger(nil, "test-tenant", zap.NewNop()), zap.NewNop())
+	svc := NewProfileService(repo, db, "test-tenant", audit.NewLogger(nil, "test-tenant", zap.NewNop()), zap.NewNop()).
+		WithManagedStanding(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed))
+	db.nodes["user-1"].Payload[ufSetUpAt] = int64(1)
 
 	err := svc.ChangePassword(ctx, "user-1", SessionSignIn{SessionID: "sid-gone"}, issuedPW, strongPW)
 	require.ErrorIs(t, err, ErrUnauthenticated)
@@ -336,7 +338,7 @@ func TestAccessTokenExpiry_AgentsOfManagedOwnersGetAMinute(t *testing.T) {
 	far := now + (10 * time.Minute).Milliseconds()
 	assert.Equal(t, now+time.Minute.Milliseconds(), managedTokenCapMs(f.svc.cfg, managed, now, far), "a delegated or machine token of a managed owner")
 	assert.Equal(t, far, managedTokenCapMs(f.svc.cfg, f.owner, now, far), "a personal owner's")
-	assert.Equal(t, far, managedTokenCapMs(f.svc.cfg, nil, now, far))
+	assert.Equal(t, now+time.Minute.Milliseconds(), managedTokenCapMs(f.svc.cfg, nil, now, far), "no owner to judge fails closed")
 	soon := now + (10 * time.Second).Milliseconds()
 	assert.Equal(t, soon, managedTokenCapMs(f.svc.cfg, managed, now, soon), "a shorter expiry stands")
 }
@@ -365,4 +367,17 @@ func TestManagedSessionFence_CredentialCallsNeedTheTenantsStanding(t *testing.T)
 	memberships.get = membershipIn(MembershipStatusSuspended)
 	_, _, err = svc.BeginPasskeyRegistration(ctx, managed.ID, live, "laptop", false)
 	require.ErrorIs(t, err, ErrAccountNotActive, "a suspended membership")
+	db := newErrorDB()
+	db.addUserWithPassword("user-1", "bo@acme.example.com", "Bo", "member", StatusActive, hashPW(t, issuedPW))
+	db.nodes["user-1"].Payload[ufManagedByTenantID] = mTestTenant
+	db.nodes["user-1"].Payload[ufSetUpAt] = int64(1)
+	profile := NewProfileService(repo, db, "test-tenant", audit.NewLogger(nil, "test-tenant", zap.NewNop()), zap.NewNop()).
+		WithManagedStanding(memberships, tenants)
+	bo := liveSession(t, repo, "user-1")
+	require.ErrorIs(t, profile.ChangePassword(ctx, "user-1", bo, issuedPW, strongPW), ErrAccountNotActive, "ChangePassword with a suspended membership")
+	memberships.get = membershipIn(MembershipStatusActive)
+	tenants.status = func(string, string) (string, error) { return TenantStatusSuspended, nil }
+	require.ErrorIs(t, profile.ChangePassword(ctx, "user-1", bo, issuedPW, strongPW), ErrAccountNotActive, "ChangePassword in a suspended tenant")
+	tenants.status = func(string, string) (string, error) { return TenantStatusClaimed, nil }
+	require.NoError(t, profile.ChangePassword(ctx, "user-1", bo, issuedPW, strongPW))
 }

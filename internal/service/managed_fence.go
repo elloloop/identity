@@ -104,9 +104,9 @@ func (s *AuthService) accessTokenExpiresIn(user *User) int32 {
 // managedTokenCapMs caps expiresAtMs, a delegated or machine token's expiry
 // issued at nowMs for an agent whose owner is owner, at
 // GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS when a tenant manages the
-// owner.
+// owner, or when there is no owner to judge.
 func managedTokenCapMs(cfg *config.Config, owner *User, nowMs, expiresAtMs int64) int64 {
-	if owner == nil || owner.ManagedByTenantID == "" {
+	if owner != nil && owner.ManagedByTenantID == "" {
 		return expiresAtMs
 	}
 	return min(expiresAtMs, nowMs+cfg.ManagedAccessTokenExpiry().Milliseconds())

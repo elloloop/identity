@@ -45,7 +45,18 @@ type ProfileService struct {
 	// an unbounded audit scan. Wired from config via WithExportMaxAuditEvents.
 	exportMaxAuditEvents int
 
+	// standing judges a managed caller's standing in its tenant
+	// (WithManagedStanding); its zero value refuses every managed account.
+	standing managedStanding
+
 	nowFunc func() time.Time // overridable for testing
+}
+
+// WithManagedStanding wires the readers that judge a managed account's
+// standing in its tenant, and returns the service for chaining.
+func (s *ProfileService) WithManagedStanding(memberships ManagedMembershipReader, tenants ManagedTenantStatusReader) *ProfileService {
+	s.standing = managedStanding{memberships: memberships, tenants: tenants, logger: s.logger}
+	return s
 }
 
 // NewProfileService creates a ProfileService.
