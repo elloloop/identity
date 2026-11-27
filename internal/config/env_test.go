@@ -770,3 +770,21 @@ func TestManagedAccountsBoundTheSessionCache(t *testing.T) {
 		t.Fatalf("the bound applies only with managed accounts on: %v", err)
 	}
 }
+
+// The per-tenant address-check budget cannot be switched off: zero selects
+// the default and a negative value is refused.
+func TestRateLimitManagedAddressCheckPerTenant(t *testing.T) {
+	c := Load()
+	c.RateLimitManagedAddressCheckPerTenant = 0
+	if err := c.Validate(); err != nil || c.RateLimitManagedAddressCheckPerTenant != DefaultRateLimitManagedAddressCheckPerTenant {
+		t.Fatalf("zero = %d %v, want the default", c.RateLimitManagedAddressCheckPerTenant, err)
+	}
+	c.RateLimitManagedAddressCheckPerTenant = -1
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_RATE_LIMIT_MANAGED_ADDRESS_CHECK_PER_TENANT") {
+		t.Fatalf("negative = %v, want refused", err)
+	}
+	t.Setenv("GATEWAY_RATE_LIMIT_MANAGED_ADDRESS_CHECK_PER_TENANT", "7")
+	if got := Load().RateLimitManagedAddressCheckPerTenant; got != 7 {
+		t.Fatalf("env = %d, want 7", got)
+	}
+}

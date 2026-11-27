@@ -122,6 +122,9 @@ type MembershipService struct {
 	// managedSetups writes managed accounts' set-up links
 	// (WithManagedSetups); nil creates none.
 	managedSetups ManagedSetupStore
+	// addressChecks caps CheckManagedAddresses calls per tenant
+	// (WithManagedAddressCheckBudget); nil leaves the check unimplemented.
+	addressChecks *probeBudget
 	nowFunc       func() time.Time
 }
 

@@ -740,17 +740,13 @@ func TestListMyTenants_Handler(t *testing.T) {
 	}
 }
 
-func TestManagedAccountRPCs_ReturnUnimplemented(t *testing.T) {
+func TestResetManagedAccount_ReturnsUnimplemented(t *testing.T) {
 	t.Parallel()
 	for _, svc := range []*service.MembershipService{nil, newMembershipSvc(nil, nil, nil, nil)} {
 		srv := startMembershipServer(t, svc)
 		ctx := context.Background()
 
-		_, err := srv.client.CheckManagedAddresses(ctx,
-			withAuth(&identitypb.CheckManagedAddressesRequest{TenantId: "t", Addresses: []*identitypb.ManagedAddress{{Username: "ann", Domain: "acme.example.com"}}}, "u1"))
-		requireCode(t, err, connect.CodeUnimplemented)
-
-		_, err = srv.client.ResetManagedAccount(ctx,
+		_, err := srv.client.ResetManagedAccount(ctx,
 			withAuth(&identitypb.ResetManagedAccountRequest{TenantId: "t", UserId: "u2", DeliveryAddress: "ann@example.com"}, "u1"))
 		requireCode(t, err, connect.CodeUnimplemented)
 	}
@@ -838,6 +834,37 @@ func TestAccountKindToProto(t *testing.T) {
 	} {
 		if got := accountKindToProto(kind); got != want {
 			t.Fatalf("%q = %v, want %v", kind, got, want)
+		}
+	}
+}
+
+// Without a membership service, or without the managed store behind one,
+// the address check is unimplemented; with no caller it is unauthenticated.
+func TestCheckManagedAddresses_Unavailable(t *testing.T) {
+	t.Parallel()
+	req := &identitypb.CheckManagedAddressesRequest{TenantId: "t", Addresses: []*identitypb.ManagedAddress{{Username: "ann", Domain: "acme.example.com"}}}
+	for _, svc := range []*service.MembershipService{nil, newMembershipSvc(nil, nil, nil, nil)} {
+		srv := startMembershipServer(t, svc)
+		_, err := srv.client.CheckManagedAddresses(context.Background(), withAuth(req, "u1"))
+		requireCode(t, err, connect.CodeUnimplemented)
+	}
+	srv := startMembershipServer(t, newMembershipSvc(nil, nil, nil, nil))
+	_, err := srv.client.CheckManagedAddresses(context.Background(), connect.NewRequest(req))
+	requireCode(t, err, connect.CodeUnauthenticated)
+}
+
+func TestManagedAddressStatusToProto(t *testing.T) {
+	t.Parallel()
+	for status, want := range map[string]identitypb.ManagedAddressStatus{
+		service.ManagedAddressFree:                 identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_FREE,
+		service.ManagedAddressManagedByThis:        identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_MANAGED_BY_THIS_TENANT,
+		service.ManagedAddressHeldOutsideTheTenant: identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_ADDRESS_UNAVAILABLE,
+		service.ManagedAddressDomainUnverified:     identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_DOMAIN_UNVERIFIED,
+		service.ManagedAddressInvalid:              identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_INVALID,
+		"something else":                           identitypb.ManagedAddressStatus_MANAGED_ADDRESS_STATUS_UNSPECIFIED,
+	} {
+		if got := managedAddressStatusToProto(status); got != want {
+			t.Fatalf("%q = %v, want %v", status, got, want)
 		}
 	}
 }

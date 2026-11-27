@@ -512,6 +512,14 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitInvitationPerIP, 0),
 		},
 		{
+			// The address check reads who holds up to a hundred addresses a
+			// call, on the caller's verified domains only. Its own budget,
+			// the invitation budget's size, bounds how fast one source walks
+			// a domain's mailboxes.
+			PathPrefix: identityconnectgen.IdentityServiceCheckManagedAddressesProcedure, Tag: "managed_address_check",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitInvitationPerIP, 0),
+		},
+		{
 			// Reading an invitation by its token is unauthenticated: the
 			// token is long enough not to be guessed, and this bounds how
 			// fast one source can try.
@@ -1474,7 +1482,8 @@ func buildMembershipService(deps Deps, accounts service.Repository, users servic
 		deps.Config,
 		logger,
 	).WithAudit(auditLog).WithDomains(deps.DomainStore).WithAccounts(accounts).WithActiveProjects(deps.ActiveProjects).
-		WithManagedSetups(deps.ManagedSetups)
+		WithManagedSetups(deps.ManagedSetups).
+		WithManagedAddressCheckBudget(deps.Config.RateLimitManagedAddressCheckPerTenant, rateLimitWindow(deps.Config).Milliseconds())
 }
 
 // buildControlPlaneAdminService returns the wired ControlPlaneAdminService

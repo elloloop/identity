@@ -399,3 +399,9 @@ func TestToConnectErrorManagedAccount(t *testing.T) {
 		t.Fatalf("code = %v, want PermissionDenied", got)
 	}
 }
+
+func TestToConnectErrorManagedAddressCheckLimited(t *testing.T) {
+	if got := connect.CodeOf(toConnectError(service.ErrManagedAddressCheckLimited)); got != connect.CodeResourceExhausted {
+		t.Fatalf("code = %v, want ResourceExhausted", got)
+	}
+}
