@@ -168,50 +168,34 @@ func TestRefreshToken_ManagedStandingIsReadOnce(t *testing.T) {
 	require.Equal(t, before+1, reader.reads)
 }
 
-// Every rule an agent's owner is held to runs through agentOwnerStanding: an
-// agent of a managed owner who is suspended in the tenant, or whose tenant
-// is suspended, is refused its next session, and gets one again once the
-// owner is restored.
-func TestAgentSession_ManagedOwnerNeedsStandingInTheTenant(t *testing.T) {
+// A tenant's account owns no agent: an agent a managed account somehow
+// owns gets no session, even while the owner is in good standing.
+func TestAgentSession_ManagedOwnerStandsBehindNoAgent(t *testing.T) {
 	f := newAgentFixture(t)
 	reader := &managedMembershipsMock{get: membershipIn(MembershipStatusActive)}
-	tenants := tenantIn(TenantStatusClaimed)
-	f.svc.WithManagedMemberships(reader, tenants)
+	f.svc.WithManagedMemberships(reader, tenantIn(TenantStatusClaimed))
+	agent := seedAgent(f.repo, f.owner.ID)
+	_, refresh := issueAgentTokens(t, f, agent)
 	f.repo.mu.Lock()
 	f.owner.ManagedByTenantID, f.owner.SetUpAtMs = mTestTenant, 1
 	f.repo.mu.Unlock()
-	agent := seedAgent(f.repo, f.owner.ID)
-	_, refresh := issueAgentTokens(t, f, agent)
 
-	reader.get = membershipIn(MembershipStatusSuspended)
 	_, _, _, err := f.svc.RefreshToken(context.Background(), refresh, "", "", "")
 	require.ErrorIs(t, err, ErrAccountNotActive)
 	_, _, err = f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0, 0, "", "", credentialEnrollment{})
-	require.ErrorIs(t, err, ErrAccountNotActive, "the token chokepoint refuses too")
-
-	reader.get = membershipIn(MembershipStatusActive)
-	_, refresh = issueAgentTokens(t, f, agent)
-	_, _, _, err = f.svc.RefreshToken(context.Background(), refresh, "", "", "")
-	require.NoError(t, err, "restored, the owner's agent gets sessions again")
-
-	f.svc.WithManagedMemberships(reader, tenantIn(TenantStatusSuspended))
-	_, _, _, err = f.svc.RefreshToken(context.Background(), refresh, "", "", "")
-	require.Error(t, err, "a suspended tenant's managed owner stands behind no agent")
+	require.ErrorIs(t, err, errAgentOwnerNotActive, "the token chokepoint refuses too")
 }
 
 func TestAgentOwnerStanding_IsTheOneRule(t *testing.T) {
-	svc := newTestAuthService(t, newFakeRepo()).WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusSuspended)}, tenantIn(TenantStatusClaimed))
+	svc := newTestAuthService(t, newFakeRepo()).WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed))
 	ctx := managedScope(admitted())
 	require.NoError(t, svc.agentOwnerStanding(ctx, &User{ID: "p", Kind: UserKindPerson, Status: StatusActive}))
 	require.ErrorIs(t, svc.agentOwnerStanding(ctx, &User{ID: "a", Kind: UserKindAgent, Status: StatusActive}), errAgentOwnerNotActive)
-	require.ErrorIs(t, svc.agentOwnerStanding(ctx, &User{ID: "m", Kind: UserKindPerson, Status: StatusActive, ManagedByTenantID: mTestTenant, SetUpAtMs: 1}), ErrAccountNotActive)
+	require.ErrorIs(t, svc.agentOwnerStanding(ctx, &User{ID: "m", Kind: UserKindPerson, Status: StatusActive, ManagedByTenantID: mTestTenant, SetUpAtMs: 1}), errAgentOwnerNotActive)
 
 	oauth := &AgentOAuthService{auth: svc}
-	require.ErrorIs(t, oauth.ownerStanding(ctx, &User{ID: "a", Kind: UserKindAgent, Status: StatusActive}), ErrPermissionDenied)
-	unread := newTestAuthService(t, newFakeRepo())
-	err := (&AgentOAuthService{auth: unread}).ownerStanding(ctx, &User{ID: "m", Kind: UserKindPerson, Status: StatusActive, ManagedByTenantID: mTestTenant, SetUpAtMs: 1})
-	require.ErrorIs(t, err, errManagedStandingUnread)
-	require.False(t, isAgentOAuthAdmissionRefusal(err), "an unread standing does not end a grant")
+	require.ErrorIs(t, oauth.ownerStanding(ctx, &User{ID: "m", Kind: UserKindPerson, Status: StatusActive, ManagedByTenantID: mTestTenant, SetUpAtMs: 1}), ErrPermissionDenied)
+	require.False(t, isAgentOAuthAdmissionRefusal(errManagedStandingUnread), "an unread standing does not end a grant")
 	require.True(t, isAgentOAuthAdmissionRefusal(ErrAccountNotActive))
 }
 

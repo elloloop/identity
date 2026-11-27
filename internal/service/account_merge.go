@@ -263,6 +263,10 @@ func (s *AuthService) MergeAccounts(ctx context.Context, survivorID string, sign
 		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "second_factor_required")
 		return nil, fmt.Errorf("%w: the other account requires a second factor; turn two-step verification off there first", ErrMergeRefused)
 	}
+	if !managedAccountsMayMerge(survivor, other) {
+		s.auditMerge(ctx, survivor.ID, other.ID, ipAddr, userAgent, false, "managed_account")
+		return nil, ErrManagedAccount
+	}
 	s.resetFailedLogin(ctx, other)
 	merged, retired, err := mergeAccounts(ctx, repo, survivor, other, takeAddress, s.nowMs())
 	if err != nil {

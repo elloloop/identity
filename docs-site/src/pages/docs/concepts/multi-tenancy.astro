@@ -747,12 +747,13 @@ RestoreTenantMember(tenant_id, user_id)
     (<code>managed_account</code>), each logged as
     <code>managed_account_refused</code> with the path: creating a tenant,
     joining one by domain, accepting any invitation, leaving its tenant,
-    changing its email, linking a provider, deleting itself, owning an agent,
-    and merging with another account on either side. It signs in through no
+    changing its email, linking a provider, deleting itself, owning an agent
+    (created for it, offered to it, accepted by it or reassigned to it), and
+    merging with another account on either side. It signs in through no
     OAuth provider, since no tenant owns one yet: a provider account at the
     same address would otherwise control it. While it waits to be set up it is
-    sent no sign-in code or link (the request answers as for any address), and
-    a code or link already sent signs nothing in. The admin
+    sent no sign-in code, link or password reset (the request answers as for
+    any address), and one already sent signs nothing in and sets nothing. The admin
     <code>DeactivateUser</code>, <code>ReactivateUser</code>,
     <code>DeleteUser</code>, <code>ResetUserPassword</code> and
     <code>UpdateUser</code> refuse it too, and SCIM may read it but not

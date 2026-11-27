@@ -1051,13 +1051,7 @@ func (s *AuthService) upsertOAuthUser(ctx context.Context, identity *oauth.Ident
 
 	// 1. (provider, sub) lookup — survives provider-side email change.
 	if linked, err := s.findLinkedOAuthUser(ctx, identity, emailStr, now); err != nil || linked != nil {
-		if err == nil {
-			err = refuseManagedProvider(ctx, s.logger, s.projectID(ctx), linked, identity.Provider)
-		}
-		if err != nil {
-			return nil, false, err
-		}
-		return linked, false, nil
+		return linked, false, err
 	}
 
 	// 2 & 3. Email-based lookup, then create. Shared with passwordless
@@ -1145,7 +1139,9 @@ func (s *AuthService) refuseProviderSignIn(ctx context.Context, userID, provider
 }
 
 // findLinkedOAuthUser returns the account the provider identity is linked to,
-// with the provider's profile applied, or nil when it is linked to none.
+// with the provider's profile applied, or nil when it is linked to none. A
+// managed account the provider may not sign in to is refused before anything
+// is written to it (refuseManagedProvider).
 func (s *AuthService) findLinkedOAuthUser(ctx context.Context, identity *oauth.Identity, email string, nowMs int64) (*User, error) {
 	var linked *User
 	if identity.ProviderUserID != "" {
@@ -1155,6 +1151,9 @@ func (s *AuthService) findLinkedOAuthUser(ctx context.Context, identity *oauth.I
 		}
 	}
 	if linked != nil {
+		if err := refuseManagedProvider(ctx, s.logger, s.projectID(ctx), linked, identity.Provider); err != nil {
+			return nil, err
+		}
 		if err := s.applyOAuthProfileUpdates(ctx, linked, identity, email, nowMs); err != nil {
 			return nil, err
 		}

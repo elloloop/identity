@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/elloloop/identity/pkg/passwords"
 )
 
 // seedManaged seeds an account mTestTenant manages at email, active and set
@@ -28,8 +30,14 @@ func TestOAuthLogin_RefusesAManagedAccountByEmail(t *testing.T) {
 	ctx := context.Background()
 	managed := seedManaged(repo, "ann@acme.example.com", StatusActive)
 
-	_, err := svc.OAuthLogin(ctx, OAuthLoginParams{Code: fakeOAuthCode("ann@acme.example.com", "Ann", "", "google"), Provider: "google", RedirectURI: "https://app/cb"})
+	before, err := repo.GetUser(ctx, managed.ID)
+	require.NoError(t, err)
+	_, err = svc.OAuthLogin(ctx, OAuthLoginParams{Code: fakeOAuthCode("ann@acme.example.com", "Someone Else", "https://example.com/a.png", "google"), Provider: "google", RedirectURI: "https://app/cb"})
 	require.ErrorIs(t, err, ErrManagedAccount)
+	after, err := repo.GetUser(ctx, managed.ID)
+	require.NoError(t, err)
+	require.Equal(t, before.Name, after.Name, "the provider's profile is not applied")
+	require.Equal(t, before.EmailVerified, after.EmailVerified)
 	links, err := repo.ListOAuthIdentitiesForUser(ctx, managed.ID)
 	require.NoError(t, err)
 	require.Empty(t, links, "no provider is linked to a managed account")
@@ -43,8 +51,15 @@ func TestOAuthLogin_RefusesAManagedAccountByItsLink(t *testing.T) {
 	require.NoError(t, repo.CreateOAuthIdentity(ctx, &OAuthIdentity{
 		UserID: managed.ID, Provider: "google", ProviderUserID: "sub-ann@acme.example.com", EmailAtLinkTime: "ann@acme.example.com", CreatedAt: 1,
 	}))
-	_, err := svc.OAuthLogin(ctx, OAuthLoginParams{Code: fakeOAuthCode("ann@acme.example.com", "Ann", "", "google"), Provider: "google", RedirectURI: "https://app/cb"})
+	before, err := repo.GetUser(ctx, managed.ID)
+	require.NoError(t, err)
+	_, err = svc.OAuthLogin(ctx, OAuthLoginParams{Code: fakeOAuthCode("ann@acme.example.com", "Someone Else", "https://example.com/a.png", "google"), Provider: "google", RedirectURI: "https://app/cb"})
 	require.ErrorIs(t, err, ErrManagedAccount)
+	after, err := repo.GetUser(ctx, managed.ID)
+	require.NoError(t, err)
+	require.Equal(t, before.Name, after.Name, "the provider's profile is not applied")
+	require.Equal(t, before.AvatarURL, after.AvatarURL)
+	require.Equal(t, before.UpdatedAt, after.UpdatedAt, "nothing is written to the account")
 }
 
 func TestOAuthLogin_PersonalAccountsAreUnchanged(t *testing.T) {
@@ -281,4 +296,90 @@ func TestLinkIdentity_RefusesAManagedAccount(t *testing.T) {
 	links, err := repo.ListOAuthIdentitiesForUser(ctx, managed.ID)
 	require.NoError(t, err)
 	require.Empty(t, links)
+}
+
+// A managed account comes to own no agent by any path: an offer to it, its
+// acceptance of an offer, or an admin's reassignment of an orphan to it.
+func TestAgentTransfer_ToAManagedAccountIsRefused(t *testing.T) {
+	ctx := context.Background()
+
+	f := newAgentFixture(t)
+	managed := seedManaged(f.repo, "ann@acme.example.com", StatusActive)
+	agent := seedAgent(f.repo, f.owner.ID)
+	_, err := f.svc.TransferAgent(ctx, f.owner.ID, SessionSignIn{}, agent.ID, managed.ID, "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument, "an offer to a managed account")
+	stored, _ := f.repo.GetUser(ctx, agent.ID)
+	require.Empty(t, stored.PendingOwnerUserID)
+
+	f.repo.mu.Lock()
+	f.repo.users[agent.ID].PendingOwnerUserID = managed.ID
+	f.repo.mu.Unlock()
+	_, err = f.svc.AcceptAgentTransfer(ctx, managed.ID, agent.ID, "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument, "a managed account accepting an offer")
+	stored, _ = f.repo.GetUser(ctx, agent.ID)
+	require.Equal(t, f.owner.ID, stored.OwnerUserID)
+
+	g := newAgentFixture(t)
+	managed = seedManaged(g.repo, "ann@acme.example.com", StatusActive)
+	orphan := seedAgent(g.repo, g.owner.ID)
+	require.NoError(t, g.repo.DeleteUser(ctx, g.owner.ID))
+	_, err = g.svc.TransferAgent(ctx, g.admin.ID, SessionSignIn{}, orphan.ID, managed.ID, "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument, "an orphan reassigned to a managed account")
+	stored, _ = g.repo.GetUser(ctx, orphan.ID)
+	require.Equal(t, g.owner.ID, stored.OwnerUserID)
+}
+
+// An account waiting for its set-up is sent no password reset, and a reset
+// token issued for it sets nothing.
+func TestPasswordReset_InvitedManagedAccountGetsNone(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	mailer := &recordingMailer{}
+	svc.mailer = mailer
+	invited := seedManaged(repo, "ann@acme.example.com", StatusInvited)
+	ctx := context.Background()
+
+	svc.sendPasswordResetNow(ctx, "ann@acme.example.com", emailLink{})
+	require.Zero(t, mailer.count(), "no reset mail to a waiting managed account")
+
+	require.NoError(t, repo.CreatePasswordResetToken(ctx, &PasswordResetToken{
+		TokenHash: sha256Hex("reset-token"), UserID: invited.ID, Email: invited.Email, ExpiresAt: svc.nowMs() + 60_000, CreatedAt: svc.nowMs(),
+	}))
+	before, err := repo.GetUser(ctx, invited.ID)
+	require.NoError(t, err)
+	err = svc.ConfirmPasswordReset(ctx, "reset-token", signupPassword)
+	require.ErrorIs(t, err, ErrManagedAccount)
+	after, err := repo.GetUser(ctx, invited.ID)
+	require.NoError(t, err)
+	require.Equal(t, before.PasswordHash, after.PasswordHash, "the token sets no password")
+
+	repo.mu.Lock()
+	invited.Status = StatusActive
+	repo.mu.Unlock()
+	svc.sendPasswordResetNow(ctx, "ann@acme.example.com", emailLink{})
+	require.Equal(t, 1, mailer.count(), "a set-up managed account still gets a reset")
+}
+
+// The merge refuses a managed account on the other side before it touches
+// that account's failed-sign-in count.
+func TestMergeAccounts_RefusesAManagedOtherBeforeTouchingIt(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	svc.cfg.AccountMergeEnabled = true
+	hash, err := passwords.Hash(signupPassword)
+	require.NoError(t, err)
+	survivor := seedUser(repo, "bob@example.com", hash, StatusActive)
+	other := seedManaged(repo, "ann@acme.example.com", StatusActive)
+	repo.mu.Lock()
+	survivor.EmailVerified = true
+	other.PasswordHash = hash
+	other.FailedLoginCount = 2
+	repo.mu.Unlock()
+
+	_, err = svc.MergeAccounts(context.Background(), survivor.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}},
+		"ann@acme.example.com", signupPassword, "", "", false)
+	require.ErrorIs(t, err, ErrManagedAccount)
+	got, err := repo.GetUser(context.Background(), other.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, got.FailedLoginCount, "the other account's failed-sign-in count is untouched")
 }

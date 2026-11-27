@@ -234,12 +234,10 @@ func seedAgentRefresh(t *testing.T, h *RedesignHarness, agentID string) string {
 	return raw
 }
 
-// TestRedesign_ManagedAccounts_AgentsFollowTheirOwnersStanding: an agent
-// whose owner is a managed account refreshes while the owner is in good
-// standing, is refused once the owner is suspended in the tenant, and
-// refreshes again once the owner is restored; a suspended tenant's managed
-// owner, and the agent with them, hold no session.
-func TestRedesign_ManagedAccounts_AgentsFollowTheirOwnersStanding(t *testing.T) {
+// TestRedesign_ManagedAccounts_AgentsOfAManagedOwnerGetNoSession: an agent
+// whose owner is a managed account gets no session, whatever the owner's
+// standing; a suspended tenant's managed account signs nothing in.
+func TestRedesign_ManagedAccounts_AgentsOfAManagedOwnerGetNoSession(t *testing.T) {
 	h := startRedesignHarnessWith(t, enableManagedSignIn)
 	setProjectConfig(t, h, managedAccountsConfig)
 	ctx := context.Background()
@@ -251,21 +249,8 @@ func TestRedesign_ManagedAccounts_AgentsFollowTheirOwnersStanding(t *testing.T) 
 	if err != nil {
 		t.Fatalf("seed the agent: %v", err)
 	}
-
-	if _, err := refresh(h, seedAgentRefresh(t, h, agentID)); err != nil {
-		t.Fatalf("agent refresh while the owner is active: %v", err)
-	}
-	if _, err := mt.owner.client.SuspendTenantMember(ctx, connect.NewRequest(&identitypb.SuspendTenantMemberRequest{TenantId: mt.tenantID, UserId: ownerID})); err != nil {
-		t.Fatalf("SuspendTenantMember: %v", err)
-	}
 	if _, err := refresh(h, seedAgentRefresh(t, h, agentID)); connect.CodeOf(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("agent refresh while the owner is suspended = %v, want FailedPrecondition", err)
-	}
-	if _, err := mt.owner.client.RestoreTenantMember(ctx, connect.NewRequest(&identitypb.RestoreTenantMemberRequest{TenantId: mt.tenantID, UserId: ownerID})); err != nil {
-		t.Fatalf("RestoreTenantMember: %v", err)
-	}
-	if _, err := refresh(h, seedAgentRefresh(t, h, agentID)); err != nil {
-		t.Fatalf("agent refresh once the owner is restored: %v", err)
+		t.Fatalf("agent refresh with a managed owner = %v, want FailedPrecondition", err)
 	}
 
 	conn, err := pgx.Connect(ctx, os.Getenv("GATEWAY_POSTGRES_DSN"))
@@ -275,9 +260,6 @@ func TestRedesign_ManagedAccounts_AgentsFollowTheirOwnersStanding(t *testing.T) 
 	defer func() { _ = conn.Close(ctx) }()
 	if _, err := conn.Exec(ctx, `UPDATE tenants SET status = 'suspended' WHERE project_id = $1 AND id = $2`, h.ProjectID, mt.tenantID); err != nil {
 		t.Fatalf("suspend the tenant: %v", err)
-	}
-	if _, err := refresh(h, seedAgentRefresh(t, h, agentID)); connect.CodeOf(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("agent refresh in a suspended tenant = %v, want FailedPrecondition", err)
 	}
 	if _, err := brandedClient(h, "").PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{Email: "pat@" + mt.domain, Password: validPassword})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("sign-in in a suspended tenant = %v, want FailedPrecondition", err)
