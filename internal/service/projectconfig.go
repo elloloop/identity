@@ -897,14 +897,16 @@ func (a ProjectAccessConfig) denies(cfg *config.Config, email canonicalEmail) bo
 // "spec" struct; a second copy of the field list is the same mistake one level up.
 func NewDefaultProjectAccess(cfg *config.Config) (ProjectAccessConfig, error) {
 	return NewProjectAccessConfig(ProjectAccessConfig{
-		Mode:                    cfg.DefaultProjectAccessMode,
-		AllowedEmails:           cfg.DefaultProjectAllowedEmailList(),
-		AllowedDomains:          cfg.DefaultProjectAllowedDomainList(),
-		BlockPublicEmailDomains: cfg.DefaultProjectBlockPublicEmailDomains,
-		BlockedDomains:          cfg.DefaultProjectBlockedEmailDomainList(),
-		ExemptEmails:            cfg.DefaultProjectExemptEmailList(),
-		AdmitTenantInvitations:  cfg.DefaultProjectAdmitTenantInvitations,
-		AdmitDomainJoin:         cfg.DefaultProjectAdmitDomainJoin,
+		Mode:                            cfg.DefaultProjectAccessMode,
+		AllowedEmails:                   cfg.DefaultProjectAllowedEmailList(),
+		AllowedDomains:                  cfg.DefaultProjectAllowedDomainList(),
+		BlockPublicEmailDomains:         cfg.DefaultProjectBlockPublicEmailDomains,
+		BlockedDomains:                  cfg.DefaultProjectBlockedEmailDomainList(),
+		ExemptEmails:                    cfg.DefaultProjectExemptEmailList(),
+		AdmitTenantInvitations:          cfg.DefaultProjectAdmitTenantInvitations,
+		AdmitDomainJoin:                 cfg.DefaultProjectAdmitDomainJoin,
+		AdmitManagedAccounts:            cfg.DefaultProjectAdmitManagedAccounts,
+		AdmitManagedAccountsSelfService: cfg.DefaultProjectAdmitManagedAccountsSelfService,
 	})
 }
 

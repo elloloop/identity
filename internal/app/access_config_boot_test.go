@@ -136,3 +136,32 @@ func TestNew_DefaultProjectAdmitDomainJoinNeedsInviteMode(t *testing.T) {
 		}
 	}
 }
+
+// The default project's self-service managed-account switch needs the first
+// one, so on its own it stops the boot, naming both variables.
+func TestNew_DefaultProjectManagedAccountsSelfServiceNeedsTheFirst(t *testing.T) {
+	_, err := New(bootDeps(t, &config.Config{DefaultProjectAdmitManagedAccountsSelfService: true}))
+	if err == nil {
+		t.Fatal("expected New to fail on the self-service switch alone")
+	}
+	for _, want := range []string{"GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE", "admit_managed_accounts_self_service is only valid with admit_managed_accounts"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("boot error %q does not say %q", err, want)
+		}
+	}
+}
+
+// A membership-capable build serves the default project's managed-account
+// switch.
+func TestCheckTenantFeatures_DefaultProjectManagedAccountsNeedTheMembershipStores(t *testing.T) {
+	cfg := &config.Config{DefaultProjectAdmitManagedAccounts: true}
+	if err := checkTenantFeatures(governanceDeps(cfg), zap.NewNop()); err != nil {
+		t.Fatalf("with the stores: %v", err)
+	}
+	d := governanceDeps(cfg)
+	d.MembershipStore = nil
+	err := checkTenantFeatures(d, zap.NewNop())
+	if err == nil || !strings.Contains(err.Error(), "GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS") {
+		t.Fatalf("without the membership store the boot must refuse, naming the variable: %v", err)
+	}
+}

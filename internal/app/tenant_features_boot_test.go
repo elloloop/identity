@@ -60,6 +60,9 @@ func TestNew_RefusesTenantSwitchesWithoutTheirStores(t *testing.T) {
 			c.DefaultProjectAccessMode = "invite"
 			c.DefaultProjectAdmitDomainJoin = true
 		},
+		"GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS": func(c *config.Config) {
+			c.DefaultProjectAdmitManagedAccounts = true
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := newTestConfig()
