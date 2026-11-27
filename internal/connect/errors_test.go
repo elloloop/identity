@@ -405,3 +405,17 @@ func TestToConnectErrorManagedAddressCheckLimited(t *testing.T) {
 		t.Fatalf("code = %v, want ResourceExhausted", got)
 	}
 }
+
+func TestToConnectErrorManagedAccountReset(t *testing.T) {
+	t.Parallel()
+	for err, want := range map[error]connect.Code{
+		service.ErrManagedResetReauthenticationRequired:               connect.CodePermissionDenied,
+		service.ErrManagedResetLimited:                                connect.CodeResourceExhausted,
+		service.ErrManagedAccountsNotAdmitted:                         connect.CodeFailedPrecondition,
+		fmt.Errorf("wrapped: %w", service.ErrManagedSetupNeedsMailer): connect.CodeFailedPrecondition,
+	} {
+		if got := toConnectError(err).Code(); got != want {
+			t.Errorf("%v: code = %v, want %v", err, got, want)
+		}
+	}
+}

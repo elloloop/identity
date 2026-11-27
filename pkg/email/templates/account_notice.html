@@ -27,7 +27,7 @@
           </tr>
           <tr>
             <td style="padding:24px 40px 36px;">
-              <p style="margin:0; font-size:13px; line-height:1.55; color:#9ca3af;">If this was you, there is nothing to do. If it was not, sign in and review your account, or contact support: your account may be compromised.</p>
+              <p style="margin:0; font-size:13px; line-height:1.55; color:#9ca3af;">{{if .Advice}}{{.Advice}}{{else}}If this was you, there is nothing to do. If it was not, sign in and review your account, or contact support: your account may be compromised.{{end}}</p>
             </td>
           </tr>
           {{- if or .ProductName .SupportEmail}}

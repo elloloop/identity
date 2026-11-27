@@ -320,6 +320,41 @@ RestoreTenantMember(tenant_id, user_id)
     records the status the membership had, so removing a suspended member
     shows as one.
   </p>
+  <h3 id="taking-back-a-managed-account">Taking back a managed account</h3>
+  <p>
+    An account a tenant manages belongs to the tenant, so suspending or
+    removing it acts on the account as well as the membership. Both end the
+    account's sessions and refresh tokens, and deactivate its agents, in the
+    same transaction, so its access tokens stop working on the next request
+    (on another replica, within <code>GATEWAY_SESSION_CACHE_TTL_SECONDS</code>).
+    A removal also deactivates the account, keeping its id and address; a
+    managed account cannot remove itself. When the account can no longer be
+    trusted, an owner or admin who signed in recently resets it:
+  </p>
+  <Code
+    code={`ResetManagedAccount(tenant_id, user_id, delivery_address)
+  -> invitation { is_managed_setup, account_address, email: delivery_address, role }, email_send_status
+  -> INVALID_ARGUMENT      # user_id is you, a missing id, or an unusable address
+  -> PERMISSION_DENIED     # not an active owner or admin, an admin resetting an owner, or no recent sign-in (reauthentication_required)
+  -> FAILED_PRECONDITION   # managed accounts not enabled or admitted, or no mail provider
+  -> NOT_FOUND             # not one of the tenant's managed accounts with an active or suspended membership
+  -> RESOURCE_EXHAUSTED    # too many set-up links to delivery_address, or the tenant's or your invitation cap`}
+    lang="bash"
+  />
+  <p>
+    A reset signs the account out everywhere, spends its outstanding links
+    and codes, clears its password, passkeys, linked providers, recovery
+    emails, two-step methods, backup codes and phone, deactivates its
+    agents, and makes it <code>invited</code> with its membership unchanged.
+    Every address it had is told, then a new set-up link with the member's
+    role goes to <code>delivery_address</code>, and only that link sets the
+    account up again. When an admin resets another admin, every active
+    owner of the tenant is mailed who reset which account. The reset is audited as
+    <code>managed_account_reset</code>, with a note to review the
+    invitations and accounts the reset account made. A managed account's
+    password is reset by email only while it is active, and only at its own
+    address; once it cannot sign in, only its tenant brings it back.
+  </p>
   <h3 id="setting-a-members-role">Setting a member's role</h3>
   <p>
     An owner or admin makes a member an admin, or an admin a member:

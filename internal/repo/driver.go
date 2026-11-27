@@ -204,6 +204,16 @@ func (b *Built) MembershipStoreIface() service.MembershipStore {
 	return b.MembershipStore
 }
 
+// ManagedMemberStore returns the store that suspends, removes and resets
+// managed accounts, or a true nil when this build has no control plane
+// (memory, SQLite). It is the membership store: only postgres has one.
+func (b *Built) ManagedMemberStore() service.ManagedMemberStore {
+	if b.MembershipStore == nil {
+		return nil
+	}
+	return b.MembershipStore
+}
+
 // InvitationStoreIface returns the invitation governance store as a
 // driver-agnostic interface, or a true nil when this build has no control
 // plane (memory) — avoiding the typed-nil trap.

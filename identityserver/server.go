@@ -132,6 +132,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var membershipStore service.MembershipStore
 	var invitationStore service.InvitationStore
 	var managedSetups service.ManagedSetupStore
+	var managedMembers service.ManagedMemberStore
 	var controlPlaneStore service.ControlPlaneProjectStore
 	var activeProjects service.ActiveProjectStore
 	var projectLister service.ProjectLister
@@ -169,6 +170,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		membershipStore = built.MembershipStoreIface()
 		invitationStore = built.InvitationStoreIface()
 		managedSetups = built.ManagedSetupStore()
+		managedMembers = built.ManagedMemberStore()
 		controlPlaneStore = built.ControlPlaneStore()
 		activeProjects = built.ActiveProjects()
 		projectLister = built.ProjectLister()
@@ -235,6 +237,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		MembershipStore:       membershipStore,
 		InvitationStore:       invitationStore,
 		ManagedSetups:         managedSetups,
+		ManagedMembers:        managedMembers,
 		ControlPlaneStore:     controlPlaneStore,
 		ActiveProjects:        activeProjects,
 		Projects:              projectLister,

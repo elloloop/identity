@@ -80,7 +80,9 @@ func formatExpiresIn(d time.Duration) string {
 // persistence or email dispatch are logged internally; the caller is told
 // nothing. The one error it returns is ErrInvalidArgument for refused link
 // params, which are checked first and from the request alone, so that
-// answer is the same for every email.
+// answer is the same for every email. An account a tenant manages is mailed a
+// reset only while it is active, and only at its own address
+// (managedPasswordResettable).
 func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string, params EmailLinkParams) error {
 	link, err := s.checkEmailLinkParams(params)
 	if err != nil {
@@ -142,6 +144,10 @@ func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string
 		_ = refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, "password_reset_send:invited")
 		return
 	}
+	if !managedPasswordResettable(user) {
+		s.logger.Info("password_reset_refused_managed_not_active", zap.String("user_id", user.ID))
+		return
+	}
 
 	if !s.emailThrottle.allow(emailAddr, s.nowMs()) {
 		s.logger.Info("password_reset_throttled", zap.String("email", redactEmail(emailAddr)))
@@ -196,6 +202,28 @@ func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string
 	)
 }
 
+// managedPasswordResettable reports whether user's password may be reset by
+// email: always for a personal account, and for an account a tenant manages
+// only while it is active. A managed account waiting to be set up, or one its
+// tenant removed, comes back only through its tenant (a set-up link, or a
+// reset by an owner or admin), and the reset link goes only to the account's
+// own address, never to a recovery email.
+func managedPasswordResettable(user *User) bool {
+	return user.ManagedByTenantID == "" || isActiveStatus(user.Status)
+}
+
+// resetTokenRefusal is the log event that refuses rec for user's password,
+// or "" when it may set it.
+func resetTokenRefusal(rec *PasswordResetToken, user *User) string {
+	switch {
+	case !resetTokenBindsAddress(rec.Email, user.Email):
+		return "password_reset_address_changed"
+	case !managedPasswordResettable(user):
+		return "password_reset_refused_managed_not_active"
+	}
+	return ""
+}
+
 // resetTokenBindsAddress reports whether the account still holds the address
 // a reset token was issued for. An account without an address (a username
 // account an admin reset) is matched only by a token issued without one.
@@ -213,8 +241,9 @@ func resetTokenBindsAddress(issuedFor, current string) bool {
 //
 // Token must be unconsumed and unexpired, and the account must still hold
 // the address the token was issued for: whoever keeps a mailbox the account
-// has moved away from must not keep a way in. That refusal reads as an
-// invalid token and spends it. On success, every refresh
+// has moved away from must not keep a way in. An account a tenant manages
+// must also still be active (managedPasswordResettable). Either refusal reads
+// as an invalid token and spends it. On success, every refresh
 // token belonging to the user is revoked — OAuth 2.1 §4.13 best
 // practice for any credential change forces re-login on all devices.
 func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPassword string) error {
@@ -255,12 +284,12 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	if user.ManagedByTenantID != "" && user.Status == StatusInvited {
 		return refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, "password_reset_confirm:invited")
 	}
-	if !resetTokenBindsAddress(rec.Email, user.Email) {
+	if refusal := resetTokenRefusal(rec, user); refusal != "" {
 		if err := s.repo(ctx).MarkPasswordResetTokenConsumed(ctx, rec.NodeID, s.nowMs()); err != nil {
 			s.logger.Warn("password_reset_consume_failed",
 				zap.String("user_id", user.ID), zap.Error(err))
 		}
-		s.logger.Info("password_reset_address_changed", zap.String("user_id", user.ID))
+		s.logger.Info(refusal, zap.String("user_id", user.ID))
 		return fmt.Errorf("%w: invalid reset token", ErrUnauthenticated)
 	}
 

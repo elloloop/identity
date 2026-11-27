@@ -42,9 +42,11 @@ const (
 	// address before it is kept as an account's recovery email.
 	TemplateRecoveryEmailCode = "recovery_email_code"
 	// TemplateAccountNotice is the security notice sent to an account's
-	// addresses when its recovery emails or phone change, or a recovery
-	// email signs in to it. Headline is the subject and Detail plain
-	// sentences saying what happened.
+	// addresses when its recovery emails or phone change, a recovery email
+	// signs in to it, or the tenant that manages it resets it. Headline is
+	// the subject, Detail plain sentences saying what happened, and Advice,
+	// when set, what to do about it in place of the advice to an account's
+	// owner.
 	TemplateAccountNotice = "account_notice"
 	// TemplatePhoneCodeCapture carries a phone verification code to the
 	// account's own address on a local deployment that captures phone codes

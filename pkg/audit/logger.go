@@ -492,6 +492,15 @@ const (
 	// already has records nothing.
 	EventTenantMemberRoleChanged EventType = "tenant_member_role_changed"
 
+	// EventManagedAccountReset records a tenant owner or admin taking back an
+	// account the tenant manages (ResetManagedAccount): actor the caller and
+	// target the account, with the project and tenant ids, the member's role,
+	// the redacted address the new set-up link went to, the number of
+	// sessions ended and the agents deactivated in the details, and a note
+	// that the invitations and accounts the reset account created should be
+	// reviewed, as whoever held it may have made them.
+	EventManagedAccountReset EventType = "managed_account_reset"
+
 	// EventTenantInvitationRevoked records a tenant owner or admin revoking a
 	// pending invitation (RevokeTenantInvitation): actor the caller and
 	// target the invitation, with the project and tenant ids, the role it
@@ -647,6 +656,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantMemberSuspended:         {},
 	EventTenantMemberRestored:          {},
 	EventTenantMemberRoleChanged:       {},
+	EventManagedAccountReset:           {},
 	EventTenantInvitationRevoked:       {},
 	EventManagedAccountCreated:         {},
 	EventManagedAccountSetupResent:     {},

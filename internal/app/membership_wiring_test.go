@@ -2,10 +2,12 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
+	"github.com/elloloop/identity/internal/middleware"
 	"github.com/elloloop/identity/internal/service"
 	"github.com/elloloop/identity/pkg/email"
 )
@@ -33,7 +35,7 @@ func TestBuildMembershipService(t *testing.T) {
 		MembershipStore: &stubMembershipStore{},
 		TenantStore:     &stubTenantStore{},
 	}
-	if got := buildMembershipService(full, nil, users, mailer, false, nil, logger); got == nil {
+	if got := buildMembershipService(full, nil, users, mailer, false, nil, logger, nil); got == nil {
 		t.Fatal("all stores present: want non-nil MembershipService, got nil")
 	}
 
@@ -45,7 +47,7 @@ func TestBuildMembershipService(t *testing.T) {
 	} {
 		d := full
 		mutate(&d)
-		if got := buildMembershipService(d, nil, users, mailer, false, nil, logger); got != nil {
+		if got := buildMembershipService(d, nil, users, mailer, false, nil, logger, nil); got != nil {
 			t.Errorf("%s: want nil MembershipService, got non-nil", name)
 		}
 	}
@@ -74,3 +76,16 @@ func TestManagedTenantStatusReader(t *testing.T) {
 		t.Fatalf("tenant store present: want it as the reader, got %v", got)
 	}
 }
+
+func TestSessionInvalidator(t *testing.T) {
+	if got := sessionInvalidator(nil); got != nil {
+		t.Fatalf("no session cache: want a nil invalidator, got %#v", got)
+	}
+	cache := middleware.NewSessionCache(&stubSessionSource{}, time.Minute, nil)
+	if got := sessionInvalidator(cache); got != cache {
+		t.Fatalf("session cache: want the cache, got %#v", got)
+	}
+}
+
+// stubSessionSource is a session source no test reads from.
+type stubSessionSource struct{ service.Repository }
