@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/pkg/audit"
 	"github.com/elloloop/identity/pkg/email"
+	"github.com/elloloop/identity/pkg/emailaddr"
 )
 
 var (
@@ -46,7 +46,9 @@ func (s *MembershipService) WithManagedMembers(managed ManagedMemberStore, sessi
 }
 
 // managedByTenant reports whether targetUserID's account is one tenantID
-// manages. Which tenant manages an account is fixed when the account is
+// manages, whether or not managed accounts are on: turning them off must not
+// leave an existing managed account's sessions running after its suspension
+// or removal. Which tenant manages an account is fixed when the account is
 // created, so the store's transaction finds what this read found.
 func (s *MembershipService) managedByTenant(ctx context.Context, projectID, tenantID, targetUserID string) (bool, error) {
 	user, err := s.users.GetUserInProject(ctx, projectID, targetUserID)
@@ -188,7 +190,7 @@ func (s *MembershipService) ResetManagedAccount(ctx context.Context, callerID st
 	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
 		return refuse("held_session", err)
 	}
-	if !s.signedInWithin(signIn.AuthTimeSec, s.config().AccountMergeReauthMaxAge()) {
+	if !signedInWithin(s.nowFunc(), signIn.AuthTimeSec, s.config().AccountMergeReauthMaxAge()) {
 		return refuse("reauthentication_required", ErrManagedResetReauthenticationRequired)
 	}
 	if tenantID == "" || userID == "" {
@@ -197,9 +199,11 @@ func (s *MembershipService) ResetManagedAccount(ctx context.Context, callerID st
 	if userID == callerID {
 		return refuse("own_account", fmt.Errorf("%w: you cannot reset your own account", ErrInvalidArgument))
 	}
-	delivery, err := normalizeInvitationEmail(deliveryAddress)
-	if err != nil {
-		return refuse("invalid_argument", err)
+	delivery, usable := emailaddr.Mailbox(deliveryAddress)
+	if delivery == "" || !usable {
+		s.logger.Info("managed_account_reset_refused", append(fields, zap.String("reason", "invalid_argument"),
+			zap.String("to", redactEmail(deliveryAddress)))...)
+		return nil, fmt.Errorf("%w: delivery_address is not a usable address", ErrInvalidArgument)
 	}
 	callerMembership, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID)
 	if err != nil {
@@ -240,12 +244,7 @@ func (s *MembershipService) ResetManagedAccount(ctx context.Context, callerID st
 		zap.String("to", redactEmail(delivery)),
 		zap.Int("sessions_ended", len(done.RevokedSessionIDs)),
 		zap.Int("agents_deactivated", len(done.DeactivatedAgentIDs)))...)
-	var owners []*User
-	if callerMembership.Role == RoleAdmin && done.Invitation.Role == RoleAdmin {
-		if owners, err = s.activeOwners(ctx, projectID, tenantID); err != nil {
-			s.logger.Warn("managed_account_reset_owners_unread", append(fields, zap.Error(err))...)
-		}
-	}
+	notifyOwners := callerMembership.Role == RoleAdmin && done.Invitation.Role == RoleAdmin
 	if s.audit != nil {
 		s.audit.Log(ctx, audit.EventManagedAccountReset,
 			audit.WithActor(callerID), audit.WithTarget(userID),
@@ -258,28 +257,23 @@ func (s *MembershipService) ResetManagedAccount(ctx context.Context, callerID st
 				"sessions_ended":     len(done.RevokedSessionIDs),
 				"agents_deactivated": done.DeactivatedAgentIDs,
 				"review":             managedResetReviewNote,
-				"owners_notified":    len(owners),
+				"owners_told":        notifyOwners,
 			}),
 		)
 	}
-	s.sendResetNotices(ctx, done)
-	s.tellOwnersOfAdminReset(ctx, projectID, callerID, done.User, owners)
+	s.dispatchNotice(ctx, "managed_account_reset_notice", func(ctx context.Context) {
+		s.sendResetNotices(ctx, done)
+	})
+	if notifyOwners {
+		s.dispatchNotice(ctx, "managed_account_reset_owner_notice", func(ctx context.Context) {
+			s.tellOwnersOfAdminReset(ctx, projectID, tenantID, callerID, done.User, ip, userAgent)
+		})
+	}
 	out := &ManagedAccountReset{Invitation: done.Invitation, EmailStatus: EmailSent}
 	if err := s.sendManagedSetupEmail(ctx, &ManagedSetupIssued{User: done.User, Invitation: done.Invitation}, rawToken); err != nil {
 		out.EmailStatus = EmailSendFailed
 	}
 	return out, nil
-}
-
-// signedInWithin reports whether a session's sign-in (the access token's
-// auth_time, in epoch seconds) is at most maxAge old, allowing for clock
-// drift between replicas as AuthService.signedInWithin does.
-func (s *MembershipService) signedInWithin(authTimeSec int64, maxAge time.Duration) bool {
-	if authTimeSec <= 0 {
-		return false
-	}
-	age := s.nowFunc().Unix() - authTimeSec
-	return age >= -int64(authTimeClockSkew.Seconds()) && age <= int64(maxAge.Seconds())
 }
 
 // sendResetNotices tells every address the account had before its reset
@@ -291,7 +285,7 @@ func (s *MembershipService) sendResetNotices(ctx context.Context, done *ManagedR
 	advice := "If you did not expect this, contact your organization's administrator."
 	brand := resolveBranding(ctx, s.config(), "")
 	for _, addr := range done.NoticeEmails {
-		html, text, err := renderAccountNotice(brand, displayNameOrEmail(done.User), accountNotice{headline: headline, detail: detail, advice: advice})
+		html, text, err := renderAccountNotice(brand, done.User.Name, accountNotice{headline: headline, detail: detail, advice: advice})
 		if err == nil {
 			msg := email.Message{To: addr, From: s.config().SMTPFrom, Subject: headline, HTML: html, Text: text}
 			brand.applyTo(&msg)
@@ -305,21 +299,31 @@ func (s *MembershipService) sendResetNotices(ctx context.Context, done *ManagedR
 }
 
 // activeOwners returns the accounts of tenantID's active owners that are
-// active and have an address.
+// active and have an address: one read of the memberships and one of the
+// accounts.
 func (s *MembershipService) activeOwners(ctx context.Context, projectID, tenantID string) ([]*User, error) {
+	if s.accounts == nil {
+		return nil, fmt.Errorf("%w: the tenant's owners cannot be read", ErrServiceUnavailable)
+	}
 	members, err := s.memberships.ListMembershipsForTenant(ctx, projectID, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	var owners []*User
+	var ids []string
 	for _, m := range members {
-		if m.Role != RoleOwner || m.Status != MembershipStatusActive {
-			continue
+		if m.Role == RoleOwner && m.Status == MembershipStatusActive {
+			ids = append(ids, m.UserID)
 		}
-		u, err := s.users.GetUserInProject(ctx, projectID, m.UserID)
-		if err != nil {
-			return nil, err
-		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	users, err := s.accounts.WithProject(projectID).GetUsersByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	var owners []*User
+	for _, u := range users {
 		if u != nil && u.Email != "" && isActiveStatus(u.Status) {
 			owners = append(owners, u)
 		}
@@ -327,20 +331,23 @@ func (s *MembershipService) activeOwners(ctx context.Context, projectID, tenantI
 	return owners, nil
 }
 
-// tellOwnersOfAdminReset tells each of owners that the admin callerID reset
-// the sign-in of account, another admin: one admin taking back another's
-// account is a change the owners must see. Best-effort: a notice that cannot
+// tellOwnersOfAdminReset tells every active owner of tenantID that the
+// admin callerID reset the sign-in of account, another admin: one admin
+// taking back another's account is a change the owners must see. The admin
+// is named by address only, never by a name an admin can edit. The owners
+// told, those a notice reached, are audited as
+// EventManagedAccountResetOwnersNotified. Best-effort: a notice that cannot
 // be rendered or sent is logged, and the reset stands.
-func (s *MembershipService) tellOwnersOfAdminReset(ctx context.Context, projectID, callerID string, account *User, owners []*User) {
-	if len(owners) == 0 {
+func (s *MembershipService) tellOwnersOfAdminReset(ctx context.Context, projectID, tenantID, callerID string, account *User, ip, userAgent string) {
+	owners, err := s.activeOwners(ctx, projectID, tenantID)
+	if err != nil {
+		s.logger.Warn("managed_account_reset_owners_unread",
+			zap.String("project_id", projectID), zap.String("tenant_id", tenantID), zap.Error(err))
 		return
 	}
 	by := "An admin"
 	if caller, err := s.users.GetUserInProject(ctx, projectID, callerID); err == nil && caller != nil && caller.Email != "" {
 		by = caller.Email
-		if name := strings.TrimSpace(caller.Name); name != "" {
-			by = fmt.Sprintf("%s (%s)", name, caller.Email)
-		}
 	}
 	notice := accountNotice{
 		headline: "An admin reset another admin's sign-in",
@@ -348,8 +355,9 @@ func (s *MembershipService) tellOwnersOfAdminReset(ctx context.Context, projectI
 		advice:   "If you did not expect this, review your organization's admins and the members they manage.",
 	}
 	brand := resolveBranding(ctx, s.config(), "")
+	sent := 0
 	for _, owner := range owners {
-		html, text, err := renderAccountNotice(brand, displayNameOrEmail(owner), notice)
+		html, text, err := renderAccountNotice(brand, owner.Name, notice)
 		if err == nil {
 			msg := email.Message{To: owner.Email, From: s.config().SMTPFrom, Subject: notice.headline, HTML: html, Text: text}
 			brand.applyTo(&msg)
@@ -358,6 +366,43 @@ func (s *MembershipService) tellOwnersOfAdminReset(ctx context.Context, projectI
 		if err != nil {
 			s.logger.Warn("managed_account_reset_owner_notice_failed",
 				zap.String("user_id", account.ID), zap.String("owner_id", owner.ID), zap.Error(err))
+			continue
 		}
+		sent++
 	}
+	if s.audit != nil {
+		s.audit.Log(ctx, audit.EventManagedAccountResetOwnersNotified,
+			audit.WithActor(callerID), audit.WithTarget(account.ID),
+			audit.WithIP(ip), audit.WithUserAgent(userAgent),
+			audit.WithSuccess(sent == len(owners)), audit.WithDetails(map[string]any{
+				"project_id":      projectID,
+				"tenant_id":       tenantID,
+				"owners":          len(owners),
+				"owners_notified": sent,
+			}),
+		)
+	}
+}
+
+// noticeDispatcher runs a notice's send off the request path
+// (AuthService.dispatchEmailSend).
+type noticeDispatcher interface {
+	dispatchEmailSend(ctx context.Context, op string, send func(context.Context))
+}
+
+// WithNoticeDispatch sets what sends the reset's notices off the request
+// path; without one they are sent inline.
+func (s *MembershipService) WithNoticeDispatch(d noticeDispatcher) *MembershipService {
+	s.notices = d
+	return s
+}
+
+// dispatchNotice runs send through the notice dispatcher, or inline without
+// one.
+func (s *MembershipService) dispatchNotice(ctx context.Context, op string, send func(context.Context)) {
+	if s.notices == nil {
+		send(ctx)
+		return
+	}
+	s.notices.dispatchEmailSend(ctx, op, send)
 }

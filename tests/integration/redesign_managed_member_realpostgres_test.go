@@ -388,11 +388,50 @@ func TestRedesign_ManagedMember_AdminResettingAnAdminTellsTheOwner(t *testing.T)
 	}
 	owner, adminAddr := ownerAddress(t, h, m.ownerID), ownerAddress(t, h, m.mt.admin.userID)
 	text := mailedText(t, h, owner)
-	if !strings.Contains(text, adminAddr) || !strings.Contains(text, m.address+"'s sign-in") {
+	if !strings.Contains(text, adminAddr+" reset "+m.address+"'s sign-in") {
 		t.Fatalf("owner's notice = %q, want who reset which account", text)
 	}
 	event := waitForAuditEvent(t, h, m.userID, string(audit.EventManagedAccountReset))
-	if event.ActorUserID != m.mt.admin.userID || event.Details["owners_notified"] != float64(1) {
-		t.Fatalf("reset event = %+v, want the admin's reset with one owner told", event)
+	if event.ActorUserID != m.mt.admin.userID || event.Details["owners_told"] != true {
+		t.Fatalf("reset event = %+v, want the admin's reset telling the owners", event)
 	}
+	told := waitForAuditEvent(t, h, m.userID, string(audit.EventManagedAccountResetOwnersNotified))
+	if told.ActorUserID != m.mt.admin.userID || told.Details["owners_notified"] != float64(1) {
+		t.Fatalf("owners-notified event = %+v, want the one owner reached", told)
+	}
+}
+
+// TestRedesign_ManagedMember_SwitchedOffStillSignsOut: a server with
+// managed accounts switched off, serving a managed account made while they
+// were on, still ends its sessions at once when an owner suspends it.
+func TestRedesign_ManagedMember_SwitchedOffStillSignsOut(t *testing.T) {
+	h := startManagedHarness(t, func(*config.Config) {})
+	m := newManagedMember(t, h, "managed-switched-off")
+	ctx := context.Background()
+	off := bootRedesignHarnessOn(t, h.ProjectID, h.TenantID, h.BrandedAuthDomain, func(c *config.Config) {
+		c.RevocationMode = config.RevocationModeSession
+		c.SessionCacheTTLSeconds = 60
+	}, NewRecordingMailer())
+	setProjectConfig(t, h, managedAccountsConfig)
+	login, err := brandedClient(off, "").PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{Email: m.address, Password: m.password}))
+	if err != nil {
+		t.Fatalf("managed PasswordLogin on the switched-off server: %v", err)
+	}
+	ann := brandedClient(off, login.Msg.GetAccessToken())
+	if _, err := ann.ListMySessions(ctx, connect.NewRequest(&identitypb.ListMySessionsRequest{})); err != nil {
+		t.Fatalf("ListMySessions while live: %v", err)
+	}
+	ownerLogin, err := brandedClient(off, "").PasswordLogin(ctx, connect.NewRequest(&identitypb.PasswordLoginRequest{
+		Email: ownerAddress(t, h, m.ownerID), Password: validPassword,
+	}))
+	if err != nil {
+		t.Fatalf("owner PasswordLogin: %v", err)
+	}
+	if _, err := brandedClient(off, ownerLogin.Msg.GetAccessToken()).SuspendTenantMember(ctx, connect.NewRequest(&identitypb.SuspendTenantMemberRequest{
+		TenantId: m.tenantID, UserId: m.userID,
+	})); err != nil {
+		t.Fatalf("SuspendTenantMember with managed accounts off: %v", err)
+	}
+	_, err = ann.ListMySessions(ctx, connect.NewRequest(&identitypb.ListMySessionsRequest{}))
+	requireConnectCode(t, "the suspended account's token on the switched-off server", err, connect.CodeUnauthenticated)
 }

@@ -15,7 +15,10 @@ membership.
   resettable or restorable afterwards. A managed account cannot remove itself
   (`INVALID_ARGUMENT`). The audit entries gain `managed: true`,
   `sessions_ended` and `agents_deactivated`. Personal members are unchanged:
-  their access tokens still last until they expire.
+  their access tokens still last until they expire. This holds with
+  `GATEWAY_MANAGED_ACCOUNTS_ENABLED` off too: switching managed accounts off
+  stops new ones, but suspending or removing one that exists still ends its
+  sessions at once.
 - **`ResetManagedAccount(tenant_id, user_id, delivery_address)`** takes a
   managed account back in one transaction: it signs the account out
   everywhere, spends its outstanding password-reset, sign-in, email-change,
@@ -23,16 +26,18 @@ membership.
   passkeys, linked providers, recovery emails, TOTP, backup codes and phone,
   resets its lockout, deactivates its agents, makes it `invited` with its
   membership unchanged, and issues a new set-up link with the member's role,
-  mailed to `delivery_address`. Every address the account had is told first,
-  then the link is sent; `email_send_status` reports that send.
+  mailed to `delivery_address`; `email_send_status` reports that send, made
+  on the request path. The notices, to every address the account had and to
+  the owners, go off the request path.
 - **Who may call it.** An active owner or admin of the managing tenant, a
   tenant that is not suspended, from a session no recovery hold binds and
   signed in within `GATEWAY_ACCOUNT_MERGE_REAUTH_MAX_AGE_SECONDS`
   (`PERMISSION_DENIED`, the message leading with `reauthentication_required`,
   otherwise). Only an owner resets an owner; an admin may reset another
   admin, and then every active owner of the tenant is mailed who reset which
-  account (`owners_notified` in the audit details); naming yourself is
-  `INVALID_ARGUMENT`. A `user_id` that is not one of the tenant's managed
+  account, the admin named by address only (`owners_told` in the reset's
+  audit details, and `managed_account_reset_owners_notified` with the
+  owners the notice reached); naming yourself is `INVALID_ARGUMENT`. A `user_id` that is not one of the tenant's managed
   accounts with an active or suspended membership is `NOT_FOUND`.
 - **What it needs.** `GATEWAY_MANAGED_ACCOUNTS_ENABLED`, the project's
   `access.admit_managed_accounts` (and `access.admit_managed_accounts_self_service`
@@ -45,7 +50,8 @@ membership.
   `GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT` per invitation window
   (`RESOURCE_EXHAUSTED`).
 - **Password reset of a managed account.** `RequestPasswordReset` mails a
-  managed account only while it is active, and only at its own address;
+  managed account only while it is active, set up and an active member of a
+  tenant that is not suspended, and only at its own address;
   `ConfirmPasswordReset` refuses, and spends, a link whose managed account is
   no longer active, as an invalid token. A managed account is never
   recovered through a recovery email: once it cannot sign in, only its

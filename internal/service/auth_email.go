@@ -82,7 +82,7 @@ func formatExpiresIn(d time.Duration) string {
 // params, which are checked first and from the request alone, so that
 // answer is the same for every email. An account a tenant manages is mailed a
 // reset only while it is active, and only at its own address
-// (managedPasswordResettable).
+// and only while it stands in its tenant (managedPasswordResettable).
 func (s *AuthService) RequestPasswordReset(ctx context.Context, emailAddr string, params EmailLinkParams) error {
 	link, err := s.checkEmailLinkParams(params)
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string
 		_ = refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, "password_reset_send:invited")
 		return
 	}
-	if !managedPasswordResettable(user) {
+	if !s.managedPasswordResettable(ctx, user) {
 		s.logger.Info("password_reset_refused_managed_not_active", zap.String("user_id", user.ID))
 		return
 	}
@@ -204,21 +204,23 @@ func (s *AuthService) sendPasswordResetNow(ctx context.Context, emailAddr string
 
 // managedPasswordResettable reports whether user's password may be reset by
 // email: always for a personal account, and for an account a tenant manages
-// only while it is active. A managed account waiting to be set up, or one its
-// tenant removed, comes back only through its tenant (a set-up link, or a
-// reset by an owner or admin), and the reset link goes only to the account's
-// own address, never to a recovery email.
-func managedPasswordResettable(user *User) bool {
-	return user.ManagedByTenantID == "" || isActiveStatus(user.Status)
+// only while it stands in that tenant (refuseManagedAccount: active, set up,
+// an active membership, a tenant that is not suspended; a standing that
+// cannot be read refuses). A managed account waiting to be set up, suspended
+// or removed comes back only through its tenant (a set-up link, a restore or
+// a reset by an owner or admin), and the reset link goes only to the
+// account's own address, never to a recovery email.
+func (s *AuthService) managedPasswordResettable(ctx context.Context, user *User) bool {
+	return user.ManagedByTenantID == "" || s.refuseManagedAccount(ctx, user) == nil
 }
 
 // resetTokenRefusal is the log event that refuses rec for user's password,
 // or "" when it may set it.
-func resetTokenRefusal(rec *PasswordResetToken, user *User) string {
+func (s *AuthService) resetTokenRefusal(ctx context.Context, rec *PasswordResetToken, user *User) string {
 	switch {
 	case !resetTokenBindsAddress(rec.Email, user.Email):
 		return "password_reset_address_changed"
-	case !managedPasswordResettable(user):
+	case !s.managedPasswordResettable(ctx, user):
 		return "password_reset_refused_managed_not_active"
 	}
 	return ""
@@ -242,7 +244,7 @@ func resetTokenBindsAddress(issuedFor, current string) bool {
 // Token must be unconsumed and unexpired, and the account must still hold
 // the address the token was issued for: whoever keeps a mailbox the account
 // has moved away from must not keep a way in. An account a tenant manages
-// must also still be active (managedPasswordResettable). Either refusal reads
+// must also still stand in its tenant (managedPasswordResettable). Either refusal reads
 // as an invalid token and spends it. On success, every refresh
 // token belonging to the user is revoked — OAuth 2.1 §4.13 best
 // practice for any credential change forces re-login on all devices.
@@ -284,7 +286,7 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token, newPasswo
 	if user.ManagedByTenantID != "" && user.Status == StatusInvited {
 		return refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), user, "password_reset_confirm:invited")
 	}
-	if refusal := resetTokenRefusal(rec, user); refusal != "" {
+	if refusal := s.resetTokenRefusal(ctx, rec, user); refusal != "" {
 		if err := s.repo(ctx).MarkPasswordResetTokenConsumed(ctx, rec.NodeID, s.nowMs()); err != nil {
 			s.logger.Warn("password_reset_consume_failed",
 				zap.String("user_id", user.ID), zap.Error(err))

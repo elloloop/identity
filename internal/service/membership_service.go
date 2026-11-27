@@ -132,7 +132,10 @@ type MembershipService struct {
 	// sessions is the session cache the sessions managed writes end are
 	// dropped from; nil drops none.
 	sessions SessionInvalidator
-	nowFunc  func() time.Time
+	// notices sends a reset's notices off the request path
+	// (WithNoticeDispatch); nil sends them inline.
+	notices noticeDispatcher
+	nowFunc func() time.Time
 }
 
 // NewMembershipService wires a MembershipService. mailerDelivers tells the

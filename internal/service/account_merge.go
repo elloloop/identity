@@ -531,12 +531,19 @@ func (s *AuthService) recentlyAuthenticated(authTimeSec int64) bool {
 // auth_time, in epoch seconds; 0 when no sign-in opened the session) is at
 // most maxAge old.
 func (s *AuthService) signedInWithin(authTimeSec int64, maxAge time.Duration) bool {
+	return signedInWithin(time.UnixMilli(s.nowMs()), authTimeSec, maxAge)
+}
+
+// signedInWithin reports whether a session's sign-in (the access token's
+// auth_time, in epoch seconds; 0 when no sign-in opened the session) is at
+// most maxAge old at now.
+func signedInWithin(now time.Time, authTimeSec int64, maxAge time.Duration) bool {
 	if authTimeSec <= 0 {
 		return false
 	}
 	// Compared in seconds, so no claim value can overflow the arithmetic. A
 	// sign-in stamped by a replica whose clock runs slightly ahead is still a
 	// sign-in; anything further in the future is not.
-	age := s.nowMs()/1000 - authTimeSec
+	age := now.Unix() - authTimeSec
 	return age >= -int64(authTimeClockSkew.Seconds()) && age <= int64(maxAge.Seconds())
 }

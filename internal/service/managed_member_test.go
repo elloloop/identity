@@ -295,7 +295,7 @@ func TestResetManagedAccount_ResetsNotifiesAndSendsTheSetUpLink(t *testing.T) {
 		"project_id": ssProject, "tenant_id": ownTenant, "role": RoleMember,
 		"delivery_email": redactEmail(managedDelivery), "sessions_ended": float64(1),
 		"agents_deactivated": []any{"agent-1"}, "review": managedResetReviewNote,
-		"owners_notified": float64(0),
+		"owners_told": false,
 	}}, f.audit.detailsOf(string(audit.EventManagedAccountReset)))
 	assert.Equal(t, [][2]string{{"203.0.113.7", "test-agent"}}, f.audit.clientsOf(string(audit.EventManagedAccountReset)))
 }
@@ -411,10 +411,8 @@ func TestResetManagedAccount_StoreRefusalsPassThrough(t *testing.T) {
 	}
 }
 
-func TestMembershipService_SignedInWithin(t *testing.T) {
-	f := newManagedFixture(t)
+func TestSignedInWithin(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
-	f.svc.nowFunc = func() time.Time { return now }
 	for authTime, want := range map[int64]bool{
 		0:                                 false,
 		now.Unix():                        true,
@@ -424,10 +422,9 @@ func TestMembershipService_SignedInWithin(t *testing.T) {
 		now.Unix() + 31:                   false,
 		now.Unix() - int64(time.Hour/1e9): false,
 	} {
-		assert.Equal(t, want, f.svc.signedInWithin(authTime, 5*time.Minute), "auth_time %d", authTime)
+		assert.Equal(t, want, signedInWithin(now, authTime, 5*time.Minute), "auth_time %d", authTime)
 	}
 }
-
 func (f *managedFixture) membership(t *testing.T, userID string) *TenantMembership {
 	t.Helper()
 	m, err := f.members.GetMembership(context.Background(), ssProject, ownTenant, userID)
@@ -462,6 +459,12 @@ func TestResetManagedAccount_AdminResettingAnAdminTellsTheOwners(t *testing.T) {
 				Source: MembershipSourceInvited, Role: RoleOwner, Status: MembershipStatusSuspended,
 			})
 			require.NoError(t, err)
+			accounts := newFakeRepo()
+			accounts.mu.Lock()
+			accounts.users[ssOwnerID] = &User{ID: ssOwnerID, Email: "owner@example.test", Name: "Olive", Status: StatusActive}
+			accounts.users["user-owner-away"] = &User{ID: "user-owner-away", Email: "away@example.test", Status: StatusActive}
+			accounts.mu.Unlock()
+			f.svc.WithAccounts(accounts)
 			var asked ManagedReset
 			f.programResetOf(t, &asked, tc.targetRole)
 
@@ -472,7 +475,8 @@ func TestResetManagedAccount_AdminResettingAnAdminTellsTheOwners(t *testing.T) {
 			for _, m := range f.mailer.sent {
 				if m.Subject == "An admin reset another admin's sign-in" {
 					told = append(told, m.To)
-					assert.Contains(t, m.Text, "other@example.test reset "+managedAddress+"'s sign-in")
+					assert.Contains(t, m.Text, "other@example.test reset "+managedAddress+"'s sign-in", "the admin is named by address only")
+					assert.Contains(t, m.Text, "Hi Olive,")
 				}
 			}
 			if tc.ownersTold == 0 {
@@ -480,7 +484,107 @@ func TestResetManagedAccount_AdminResettingAnAdminTellsTheOwners(t *testing.T) {
 			} else {
 				assert.Equal(t, []string{"owner@example.test"}, told, "the active owner only")
 			}
-			assert.Equal(t, float64(tc.ownersTold), f.audit.detailsOf(string(audit.EventManagedAccountReset))[0]["owners_notified"])
+			assert.Equal(t, tc.ownersTold > 0, f.audit.detailsOf(string(audit.EventManagedAccountReset))[0]["owners_told"])
+			notified := f.audit.detailsOf(string(audit.EventManagedAccountResetOwnersNotified))
+			if tc.ownersTold == 0 {
+				assert.Empty(t, notified)
+				return
+			}
+			require.Len(t, notified, 1)
+			assert.Equal(t, float64(1), notified[0]["owners"])
+			assert.Equal(t, float64(1), notified[0]["owners_notified"], "the sends that succeeded")
 		})
 	}
+}
+
+// A failed send to an owner is not counted as notified.
+func TestResetManagedAccount_OwnersNotifiedCountsSuccessfulSends(t *testing.T) {
+	f := newManagedFixture(t)
+	_, err := f.members.UpsertMembership(context.Background(), &TenantMembership{
+		ProjectID: ssProject, TenantID: ownTenant, UserID: ssOtherID,
+		Source: MembershipSourceInvited, Role: RoleAdmin, Status: MembershipStatusActive,
+	})
+	require.NoError(t, err)
+	accounts := newFakeRepo()
+	accounts.mu.Lock()
+	accounts.users[ssOwnerID] = &User{ID: ssOwnerID, Email: "owner@example.test", Status: StatusActive}
+	accounts.mu.Unlock()
+	f.svc.WithAccounts(accounts)
+	var asked ManagedReset
+	f.programResetOf(t, &asked, RoleAdmin)
+	f.mailer.sendErr = errors.New("smtp down")
+
+	_, err = f.svc.ResetManagedAccount(managedProject(true, false), ssOtherID, freshSignIn(), ownTenant, managedMemberID, managedDelivery, "", "")
+	require.NoError(t, err)
+	notified := f.audit.detailsOf(string(audit.EventManagedAccountResetOwnersNotified))
+	require.Len(t, notified, 1)
+	assert.Equal(t, float64(1), notified[0]["owners"])
+	assert.Equal(t, float64(0), notified[0]["owners_notified"])
+}
+
+// The reset's notices run through the notice dispatcher, the set-up link
+// does not: its send status is the call's answer.
+func TestResetManagedAccount_NoticesAreDispatchedTheLinkIsNot(t *testing.T) {
+	f := newManagedFixture(t)
+	var asked ManagedReset
+	f.programReset(t, &asked)
+	dispatcher := &heldDispatcher{}
+	f.svc.WithNoticeDispatch(dispatcher)
+
+	out, err := f.svc.ResetManagedAccount(managedProject(true, false), ssOwnerID, freshSignIn(), ownTenant, managedMemberID, managedDelivery, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, EmailSent, out.EmailStatus)
+	require.Equal(t, 1, f.mailer.count(), "only the link is sent on the request path")
+	assert.Equal(t, managedDelivery, f.mailer.last().To)
+	assert.Equal(t, []string{"managed_account_reset_notice"}, dispatcher.ops)
+
+	dispatcher.run()
+	assert.Equal(t, 3, f.mailer.count(), "the held notices go out when the dispatcher runs them")
+}
+
+// heldDispatcher holds what it is given until run.
+type heldDispatcher struct {
+	ops   []string
+	sends []func(context.Context)
+}
+
+func (d *heldDispatcher) dispatchEmailSend(_ context.Context, op string, send func(context.Context)) {
+	d.ops = append(d.ops, op)
+	d.sends = append(d.sends, send)
+}
+
+func (d *heldDispatcher) run() {
+	for _, send := range d.sends {
+		send(context.Background())
+	}
+}
+
+// Where managed accounts are switched off, suspending or removing an account
+// that is still managed acts on the account all the same: its sessions end
+// at once.
+func TestManagedMemberChanges_SwitchedOffStillSignOutAManagedAccount(t *testing.T) {
+	f := newManagedFixture(t)
+	f.svc.cfg.ManagedAccountsEnabled = false
+	f.managed.suspend = func(_, _, _, _ string) (*ManagedMemberChange, error) {
+		return managedChange(MembershipStatusSuspended), nil
+	}
+	f.managed.remove = func(_, _, _, _ string) (*ManagedMemberChange, error) {
+		return managedChange(MembershipStatusSuspended), nil
+	}
+	ctx := managedProject(false, false)
+
+	got, err := f.svc.SuspendTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, managedMemberID, "", "")
+	require.NoError(t, err)
+	assert.Equal(t, MembershipStatusSuspended, got.Status)
+	assert.Equal(t, []string{"sid-1", "sid-2"}, f.sessions.sids, "the suspension ended its sessions")
+	require.NoError(t, f.svc.RemoveTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, managedMemberID, "", ""))
+	assert.Equal(t, []string{"sid-1", "sid-2", "sid-1", "sid-2"}, f.sessions.sids, "so did the removal")
+}
+
+// A delivery address that is not usable is refused without echoing it.
+func TestResetManagedAccount_BadDeliveryAddressIsNotEchoed(t *testing.T) {
+	f := newManagedFixture(t)
+	_, err := f.svc.ResetManagedAccount(managedProject(true, false), ssOwnerID, freshSignIn(), ownTenant, managedMemberID, "not-an-address@", "", "")
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.NotContains(t, err.Error(), "not-an-address")
 }

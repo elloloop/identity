@@ -1098,16 +1098,18 @@ func TestDispatchEmailSend_CountsDropsAndPacesTheirLog(t *testing.T) {
 	}
 }
 
-// An account a tenant manages is mailed a reset only while it is active, and
-// only at its own address; a link mailed while it was active stops working
-// once it is not, and is spent.
+// An account a tenant manages is mailed a reset only while it is active and
+// its membership of the tenant is, and only at its own address; a link
+// mailed while it was stops working once it is not, and is spent.
 func TestPasswordReset_ManagedAccountOnlyWhileActive(t *testing.T) {
-	for _, status := range []string{StatusInvited, StatusDeactivated, StatusPendingDeletion} {
+	for _, status := range []string{StatusInvited, StatusDeactivated, StatusPendingDeletion, MembershipStatusSuspended} {
 		t.Run(status, func(t *testing.T) {
 			svc, repo, rec := newAuthSvcWithMailer(t)
+			memberships := &managedMembershipsMock{get: membershipIn(MembershipStatusActive)}
+			svc.WithManagedMemberships(memberships, tenantIn(TenantStatusClaimed))
 			user := seedUserWithPassword(t, repo, "ann@acme.example.com", "OldStr0ng!Pass")
 			repo.mu.Lock()
-			repo.users[user.ID].ManagedByTenantID = "t-acme"
+			repo.users[user.ID].ManagedByTenantID, repo.users[user.ID].SetUpAtMs = "t-acme", 1
 			repo.mu.Unlock()
 
 			tok := requestAndExtractResetToken(t, svc, rec, "ann@acme.example.com")
@@ -1115,9 +1117,13 @@ func TestPasswordReset_ManagedAccountOnlyWhileActive(t *testing.T) {
 				t.Fatalf("an active managed account's reset went to %+v, want its own address once", sent)
 			}
 
-			repo.mu.Lock()
-			repo.users[user.ID].Status = status
-			repo.mu.Unlock()
+			if status == MembershipStatusSuspended {
+				memberships.get = membershipIn(MembershipStatusSuspended)
+			} else {
+				repo.mu.Lock()
+				repo.users[user.ID].Status = status
+				repo.mu.Unlock()
+			}
 			rec.Reset()
 			if err := svc.RequestPasswordReset(context.Background(), "ann@acme.example.com", EmailLinkParams{}); err != nil {
 				t.Fatalf("RequestPasswordReset: %v", err)
@@ -1150,9 +1156,10 @@ func TestPasswordReset_ManagedAccountOnlyWhileActive(t *testing.T) {
 
 func TestPasswordReset_ActiveManagedAccountResets(t *testing.T) {
 	svc, repo, rec := newAuthSvcWithMailer(t)
+	svc.WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed))
 	user := seedUserWithPassword(t, repo, "ann@acme.example.com", "OldStr0ng!Pass")
 	repo.mu.Lock()
-	repo.users[user.ID].ManagedByTenantID = "t-acme"
+	repo.users[user.ID].ManagedByTenantID, repo.users[user.ID].SetUpAtMs = "t-acme", 1
 	repo.mu.Unlock()
 
 	tok := requestAndExtractResetToken(t, svc, rec, "ann@acme.example.com")
