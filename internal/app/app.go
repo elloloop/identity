@@ -1390,6 +1390,9 @@ func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
 		logger.Info("invited_signup_disabled",
 			zap.Bool("other_projects_may_enable", membershipServiceServed(deps)))
 	}
+	if cfg.ManagedAccountsEnabled && (managedMembershipReader(deps) == nil || managedTenantStatusReader(deps) == nil) {
+		return errors.New("app: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs the membership and tenant stores to judge a managed account's standing; without them every managed account would answer UNAVAILABLE where a personal one does not")
+	}
 	if cfg.DefaultProjectAdmitManagedAccounts && !membershipServiceServed(deps) {
 		return errors.New("app: GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS needs the tenant, membership and invitation stores, which only the postgres driver provides")
 	}

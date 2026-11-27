@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"testing"
 
@@ -432,22 +433,36 @@ func TestAccountClassificationSharesHTTPAndNativeBudget(t *testing.T) {
 // RequestAdminHelp draws on one per-IP budget across HTTP and native gRPC
 // where managed accounts are on: past it a native call is RESOURCE_EXHAUSTED
 // with the window as its retry-after, and an HTTP call is over quota too.
-// Where they are off it has no budget on either surface, as before.
+// Where they are off it has no budget on either surface, as before. Managed
+// accounts need the postgres stores, so the switched-on case runs against
+// GATEWAY_POSTGRES_DSN and is skipped without it.
 func TestRegisterGRPC_RequestAdminHelpSharesHTTPBudget(t *testing.T) {
 	t.Parallel()
 	req := &identitypb.RequestAdminHelpRequest{Email: "ann@example.com"}
+	dsn := os.Getenv("GATEWAY_POSTGRES_DSN")
 	for _, on := range []bool{true, false} {
+		if on && dsn == "" {
+			t.Log("GATEWAY_POSTGRES_DSN unset: skipping the case with managed accounts on")
+			continue
+		}
 		srv := newTestServerWith(t, func(c *config.Config) {
 			c.RateLimitPasswordlessPerIP = 2
 			c.RateLimitWindowSeconds = 40
 			if on {
 				c.RepoDriver = "postgres"
+				c.PostgresDSN = dsn
+				c.PostgresAutoMigrate = true
+				c.DefaultProjectID = "help-budget"
 				c.ProjectSecretsKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
 				c.ManagedAccountsEnabled = true
 				c.RevocationMode = config.RevocationModeSession
 				c.SessionCacheTTLSeconds = 0
 			}
-		}, nil)
+		}, func(o *identityserver.Options) {
+			if on {
+				o.Repo, o.DB = nil, nil
+			}
+		})
 		httpSrv := httptest.NewServer(srv.Handler())
 		t.Cleanup(httpSrv.Close)
 		httpClient := identityconnectgen.NewIdentityServiceClient(httpSrv.Client(), httpSrv.URL)

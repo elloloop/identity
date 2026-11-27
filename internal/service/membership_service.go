@@ -243,7 +243,7 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 		if errors.Is(err, ErrManagedByThisTenant) {
 			s.logger.Info("managed_account_refused",
 				zap.String("project_id", projectID), zap.String("tenant_id", tenantID),
-				zap.String("inviter_id", callerID), zap.String("path", "ordinary_invitation"))
+				zap.String("inviter_id", callerID), zap.String("surface", "ordinary_invitation"))
 		}
 		return nil, err
 	}

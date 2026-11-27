@@ -829,7 +829,7 @@ RestoreTenantMember(tenant_id, user_id)
     A managed account is the tenant's, so what only a person's own account
     may do is refused to it with <code>PERMISSION_DENIED</code>
     (<code>managed_account</code>), each logged as
-    <code>managed_account_refused</code> with the path: creating a tenant,
+    <code>managed_account_refused</code> with the <code>surface</code>: creating a tenant,
     joining one by domain, accepting any invitation, leaving its tenant,
     changing its email, adding a recovery email (<code>FAILED_PRECONDITION</code>
     with <code>POLICY</code>: its tenant recovers it with a reset), linking a

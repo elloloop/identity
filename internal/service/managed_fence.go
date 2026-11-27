@@ -32,7 +32,7 @@ func fenceManagedSession(ctx context.Context, repo Repository, logger *zap.Logge
 	refuse := func(reason string, err error) error {
 		logger.Info("managed_account_refused",
 			zap.String("tenant_id", user.ManagedByTenantID), zap.String("user_id", user.ID),
-			zap.String("path", path), zap.String("reason", reason))
+			zap.String("surface", path), zap.String("reason", reason))
 		return err
 	}
 	if !isActiveStatus(user.Status) {

@@ -1,6 +1,6 @@
 # Upgrade guide
 
-## Next — managed-account polish: a deactivated agent comes back only behind an owner in standing; the managed token ceiling always holds; `owners_notice_due`; `identity_managed_help_limited_total` (no migration; audit detail renamed; one metric)
+## Next — managed-account polish: a deactivated agent comes back only behind an owner in standing; the managed token ceiling always holds; `owners_notice_due`; `identity_managed_help_limited_total`; an unread standing is `UNAVAILABLE` (no migration; an audit detail and a log field renamed; one metric; one stricter start-up check)
 
 - **`ReactivateAgent` needs the owner's standing.** An agent whose owner is a
   managed account that is suspended, removed or not set up, or an owner that
@@ -53,6 +53,22 @@
   - The source key is an HMAC under a key derived from
     `GATEWAY_TOTP_RECOVERY_PEPPER`; rotating the pepper restarts every
     source's daily count.
+- **An unread standing is retryable.** When a managed account's standing in
+  its tenant cannot be read (the membership or tenant store failing), the
+  account, or an agent it owns, is refused with `UNAVAILABLE` (`server_error`
+  from the agent OAuth token endpoint), never `FAILED_PRECONDITION`, and
+  nothing is revoked: retry. Agent creation, transfer, offer acceptance and
+  reactivation refused this way are audited unsuccessful with `step`
+  `owner_standing_unread`. With `GATEWAY_MANAGED_ACCOUNTS_ENABLED` on, boot
+  now refuses to start without the membership and tenant stores, so this
+  answer never stands for a missing store, which would set managed accounts
+  apart from personal ones. A host that injects its own repository and keeps
+  managed accounts off must wire both stores itself if any managed account
+  exists in its data.
+- **One log field.** Every `managed_account_refused` line names where the
+  refusal happened in `surface` (it was `path` on the credential fence, the
+  personal-only refusals, SCIM and ordinary invitations); alerts and queries
+  on `path` should move to `surface`.
 - **Config reference.** `GATEWAY_MANAGED_HELP_*` is listed under Projects &
   tenancy, `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` under JWT & tokens
   and `GATEWAY_TENANT_MEMBERS_PAGE_URL` under Email & branding.

@@ -30,7 +30,7 @@ func refuseManagedAccountPath(ctx context.Context, logger *zap.Logger, projectID
 func logManagedAccountRefused(logger *zap.Logger, projectID, tenantID, userID, path string) {
 	logger.Info("managed_account_refused",
 		zap.String("project_id", projectID), zap.String("tenant_id", tenantID),
-		zap.String("user_id", userID), zap.String("path", path))
+		zap.String("user_id", userID), zap.String("surface", path))
 }
 
 // refuseManagedMerge is the rule that keeps a managed account out of every

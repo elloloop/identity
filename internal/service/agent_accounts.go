@@ -338,6 +338,8 @@ func (s *AuthService) CreateAgent(
 	if owner != caller {
 		if err := s.agentOwnerStanding(ctx, owner); err != nil {
 			if isManagedStandingUnread(err) {
+				s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
+					map[string]any{"step": "owner_standing_unread", "owner_user_id": strings.TrimSpace(ownerUserID)})
 				return nil, err
 			}
 			s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
@@ -345,8 +347,12 @@ func (s *AuthService) CreateAgent(
 			return nil, errAgentOwnerNotEligible
 		}
 	} else if err := s.agentOwnerStanding(ctx, owner); err != nil {
+		step := "owner_not_eligible"
+		if isManagedStandingUnread(err) {
+			step = "owner_standing_unread"
+		}
 		s.auditAgentAction(ctx, agentOpCreate, callerID, "", false, ip, userAgent,
-			map[string]any{"step": "owner_not_eligible"})
+			map[string]any{"step": step})
 		return nil, err
 	}
 	if err := validateAgentCreationKey(clientRequestID); err != nil {
@@ -485,6 +491,8 @@ func (s *AuthService) TransferAgent(
 	}
 	if err := s.agentOwnerStanding(ctx, newOwner); err != nil {
 		if isManagedStandingUnread(err) {
+			s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
+				map[string]any{"step": "owner_standing_unread", "owner_user_id": newOwner.ID})
 			return nil, err
 		}
 		s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
@@ -633,6 +641,8 @@ func (s *AuthService) AcceptAgentTransfer(ctx context.Context, callerID, agentID
 	}
 	if err := s.agentOwnerStanding(ctx, caller); err != nil {
 		if isManagedStandingUnread(err) {
+			s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
+				map[string]any{"step": "owner_standing_unread", "owner_user_id": caller.ID})
 			return nil, err
 		}
 		s.auditAgentAction(ctx, agentOpTransfer, callerID, agent.ID, false, ip, userAgent,
