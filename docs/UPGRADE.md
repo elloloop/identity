@@ -1,5 +1,23 @@
 # Upgrade guide
 
+## Next — the default project can admit tenant-managed accounts: `GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS` and `GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE` (off by default; no migration)
+
+The environment-configured default project had no way to set
+`access.admit_managed_accounts`, which a control-plane project sets in its
+`config_json`.
+
+- **`GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS`** is the default project's
+  `access.admit_managed_accounts`, and
+  **`GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE`** its
+  `access.admit_managed_accounts_self_service`. Both default to `false`.
+- **Boot refuses** the self-service variable without the first, as
+  `config_json` refuses the key, and the first on the memory or SQLite driver,
+  which keep no tenants. The server must still enable managed accounts with
+  `GATEWAY_MANAGED_ACCOUNTS_ENABLED`.
+- **Go API.** `config.Config` gains `DefaultProjectAdmitManagedAccounts` and
+  `DefaultProjectAdmitManagedAccountsSelfService`, which
+  `service.NewDefaultProjectAccess` maps.
+
 ## Next — data and store for tenant-managed accounts (migration `0068_add_managed_accounts`, schema 68; SQLite `0034`; `GATEWAY_MANAGED_ACCOUNTS_ENABLED`, `access.admit_managed_accounts`, `access.admit_managed_accounts_self_service` (all off by default); `ManagedSetupStore`, `ManagedMemberStore` (Go API))
 
 A tenant-managed account is an account a tenant owner or admin creates on a

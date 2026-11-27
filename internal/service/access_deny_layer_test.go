@@ -462,3 +462,29 @@ func TestAccessDenyLayer_UsesTheSharedProviderList(t *testing.T) {
 	// Without the env addition the same address is ordinary.
 	require.False(t, cfg.Access.denies(testCfg, canonicalize("someone@startup.example")))
 }
+
+// The default project's managed-account switches reach its policy, off by
+// default, and the self-service one is refused without the first, as in
+// config_json.
+func TestNewDefaultProjectAccess_MapsManagedAccounts(t *testing.T) {
+	t.Parallel()
+	off, err := NewDefaultProjectAccess(&config.Config{DefaultProjectAccessMode: AccessModeInvite})
+	require.NoError(t, err)
+	require.False(t, off.AdmitManagedAccounts)
+	require.False(t, off.AdmitManagedAccountsSelfService)
+
+	on, err := NewDefaultProjectAccess(&config.Config{
+		DefaultProjectAccessMode:                      AccessModeInvite,
+		DefaultProjectAdmitManagedAccounts:            true,
+		DefaultProjectAdmitManagedAccountsSelfService: true,
+	})
+	require.NoError(t, err)
+	require.True(t, on.AdmitManagedAccounts)
+	require.True(t, on.AdmitManagedAccountsSelfService)
+
+	_, err = NewDefaultProjectAccess(&config.Config{
+		DefaultProjectAccessMode:                      AccessModeInvite,
+		DefaultProjectAdmitManagedAccountsSelfService: true,
+	})
+	require.ErrorContains(t, err, "admit_managed_accounts_self_service is only valid with admit_managed_accounts")
+}

@@ -864,8 +864,11 @@ default project's variable refuses to boot without the domain and tenant
 stores. See the multi-tenancy docs, "domain-join sign-up".
 
 **`access.admit_managed_accounts`** and
-**`access.admit_managed_accounts_self_service`** (off by default; a
-control-plane project's `config_json` only; valid with every mode) let the
+**`access.admit_managed_accounts_self_service`**
+(`GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS` and
+`GATEWAY_DEFAULT_PROJECT_ADMIT_MANAGED_ACCOUNTS_SELF_SERVICE` for the default
+project, which refuse to boot on memory or SQLite; off by default; valid with
+every mode) let the
 project's tenant owners and admins create **tenant-managed accounts**:
 accounts on a domain verified for the tenant, created before their first
 sign-in and belonging to that tenant only. The second extends the first to
