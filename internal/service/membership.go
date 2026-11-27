@@ -83,7 +83,19 @@ type TenantInvitation struct {
 	// (GetTenantInvitation). It is false for an invitation stored before it
 	// was recorded, whose token may have gone anywhere.
 	TokenOnlyInEmail bool
+	// UserID is set on a managed account's set-up link: the account it sets
+	// up, whose address is Email. "" on an ordinary invitation.
+	UserID string
+	// DeliveryEmail is where a set-up link was sent; "" on an ordinary
+	// invitation, which goes to Email.
+	DeliveryEmail string
+	// SetupEpoch is the account's setup_epoch the link was issued for; only
+	// a link whose epoch is the account's current one sets it up.
+	SetupEpoch int64
 }
+
+// IsManagedSetup reports whether inv is a managed account's set-up link.
+func (inv *TenantInvitation) IsManagedSetup() bool { return inv.UserID != "" }
 
 // UserTenant is a tenant a user may act in: an active membership in a
 // claimed tenant, with the role the user holds there and how the membership
@@ -346,7 +358,9 @@ type OpenInvitationReader interface {
 	// addressed to email (canonical form), in a tenant that can still take
 	// members (claimed or latent) and was not created through self-service
 	// CreateTenant (its CreatedBy is empty), from an inviter who is still an
-	// active owner or admin of that tenant, or (nil, nil).
+	// active owner or admin of that tenant, or (nil, nil). A managed
+	// account's set-up link (IsManagedSetup) is never open: it admits no
+	// sign-up or acceptance by email.
 	OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error)
 	// OpenInvitationForToken returns the invitation in the project whose
 	// hashed token is tokenHash when it is open as OpenInvitationForEmail

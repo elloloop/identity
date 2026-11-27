@@ -167,6 +167,16 @@ type User struct {
 	// recipient it names to accept or decline it; the agent stays with
 	// OwnerUserID until then. Empty otherwise, and always on a person.
 	PendingOwnerUserID string
+	// ManagedByTenantID is the tenant that manages this account (see
+	// ManagedSetupStore), "" for a personal account. Fixed at creation.
+	ManagedByTenantID string
+	// SetUpAtMs is when a managed account was first set up from its link, 0
+	// until then. A reset does not clear it.
+	SetUpAtMs int64
+	// SetupEpoch numbers a managed account's set-up links: only a link
+	// carrying the current epoch sets the account up. 0 on a personal
+	// account.
+	SetupEpoch int64
 	// DeletionScheduledAtMs is the epoch-ms instant a PENDING_DELETION account
 	// is permanently purged. 0 when the account is not pending self-service
 	// deletion. Set when the owner requests deletion; cleared on cancel or a

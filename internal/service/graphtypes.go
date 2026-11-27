@@ -76,6 +76,12 @@ const (
 	// ufPendingOwnerUserID carries the recipient an agent's transfer waits
 	// on, so the admin surfaces show a transfer in flight.
 	ufPendingOwnerUserID = "27"
+	// ufManagedByTenantID, ufSetUpAt and ufSetupEpoch carry a managed
+	// account's tenant, first set-up time and set-up epoch, so the admin
+	// surfaces can tell a managed account from a personal one.
+	ufManagedByTenantID = "28"
+	ufSetUpAt           = "29"
+	ufSetupEpoch        = "30"
 )
 
 // ── WorkingGroup field IDs (type_id 2) ─────────────────────────────

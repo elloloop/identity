@@ -57,6 +57,11 @@ const (
 	dbUfOwnerUserID = "26"
 	// dbUfPendingOwnerUserID is ufPendingOwnerUserID.
 	dbUfPendingOwnerUserID = "27"
+	// dbUfManagedByTenantID, dbUfSetUpAt and dbUfSetupEpoch are read-only on
+	// the graph path: only the managed-account store methods write them.
+	dbUfManagedByTenantID = "28"
+	dbUfSetUpAt           = "29"
+	dbUfSetupEpoch        = "30"
 )
 
 const (
@@ -1004,6 +1009,9 @@ func userNodeFromRecord(u *service.User) *graph.Node {
 			dbUfKind:                   u.Kind,
 			dbUfOwnerUserID:            u.OwnerUserID,
 			dbUfPendingOwnerUserID:     u.PendingOwnerUserID,
+			dbUfManagedByTenantID:      u.ManagedByTenantID,
+			dbUfSetUpAt:                u.SetUpAtMs,
+			dbUfSetupEpoch:             u.SetupEpoch,
 		},
 	}
 }

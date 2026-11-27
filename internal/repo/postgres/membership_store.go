@@ -821,7 +821,7 @@ func (s *MembershipStore) RestoreMembership(ctx context.Context, projectID, tena
 // is first bound to projectID, as 0046's functions bind themselves; the
 // binding ends with tx.
 func lockedEmailDomain(ctx context.Context, tx pgx.Tx, projectID, userID string) (string, error) {
-	if _, err := tx.Exec(ctx, `SELECT set_config($1, $2, true)`, rlsGUC, projectID); err != nil {
+	if err := bindProject(ctx, tx, projectID); err != nil {
 		return "", err
 	}
 	var domain string
@@ -1049,7 +1049,8 @@ func NewInvitationStore(r *pgRepository) *InvitationStore {
 
 const invitationColumns = `
 	id, project_id, tenant_id, token_hash, email, invited_by, role, status,
-	expires_at_ms, accepted_at_ms, created_at_ms, token_only_in_email`
+	expires_at_ms, accepted_at_ms, created_at_ms, token_only_in_email,
+	user_id, delivery_email, setup_epoch`
 
 func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 	var v service.TenantInvitation
@@ -1057,6 +1058,7 @@ func scanInvitation(row pgx.Row) (*service.TenantInvitation, error) {
 		&v.ID, &v.ProjectID, &v.TenantID, &v.TokenHash, &v.Email, &v.InvitedBy,
 		&v.Role, &v.Status, &v.ExpiresAtMs, &v.AcceptedAtMs, &v.CreatedAtMs,
 		&v.TokenOnlyInEmail,
+		&v.UserID, &v.DeliveryEmail, &v.SetupEpoch,
 	); err != nil {
 		return nil, err
 	}
@@ -1128,72 +1130,11 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	key := service.FoldEmail(inv.Email)
-	locks := []string{advisoryKey("tenant_invitation", inv.ProjectID, inv.TenantID)}
-	if inv.InvitedBy != "" {
-		locks = append(locks, advisoryKey("tenant_invitation_inviter", inv.ProjectID, inv.InvitedBy))
+	if err := lockInvitationWriters(ctx, tx, "CreateInvitation", inv.ProjectID, inv.TenantID, inv.InvitedBy); err != nil {
+		return "", err
 	}
-	for _, lock := range locks {
-		if err := lockXact(ctx, tx, "CreateInvitation", lock); err != nil {
-			return "", err
-		}
-	}
-
-	if limits.ResendCooldownStartMs > 0 {
-		var recent bool
-		if err := tx.QueryRow(
-			ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM tenant_invitations
-				WHERE project_id = $1 AND tenant_id = $2
-				  AND lower(email COLLATE "C") = $3 AND created_at_ms >= $4)`,
-			inv.ProjectID, inv.TenantID, key, limits.ResendCooldownStartMs,
-		).Scan(&recent); err != nil {
-			return "", wrapPgErr("CreateInvitation(cooldown)", err)
-		}
-		if recent {
-			return "", service.ErrInvitationResendTooSoon
-		}
-	}
-	var sent int
-	if err := tx.QueryRow(
-		ctx, `
-		SELECT count(*) FROM tenant_invitations
-		WHERE project_id = $1 AND tenant_id = $2 AND created_at_ms >= $3`,
-		inv.ProjectID, inv.TenantID, limits.WindowStartMs,
-	).Scan(&sent); err != nil {
-		return "", wrapPgErr("CreateInvitation(count)", err)
-	}
-	if sent >= limits.MaxPerTenant {
-		return "", service.ErrInvitationLimited
-	}
-	if limits.MaxPerInviter > 0 && inv.InvitedBy != "" {
-		var byInviter int
-		if err := tx.QueryRow(
-			ctx, `
-			SELECT count(*) FROM tenant_invitations
-			WHERE project_id = $1 AND invited_by = $2 AND created_at_ms >= $3`,
-			inv.ProjectID, inv.InvitedBy, limits.WindowStartMs,
-		).Scan(&byInviter); err != nil {
-			return "", wrapPgErr("CreateInvitation(inviter)", err)
-		}
-		if byInviter >= limits.MaxPerInviter {
-			return "", service.ErrInviterLimited
-		}
-	}
-	if limits.MaxPerRecipient > 0 {
-		var toRecipient int
-		if err := tx.QueryRow(
-			ctx, `
-			SELECT count(*) FROM tenant_invitations
-			WHERE project_id = $1 AND tenant_id = $2
-			  AND lower(email COLLATE "C") = $3 AND created_at_ms >= $4`,
-			inv.ProjectID, inv.TenantID, key, limits.WindowStartMs,
-		).Scan(&toRecipient); err != nil {
-			return "", wrapPgErr("CreateInvitation(recipient)", err)
-		}
-		if toRecipient >= limits.MaxPerRecipient {
-			return "", service.ErrInvitationRecipientLimited
-		}
+	if err := checkInvitationLimits(ctx, tx, "CreateInvitation", inv.ProjectID, inv.TenantID, inv.InvitedBy, key, limits); err != nil {
+		return "", err
 	}
 
 	// Revoke any open invite for the same recipient first, so the new one
@@ -1229,10 +1170,95 @@ func (s *InvitationStore) CreateInvitation(ctx context.Context, inv *service.Ten
 	return id, nil
 }
 
+// lockInvitationWriters takes the tenant's invitation lock, then the
+// inviter's, held until tx ends: every write that counts toward an
+// invitation limit takes them, always in that order, so two such writes
+// never wait on each other's locks in opposite orders.
+func lockInvitationWriters(ctx context.Context, tx pgx.Tx, op, projectID, tenantID, invitedBy string) error {
+	locks := []string{advisoryKey("tenant_invitation", projectID, tenantID)}
+	if invitedBy != "" {
+		locks = append(locks, advisoryKey("tenant_invitation_inviter", projectID, invitedBy))
+	}
+	for _, lock := range locks {
+		if err := lockXact(ctx, tx, op, lock); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkInvitationLimits applies limits, as InvitationStore.CreateInvitation
+// documents them, to an invitation from invitedBy to the address whose
+// FoldEmail form is recipientKey. An empty recipientKey applies neither the
+// resend cooldown nor the per-recipient cap. It must run under
+// lockInvitationWriters.
+func checkInvitationLimits(ctx context.Context, tx pgx.Tx, op, projectID, tenantID, invitedBy, recipientKey string, limits service.InvitationLimits) error {
+	if recipientKey != "" && limits.ResendCooldownStartMs > 0 {
+		var recent bool
+		if err := tx.QueryRow(
+			ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM tenant_invitations
+				WHERE project_id = $1 AND tenant_id = $2
+				  AND lower(email COLLATE "C") = $3 AND created_at_ms >= $4)`,
+			projectID, tenantID, recipientKey, limits.ResendCooldownStartMs,
+		).Scan(&recent); err != nil {
+			return wrapPgErr(op+"(cooldown)", err)
+		}
+		if recent {
+			return service.ErrInvitationResendTooSoon
+		}
+	}
+	var sent int
+	if err := tx.QueryRow(
+		ctx, `
+		SELECT count(*) FROM tenant_invitations
+		WHERE project_id = $1 AND tenant_id = $2 AND created_at_ms >= $3`,
+		projectID, tenantID, limits.WindowStartMs,
+	).Scan(&sent); err != nil {
+		return wrapPgErr(op+"(count)", err)
+	}
+	if sent >= limits.MaxPerTenant {
+		return service.ErrInvitationLimited
+	}
+	if limits.MaxPerInviter > 0 && invitedBy != "" {
+		var byInviter int
+		if err := tx.QueryRow(
+			ctx, `
+			SELECT count(*) FROM tenant_invitations
+			WHERE project_id = $1 AND invited_by = $2 AND created_at_ms >= $3`,
+			projectID, invitedBy, limits.WindowStartMs,
+		).Scan(&byInviter); err != nil {
+			return wrapPgErr(op+"(inviter)", err)
+		}
+		if byInviter >= limits.MaxPerInviter {
+			return service.ErrInviterLimited
+		}
+	}
+	if recipientKey != "" && limits.MaxPerRecipient > 0 {
+		var toRecipient int
+		if err := tx.QueryRow(
+			ctx, `
+			SELECT count(*) FROM tenant_invitations
+			WHERE project_id = $1 AND tenant_id = $2
+			  AND lower(email COLLATE "C") = $3 AND created_at_ms >= $4`,
+			projectID, tenantID, recipientKey, limits.WindowStartMs,
+		).Scan(&toRecipient); err != nil {
+			return wrapPgErr(op+"(recipient)", err)
+		}
+		if toRecipient >= limits.MaxPerRecipient {
+			return service.ErrInvitationRecipientLimited
+		}
+	}
+	return nil
+}
+
 // openInvitationQuery selects the open invitations of project $1 at $3, as
-// service.OpenInvitationReader counts one open; the caller appends which ($2).
+// service.OpenInvitationReader counts one open, never a managed account's
+// set-up link; the caller appends which ($2).
 const openInvitationQuery = `SELECT i.id, i.project_id, i.tenant_id, i.token_hash, i.email, i.invited_by, i.role, i.status,
-		i.expires_at_ms, i.accepted_at_ms, i.created_at_ms, i.token_only_in_email
+		i.expires_at_ms, i.accepted_at_ms, i.created_at_ms, i.token_only_in_email,
+		i.user_id, i.delivery_email, i.setup_epoch
 		FROM tenant_invitations i
 		JOIN tenants t ON t.project_id = i.project_id AND t.id = i.tenant_id
 		JOIN tenant_memberships m ON m.project_id = i.project_id AND m.tenant_id = i.tenant_id
@@ -1240,7 +1266,7 @@ const openInvitationQuery = `SELECT i.id, i.project_id, i.tenant_id, i.token_has
 		JOIN users u ON u.project_id = i.project_id AND u.id = i.invited_by
 		  AND lower(u.status) IN ('', 'active', 'pending_deletion')
 		  AND u.kind <> 'agent' AND NOT u.is_anonymous AND u.merged_into_user_id = ''
-		WHERE i.project_id = $1
+		WHERE i.project_id = $1 AND i.user_id = ''
 		  AND i.status = 'pending' AND (i.expires_at_ms = 0 OR i.expires_at_ms >= $3)
 		  AND t.status IN ('claimed', 'latent') AND t.created_by = ''`
 

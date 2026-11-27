@@ -936,6 +936,15 @@
     "anchor": "password-and-lockout"
   },
   {
+    "name": "GATEWAY_MANAGED_ACCOUNTS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "lets tenant owners and admins create accounts their tenant manages, on a domain verified for it.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_METRICS_PORT",
     "type": "integer",
     "default": "9090",

@@ -657,6 +657,10 @@ func TestTenantFeaturesNeedPostgres(t *testing.T) {
 	for name, set := range map[string]func(*Config){
 		"GATEWAY_SELF_SERVICE_TENANTS_ENABLED": func(c *Config) { c.SelfServiceTenantsEnabled = true },
 		"GATEWAY_TENANT_SELECTION_ENABLED":     func(c *Config) { c.TenantSelectionEnabled = true },
+		"GATEWAY_MANAGED_ACCOUNTS_ENABLED": func(c *Config) {
+			c.ManagedAccountsEnabled = true
+			c.RevocationMode = RevocationModeSession
+		},
 	} {
 		for _, driver := range []string{"memory", "sqlite"} {
 			c := Load()
@@ -716,5 +720,32 @@ func TestAccountClassificationBudget(t *testing.T) {
 	c.RateLimitAccountClassificationPerIP = -1
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_RATE_LIMIT_ACCOUNT_CLASSIFICATION_PER_IP") {
 		t.Fatalf("negative classifier budget: %v", err)
+	}
+}
+
+// Managed accounts are opt-in.
+func TestManagedAccountsEnabled_DefaultsOff(t *testing.T) {
+	t.Setenv("GATEWAY_MANAGED_ACCOUNTS_ENABLED", "")
+	if Load().ManagedAccountsEnabled {
+		t.Fatal("managed accounts must default off")
+	}
+	t.Setenv("GATEWAY_MANAGED_ACCOUNTS_ENABLED", "true")
+	if !Load().ManagedAccountsEnabled {
+		t.Fatal("GATEWAY_MANAGED_ACCOUNTS_ENABLED=true must turn them on")
+	}
+}
+
+// Signing a managed account out must end its sessions at once, which only
+// session revocation does.
+func TestManagedAccountsNeedSessionRevocation(t *testing.T) {
+	c := Load()
+	c.ManagedAccountsEnabled = true
+	c.RevocationMode = RevocationModeTTL
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "GATEWAY_REVOCATION_MODE=session") {
+		t.Fatalf("managed accounts under ttl revocation must be refused, got %v", err)
+	}
+	c.RevocationMode = RevocationModeSession
+	if err := c.Validate(); err != nil {
+		t.Fatalf("managed accounts under session revocation: %v", err)
 	}
 }
