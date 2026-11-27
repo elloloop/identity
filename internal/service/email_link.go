@@ -99,6 +99,15 @@ func (s *AuthService) emailLinkPageURL(ctx context.Context, brand resolvedBrandi
 	return appBaseURL(ctx, s.cfg) + appAuthPathPrefix + page
 }
 
+// tenantMembersLink is the link to the members page of tenantID at
+// GATEWAY_TENANT_MEMBERS_PAGE_URL, or "" when none is configured.
+func tenantMembersLink(cfg *config.Config, tenantID string) string {
+	if cfg == nil || cfg.TenantMembersPageURL == "" {
+		return ""
+	}
+	return cfg.TenantMembersPageURL + "?tenant_id=" + url.QueryEscape(tenantID)
+}
+
 // tenantInvitationLink is the link a tenant-invitation email carries. The page
 // at GATEWAY_TENANT_INVITATION_PAGE_URL, when set, wins over everything,
 // including a project's primary auth domain, because the deployment accepts

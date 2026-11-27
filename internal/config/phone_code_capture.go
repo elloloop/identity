@@ -33,6 +33,7 @@ func (c *Config) publicAddresses() []publicAddress {
 	add("GATEWAY_APP_BASE_URL", c.AppBaseURL)
 	add("GATEWAY_EMAIL_LINK_BASE_URL", c.EmailLinkBaseURL)
 	add("GATEWAY_TENANT_INVITATION_PAGE_URL", c.TenantInvitationPageURL)
+	add("GATEWAY_TENANT_MEMBERS_PAGE_URL", c.TenantMembersPageURL)
 	add("GATEWAY_QR_LOGIN_BASE_URL", c.QRLoginBaseURL)
 	add("GATEWAY_PASSKEY_RP_ID", c.PasskeyRPID)
 	add("GATEWAY_PASSKEY_ORIGIN", c.PasskeyOrigin)

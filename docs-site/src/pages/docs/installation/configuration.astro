@@ -601,6 +601,15 @@ https://signin.example.com/reset-password?token=…&product=kids&redirect=https%
 
 # CreateTenantInvitation emails
 https://app.example.com/invitations/accept/?token=…`}</code></pre>
+  <p>
+    <code>GATEWAY_TENANT_MEMBERS_PAGE_URL</code> (default empty) is the page
+    where a tenant's owners and admins manage its members. When a person
+    asks for help signing in to an account a tenant manages, the notice to
+    the tenant's owners and admins has an Open Members button to
+    <code>&lt;page&gt;?tenant_id=&lt;tenant&gt;</code>; with the variable
+    empty the notice has no button. It is validated like
+    <code>GATEWAY_TENANT_INVITATION_PAGE_URL</code>.
+  </p>
 
   <h2>Boolean parsing</h2>
   <p>

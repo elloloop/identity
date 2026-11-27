@@ -21,6 +21,15 @@ type HelpService struct {
 	defaultProjectID string
 	audit            *audit.Logger
 	logger           *zap.Logger
+	// router decides where a request goes (WithAdminHelpRouter); nil files
+	// every request for the project's admins.
+	router AdminHelpRouter
+}
+
+// WithAdminHelpRouter sets what decides where a help request goes.
+func (s *HelpService) WithAdminHelpRouter(router AdminHelpRouter) *HelpService {
+	s.router = router
+	return s
 }
 
 // NewHelpService creates a HelpService.
@@ -46,7 +55,10 @@ func (s *HelpService) db(ctx context.Context) DB {
 
 // RequestAdminHelp creates a help request. Always returns nil error
 // to prevent email enumeration — internal failures are logged and
-// swallowed. Rate limited to 3 requests per email per 24 hours.
+// swallowed. Rate limited to 3 requests per email per 24 hours. With a
+// router (WithAdminHelpRouter) the router decides where it goes: a request
+// about a managed account goes to the tenant that manages it, and only
+// another is filed here.
 func (s *HelpService) RequestAdminHelp(
 	ctx context.Context, email, reason, sourceIP, userAgent string,
 ) error {
@@ -57,7 +69,18 @@ func (s *HelpService) RequestAdminHelp(
 	if len(reason) > 1024 {
 		reason = reason[:1024]
 	}
+	file := func(ctx context.Context) { s.fileHelpRequest(ctx, email, reason, sourceIP, userAgent) }
+	if s.router == nil {
+		file(ctx)
+		return nil
+	}
+	s.router.RouteAdminHelp(ctx, email, strings.TrimSpace(reason), sourceIP, userAgent, file)
+	return nil
+}
 
+// fileHelpRequest files a help request for the project's admins, at most 3
+// per email per 24 hours. Every failure is logged, never returned.
+func (s *HelpService) fileHelpRequest(ctx context.Context, email, reason, sourceIP, userAgent string) {
 	now := nowMs()
 	dayAgo := now - 24*3600*1000
 
@@ -80,8 +103,7 @@ func (s *HelpService) RequestAdminHelp(
 	if countRecent >= 3 {
 		s.logger.Info("admin_help_rate_limited",
 			zap.String("email", redactEmail(email)), zap.Int("count", countRecent))
-		// Always return nil — no enumeration.
-		return nil
+		return
 	}
 
 	data := map[string]any{
@@ -100,8 +122,7 @@ func (s *HelpService) RequestAdminHelp(
 	result, err := s.db(ctx).ExecuteAtomic(ctx, s.projectID(ctx), tenantAdminActor, []graph.Operation{op})
 	if err != nil {
 		s.logger.Error("admin_help_create_failed", zap.String("email", redactEmail(email)), zap.Error(err))
-		// Best-effort: still return nil.
-		return nil
+		return
 	}
 
 	requestID := ""
@@ -118,7 +139,6 @@ func (s *HelpService) RequestAdminHelp(
 	)
 	s.logger.Info("admin_help_requested",
 		zap.String("email", redactEmail(email)), zap.String("request_id", requestID))
-	return nil
 }
 
 // ListHelpRequests returns a paginated list of help requests.

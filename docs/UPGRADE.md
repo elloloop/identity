@@ -1,5 +1,58 @@
 # Upgrade guide
 
+## Next — a help request about a managed account goes to its tenant (migration `0070_add_managed_help_notices`, schema 70; audit event `managed_account_help_requested`; `GATEWAY_MANAGED_HELP_MAX_PER_TENANT`, `GATEWAY_MANAGED_HELP_MAX_PER_SOURCE`, `GATEWAY_TENANT_MEMBERS_PAGE_URL`; `ManagedHelpStore`, `AdminHelpRouter` (Go API))
+
+Someone who cannot sign in to an account a tenant manages can only be helped
+by that tenant, so `RequestAdminHelp` about such an account now tells the
+tenant's owners and admins instead of filing it for the project's admins.
+
+- **What changes, with `GATEWAY_MANAGED_ACCOUNTS_ENABLED` on.** The reply is
+  the same fixed, empty answer for every address, and the lookup runs off the
+  request path, as a password reset's does. When the address is a managed
+  account whose membership of its tenant is active or suspended, the tenant's
+  active owners and admins (active accounts, the account itself excepted) are
+  mailed "<name> (<address>) asked for help signing in.", naming the account
+  by its stored display name (its address alone when it has none), with an
+  Open Members button to `GATEWAY_TENANT_MEMBERS_PAGE_URL?tenant_id=<tenant>`
+  when that variable is set (no button when it is not; it is validated like
+  `GATEWAY_TENANT_INVITATION_PAGE_URL`). The notice carries nothing
+  the caller wrote: no reason, IP address or user agent; those stay in the
+  audit entry. Any other address, and an account whose tenant has no active
+  owner or admin to tell, is filed as before. Where the project sends no
+  email, every request is filed at once, as before, and a lookup the server
+  cannot run (every background slot taken, or the project's email policy
+  failing to load) files the request instead.
+- **Limits.** The tenant is told about one account at most once in 24 hours;
+  at most `GATEWAY_MANAGED_HELP_MAX_PER_TENANT` notices (default 20, up to
+  1000) go to one tenant in 24 hours, and requests from one client address
+  cause at most `GATEWAY_MANAGED_HELP_MAX_PER_SOURCE` of them (default 3, up
+  to 1000); an IPv6 client counts as its /64. A tenant with nobody to tell
+  uses no cap and no day. The store decides under a per-tenant lock, so racing requests keep
+  the caps. `RequestAdminHelp` gets the passwordless code's per-IP budget
+  (`GATEWAY_RATE_LIMIT_PASSWORDLESS_PER_IP`), over HTTP and native gRPC.
+- **Migration.** `0070_add_managed_help_notices` adds `managed_help_notices`:
+  one row per notice sent, with an HMAC of the client address under a key
+  derived from the server's TOTP recovery pepper, never the address; rows
+  older than a day are deleted by the next request for the tenant. It takes
+  the locks 0052 took on `projects`, `tenants` and `users` while it adds its
+  foreign keys; on a lock timeout, `identity migrate force 69`, then
+  `identity migrate`.
+- **Audit and logs.** A notice sent records `managed_account_help_requested`
+  (target the account, the requester's IP address and user agent, and the
+  tenant id, `outcome` `notify`, the number of `recipients` and the caller's
+  `reason` as `RequestAdminHelp` truncated it); a request a
+  cap refuses records it unsuccessful with `outcome` `tenant_limited` or
+  `source_limited`. Logs: `managed_account_help_requested`,
+  `managed_account_help_not_sent` with the `outcome` (`duplicate` and
+  `no_recipients` included),
+  `managed_account_help_send_failed`, and `managed_account_help_failed` at
+  ERROR when the store fails, in which case nothing is filed.
+- **With the switch off** nothing changes: every request is filed at once and
+  `RequestAdminHelp` has no per-IP budget of its own.
+- **Postgres only**, like every managed-account write.
+- **Go API.** `HelpService.WithAdminHelpRouter` and `AuthService.WithManagedHelp`;
+  `app.Deps` gains `ManagedHelp`.
+
 ## Next — a tenant takes back its managed accounts: `ResetManagedAccount`, and suspending or removing a managed account signs it out (additive RPC and audit event `managed_account_reset`; no migration; `MembershipService.WithManagedMembers` (Go API))
 
 An account a tenant manages (`managed_by_tenant_id`) belongs to the tenant, so

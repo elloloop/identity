@@ -55,6 +55,7 @@
   "logout",
   "managed_account_created",
   "managed_account_deleted",
+  "managed_account_help_requested",
   "managed_account_reset",
   "managed_account_reset_owners_notified",
   "managed_account_set_up",

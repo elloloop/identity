@@ -496,6 +496,7 @@ func (s *AuthService) RemoveRecoveryEmail(ctx context.Context, userID string, si
 // does not fit ("" keeps it).
 type accountNotice struct {
 	op, headline, detail, advice string
+	buttonLabel, buttonURL       string
 }
 
 // renderAccountNotice renders notice, addressed to userName, under brand.
@@ -505,6 +506,8 @@ func renderAccountNotice(brand resolvedBranding, userName string, notice account
 		"Headline": notice.headline,
 		"Detail":   notice.detail,
 		"Advice":   notice.advice,
+		"Button":   notice.buttonLabel,
+		"Link":     notice.buttonURL,
 	}))
 }
 
