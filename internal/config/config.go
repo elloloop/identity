@@ -247,6 +247,24 @@ const DefaultTenantInvitationMaxPerRecipient = 10
 // GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT accepted.
 const MaxTenantInvitationMaxPerRecipient = 1000
 
+// DefaultManagedHelpMaxPerTenant is how many help-request notices one tenant's
+// owners and admins are sent about its managed accounts in a day when
+// GATEWAY_MANAGED_HELP_MAX_PER_TENANT is unset or 0.
+const DefaultManagedHelpMaxPerTenant = 20
+
+// MaxManagedHelpMaxPerTenant is the largest GATEWAY_MANAGED_HELP_MAX_PER_TENANT
+// accepted.
+const MaxManagedHelpMaxPerTenant = 1000
+
+// DefaultManagedHelpMaxPerSource is how many of those notices one source may
+// cause for one tenant in a day when GATEWAY_MANAGED_HELP_MAX_PER_SOURCE is
+// unset or 0.
+const DefaultManagedHelpMaxPerSource = 3
+
+// MaxManagedHelpMaxPerSource is the largest GATEWAY_MANAGED_HELP_MAX_PER_SOURCE
+// accepted.
+const MaxManagedHelpMaxPerSource = 1000
+
 // DefaultTenantDomainAttemptsMaxPerTenant is how many domain registrations
 // and verifications one tenant may make in each window when
 // GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT is unset or 0.
@@ -1610,6 +1628,17 @@ type Config struct {
 	// access.admit_managed_accounts config. Driven by
 	// GATEWAY_MANAGED_ACCOUNTS_ENABLED.
 	ManagedAccountsEnabled bool
+	// ManagedHelpMaxPerTenant caps how many help-request notices one tenant's
+	// owners and admins are sent about its managed accounts in a day, from 0
+	// to 1000 (0 selects the default, 20); past it a request is answered as
+	// any other and no notice is sent. Driven by
+	// GATEWAY_MANAGED_HELP_MAX_PER_TENANT.
+	ManagedHelpMaxPerTenant int
+	// ManagedHelpMaxPerSource caps how many of those notices requests from
+	// one client address may cause for one tenant in a day, from 0 to 1000
+	// (0 selects the default, 3). Driven by
+	// GATEWAY_MANAGED_HELP_MAX_PER_SOURCE.
+	ManagedHelpMaxPerSource int
 	// TenantStatusCacheTTLSeconds bounds how long the access-token check may
 	// serve a selected tenant's status from its in-process cache, from 0 to
 	// 300 (default 30), where 0 reads the tenant on every request that
@@ -2032,6 +2061,8 @@ func loadFromEnv() *Config {
 		SelfServiceTenantsWindowSeconds:   envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
 		TenantSelectionEnabled:            envBool("GATEWAY_TENANT_SELECTION_ENABLED", false),
 		ManagedAccountsEnabled:            envBool("GATEWAY_MANAGED_ACCOUNTS_ENABLED", false),
+		ManagedHelpMaxPerTenant:           envInt("GATEWAY_MANAGED_HELP_MAX_PER_TENANT", DefaultManagedHelpMaxPerTenant),
+		ManagedHelpMaxPerSource:           envInt("GATEWAY_MANAGED_HELP_MAX_PER_SOURCE", DefaultManagedHelpMaxPerSource),
 		TenantStatusCacheTTLSeconds:       envInt("GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS", DefaultTenantStatusCacheTTLSeconds),
 		AuditRetentionDays:                envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
 
@@ -3364,6 +3395,20 @@ func (c *Config) TenantInvitationRecipientLimit() int {
 	return boundedSetting(c.TenantInvitationMaxPerRecipient, DefaultTenantInvitationMaxPerRecipient, MaxTenantInvitationMaxPerRecipient)
 }
 
+// ManagedHelpTenantLimit is how many help-request notices one tenant's owners
+// and admins are sent in a day: the configured value, or the default when
+// unset.
+func (c *Config) ManagedHelpTenantLimit() int {
+	return boundedSetting(c.ManagedHelpMaxPerTenant, DefaultManagedHelpMaxPerTenant, MaxManagedHelpMaxPerTenant)
+}
+
+// ManagedHelpSourceLimit is how many of those notices one client address may
+// cause for one tenant in a day: the configured value, or the default when
+// unset.
+func (c *Config) ManagedHelpSourceLimit() int {
+	return boundedSetting(c.ManagedHelpMaxPerSource, DefaultManagedHelpMaxPerSource, MaxManagedHelpMaxPerSource)
+}
+
 // TenantDomainAttemptsLimit is how many domain registrations and
 // verifications one tenant may make in each window: the configured value, or
 // the default when unset.
@@ -3406,6 +3451,8 @@ func (c *Config) validateTenantGovernance() error {
 		{"GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS", c.TenantInvitationResendCooldownSeconds, MaxTenantInvitationResendCooldownSeconds, DefaultTenantInvitationResendCooldownSeconds, "; the cooldown cannot be turned off"},
 		{"GATEWAY_TENANT_INVITATION_MAX_PER_INVITER", c.TenantInvitationMaxPerInviter, MaxTenantInvitationMaxPerInviter, DefaultTenantInvitationMaxPerInviter, ""},
 		{"GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT", c.TenantInvitationMaxPerRecipient, MaxTenantInvitationMaxPerRecipient, DefaultTenantInvitationMaxPerRecipient, ""},
+		{"GATEWAY_MANAGED_HELP_MAX_PER_TENANT", c.ManagedHelpMaxPerTenant, MaxManagedHelpMaxPerTenant, DefaultManagedHelpMaxPerTenant, ""},
+		{"GATEWAY_MANAGED_HELP_MAX_PER_SOURCE", c.ManagedHelpMaxPerSource, MaxManagedHelpMaxPerSource, DefaultManagedHelpMaxPerSource, ""},
 		{"GATEWAY_TENANT_DOMAIN_ATTEMPTS_MAX_PER_TENANT", c.TenantDomainAttemptsMaxPerTenant, MaxTenantDomainAttemptsMaxPerTenant, DefaultTenantDomainAttemptsMaxPerTenant, ""},
 		{"GATEWAY_TENANT_DOMAIN_ATTEMPTS_WINDOW_SECONDS", c.TenantDomainAttemptsWindowSeconds, MaxTenantDomainAttemptsWindowSeconds, DefaultTenantDomainAttemptsWindowSeconds, ""},
 	}

@@ -1648,6 +1648,11 @@ type AuthService struct {
 	emailSendsDropped *prometheus.CounterVec
 	emailDropReports  droppedSendReports
 
+	// managedHelp records help requests about managed accounts for the
+	// tenants that manage them (WithManagedHelp); nil sends every help
+	// request to the project's admins.
+	managedHelp ManagedHelpStore
+
 	// autoFormer, when set (postgres driver only), auto-forms a tenant from
 	// a new user's company email domain at signup. nil disables the
 	// behaviour — the constructor leaves it nil; app.New sets it via

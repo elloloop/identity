@@ -785,3 +785,23 @@ func TestBuildRateLimits_ManagedAddressCheckLimited(t *testing.T) {
 	assertQuotaExhausts(t, handler, check, "198.51.100.12", 2)
 	assertQuotaExhausts(t, handler, invite, "198.51.100.12", 2)
 }
+
+// TestBuildRateLimits_AdminHelpLimitedWithManagedAccounts: RequestAdminHelp
+// gets the passwordless per-IP budget only where managed accounts are on,
+// as a request about one mails its tenant's owners and admins; off, it has
+// no per-IP limit, as before.
+func TestBuildRateLimits_AdminHelpLimitedWithManagedAccounts(t *testing.T) {
+	path := identityconnectgen.IdentityServiceRequestAdminHelpProcedure
+	cfg := &config.Config{RateLimitWindowSeconds: 60, RateLimitPasswordlessPerIP: 2}
+	_, found := middleware.MatchPathLimit(buildRateLimits(cfg), path)
+	assert.False(t, found, "with managed accounts off RequestAdminHelp has no per-IP limit")
+
+	cfg.ManagedAccountsEnabled = true
+	limit, found := middleware.MatchPathLimit(buildRateLimits(cfg), path)
+	require.True(t, found)
+	assert.Equal(t, "admin_help", limit.Tag)
+	now := time.Now()
+	assert.True(t, limit.Allow("9.9.9.9", now))
+	assert.True(t, limit.Allow("9.9.9.9", now))
+	assert.False(t, limit.Allow("9.9.9.9", now), "the third request in the window is over the budget")
+}

@@ -963,6 +963,24 @@
     "anchor": "projects-and-tenancy"
   },
   {
+    "name": "GATEWAY_MANAGED_HELP_MAX_PER_SOURCE",
+    "type": "integer",
+    "default": "3",
+    "required": false,
+    "description": "caps how many of those notices requests from one client address may cause for one tenant in a day, from 0 to 1000 (0 selects the default, 3).",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_MANAGED_HELP_MAX_PER_TENANT",
+    "type": "integer",
+    "default": "20",
+    "required": false,
+    "description": "caps how many help-request notices one tenant's owners and admins are sent about its managed accounts in a day, from 0 to 1000 (0 selects the default, 20); past it a request is answered as any other and no notice is sent.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_METRICS_PORT",
     "type": "integer",
     "default": "9090",

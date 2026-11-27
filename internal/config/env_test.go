@@ -788,3 +788,39 @@ func TestRateLimitManagedAddressCheckPerTenant(t *testing.T) {
 		t.Fatalf("env = %d, want 7", got)
 	}
 }
+
+func TestManagedHelpLimits(t *testing.T) {
+	c := &Config{}
+	if c.ManagedHelpTenantLimit() != DefaultManagedHelpMaxPerTenant || c.ManagedHelpSourceLimit() != DefaultManagedHelpMaxPerSource {
+		t.Fatalf("unset limits: got %d and %d, want the defaults", c.ManagedHelpTenantLimit(), c.ManagedHelpSourceLimit())
+	}
+	c.ManagedHelpMaxPerTenant, c.ManagedHelpMaxPerSource = 7, 2
+	if c.ManagedHelpTenantLimit() != 7 || c.ManagedHelpSourceLimit() != 2 {
+		t.Fatalf("set limits not answered: %+v", c)
+	}
+	c.ManagedHelpMaxPerTenant, c.ManagedHelpMaxPerSource = MaxManagedHelpMaxPerTenant+1, MaxManagedHelpMaxPerSource+1
+	if c.ManagedHelpTenantLimit() != MaxManagedHelpMaxPerTenant || c.ManagedHelpSourceLimit() != MaxManagedHelpMaxPerSource {
+		t.Fatalf("values over the cap are not capped: %+v", c)
+	}
+	for _, tc := range []struct {
+		env string
+		set func(*Config, int)
+		max int
+	}{
+		{"GATEWAY_MANAGED_HELP_MAX_PER_TENANT", func(c *Config, v int) { c.ManagedHelpMaxPerTenant = v }, MaxManagedHelpMaxPerTenant},
+		{"GATEWAY_MANAGED_HELP_MAX_PER_SOURCE", func(c *Config, v int) { c.ManagedHelpMaxPerSource = v }, MaxManagedHelpMaxPerSource},
+	} {
+		for _, v := range []int{-1, tc.max + 1} {
+			c := Load()
+			tc.set(c, v)
+			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), tc.env) {
+				t.Fatalf("%s=%d must be refused, got %v", tc.env, v, err)
+			}
+		}
+	}
+	t.Setenv("GATEWAY_MANAGED_HELP_MAX_PER_TENANT", "9")
+	t.Setenv("GATEWAY_MANAGED_HELP_MAX_PER_SOURCE", "4")
+	if c := Load(); c.ManagedHelpMaxPerTenant != 9 || c.ManagedHelpMaxPerSource != 4 {
+		t.Fatalf("env not read: %+v", c)
+	}
+}

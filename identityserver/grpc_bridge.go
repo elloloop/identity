@@ -46,12 +46,16 @@ type grpcBridge struct {
 	h *identityconnect.IdentityHandler
 	// directoryLimits holds the per-IP limit of each directory read, by
 	// procedure.
-	directoryLimits        map[string]middleware.PathLimit
-	machineLimits          map[string]middleware.PathLimit
-	operatorLimits         map[string]middleware.PathLimit
-	emailPolicyLimit       middleware.PathLimit
-	invitationReadLimit    middleware.PathLimit
-	invitationSignupLimit  middleware.PathLimit
+	directoryLimits       map[string]middleware.PathLimit
+	machineLimits         map[string]middleware.PathLimit
+	operatorLimits        map[string]middleware.PathLimit
+	emailPolicyLimit      middleware.PathLimit
+	invitationReadLimit   middleware.PathLimit
+	invitationSignupLimit middleware.PathLimit
+	// adminHelpLimit is RequestAdminHelp's per-IP budget, set only where
+	// managed accounts are enabled; without one the call is not throttled
+	// here, as over HTTP.
+	adminHelpLimit         middleware.PathLimit
 	reauthenticationLimits map[string]middleware.PathLimit
 	trustedProxies         []*net.IPNet
 	projectResolver        service.ProjectResolver
@@ -101,6 +105,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 	emailPolicyLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceGetProjectEmailDeliveryProcedure)
 	invitationReadLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceGetTenantInvitationProcedure)
 	invitationSignupLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceSignUpWithTenantInvitationProcedure)
+	adminHelpLimit, _ := middleware.MatchPathLimit(built.RateLimits, identityv1connect.IdentityServiceRequestAdminHelpProcedure)
 	reauthenticationLimits := make(map[string]middleware.PathLimit, 4)
 	for _, procedure := range []string{identityv1connect.IdentityServiceBeginReauthenticationProcedure, identityv1connect.IdentityServiceVerifyReauthenticationProcedure, identityv1connect.IdentityServiceBeginPasskeyEligibilityVerificationProcedure, identityv1connect.IdentityServiceCompletePasskeyEligibilityVerificationProcedure} {
 		if limit, ok := middleware.MatchPathLimit(built.RateLimits, procedure); ok {
@@ -113,6 +118,7 @@ func newGRPCBridge(built *app.Built, logger *zap.Logger, trust grpcTrust) *grpcB
 		emailPolicyLimit:       emailPolicyLimit,
 		invitationReadLimit:    invitationReadLimit,
 		invitationSignupLimit:  invitationSignupLimit,
+		adminHelpLimit:         adminHelpLimit,
 		reauthenticationLimits: reauthenticationLimits,
 		h:                      built.ConnectHandler,
 		directoryLimits:        directoryLimits,
@@ -556,6 +562,11 @@ func (b *grpcBridge) GetIdentityVerificationStatus(ctx context.Context, in *iden
 // ─── Admin help ─────────────────────────────────────────────────────
 
 func (b *grpcBridge) RequestAdminHelp(ctx context.Context, in *identitypb.RequestAdminHelpRequest) (*identitypb.RequestAdminHelpResponse, error) {
+	if b.adminHelpLimit.Limiter != nil {
+		if err := b.throttle(ctx, b.adminHelpLimit); err != nil {
+			return nil, err
+		}
+	}
 	return invoke(ctx, b, in, b.h.RequestAdminHelp)
 }
 

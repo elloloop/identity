@@ -508,6 +508,16 @@ const (
 	// unsuccessful when it reached fewer than all.
 	EventManagedAccountResetOwnersNotified EventType = "managed_account_reset_owners_notified"
 
+	// EventManagedAccountHelpRequested records a help request
+	// (RequestAdminHelp) about an account a tenant manages, which goes to
+	// that tenant's owners and admins: target the account, the requester's
+	// IP address and user agent, and the tenant id, the outcome ("notify",
+	// or "tenant_limited" or "source_limited", unsuccessful, when a daily cap
+	// kept the tenant from being told) and the number of recipients in the
+	// details. A request within a day of a notice about the same account
+	// records nothing.
+	EventManagedAccountHelpRequested EventType = "managed_account_help_requested"
+
 	// EventTenantInvitationRevoked records a tenant owner or admin revoking a
 	// pending invitation (RevokeTenantInvitation): actor the caller and
 	// target the invitation, with the project and tenant ids, the role it
@@ -664,6 +674,7 @@ var validEventTypes = map[EventType]struct{}{
 	EventTenantMemberRestored:              {},
 	EventTenantMemberRoleChanged:           {},
 	EventManagedAccountReset:               {},
+	EventManagedAccountHelpRequested:       {},
 	EventManagedAccountResetOwnersNotified: {},
 	EventTenantInvitationRevoked:           {},
 	EventManagedAccountCreated:             {},

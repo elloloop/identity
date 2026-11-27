@@ -103,6 +103,11 @@ type Deps struct {
 	// ResetManagedAccount returns Unimplemented.
 	ManagedMembers service.ManagedMemberStore
 
+	// ManagedHelp records help requests about managed accounts for the
+	// tenants that manage them. Non-nil ONLY for the postgres driver; when
+	// nil every help request goes to the project's admins.
+	ManagedHelp service.ManagedHelpStore
+
 	// ControlPlaneStore is the project write-store backing the control-plane
 	// admin RPCs (AdminCreateProject and friends). Non-nil ONLY for the
 	// postgres driver; when nil (together with the tenant/membership stores)
@@ -644,6 +649,12 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSCIMPerIP, 0),
 		},
 	}
+	if cfg.ManagedAccountsEnabled {
+		// A help request about a managed account mails the tenant's owners
+		// and admins, so requests get the passwordless code's per-IP budget
+		// on top of the tenant's and each source's daily caps.
+		limits = append(limits, middleware.PathLimit{PathPrefix: identityconnectgen.IdentityServiceRequestAdminHelpProcedure, Tag: "admin_help", Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitPasswordlessPerIP, 0)})
+	}
 	if cfg.AgentOAuthEnabled || cfg.TeammateKeysEnabled {
 		limits = append(limits, middleware.PathLimit{PathPrefix: identityconnectgen.IdentityServiceCreateAgentMachineChallengeProcedure, Tag: "agent_machine_challenge", Limiter: middleware.NewFixedWindowLimiter(window, cfg.AgentMachineChallengePerIP, 0)})
 	}
@@ -887,6 +898,7 @@ func New(deps Deps) (*Built, error) {
 		WithOpenInvitations(deps.InvitationStore).
 		WithManagedAccounts(deps.ManagedSetups, deps.TenantStore).
 		WithManagedMemberships(managedMembershipReader(deps), managedTenantStatusReader(deps)).
+		WithManagedHelp(deps.ManagedHelp).
 		WithDomainJoin(deps.DomainStore, deps.TenantStore).
 		WithMailDelivery(senders.mailDelivers).
 		WithTemplateMessages(senders.templates).
@@ -926,7 +938,7 @@ func New(deps Deps) (*Built, error) {
 	)
 	configureAgentOAuthSweep(sweep, deps)
 	groupsSvc := service.NewGroupService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
-	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger)
+	helpSvc := service.NewHelpService(deps.DB, deps.Config.DefaultProjectID, auditLog, logger).WithAdminHelpRouter(authSvc)
 	// COPPA data-minimization: one minimizer derived from the age gate +
 	// GATEWAY_MINOR_DATA_MINIMIZATION, shared by the profile and IDV services
 	// so the "is this a minimized child?" rule lives in one place. A no-op
