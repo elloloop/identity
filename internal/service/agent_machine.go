@@ -158,7 +158,7 @@ func (s *AgentOAuthService) ExchangeMachine(ctx context.Context, id, agent strin
 	if err != nil {
 		return nil, err
 	}
-	expires := now + int64(s.auth.cfg.AgentOAuthAccessSeconds)*time.Second.Milliseconds()
+	expires := managedTokenCapMs(s.auth.cfg, authority.Owner, now, now+int64(s.auth.cfg.AgentOAuthAccessSeconds)*time.Second.Milliseconds())
 	if expires <= now {
 		return nil, ErrAgentOAuthGrant
 	}

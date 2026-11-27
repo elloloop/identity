@@ -1,5 +1,52 @@
 # Upgrade guide
 
+## Next — a managed account's credential and admin calls need a live session; managed accounts own agents (no migration; every tenant-admin call reads a managed caller's session; `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` (default 60); `MembershipService.ListTenantMembers`, `ListTenantInvitations`, `CheckManagedAddresses`, `DomainService.ListTenantDomains` and `AuthService.CreateAgent` take a `SessionSignIn` (Go API))
+
+A reset, suspension or removal ends a managed account's sessions at once on
+the replica that wrote it, but another replica may keep serving its cached
+answer for up to `GATEWAY_SESSION_CACHE_TTL_SECONDS`. Nothing such a token
+does there may outlast the reset.
+
+- **The fence.** Passkey registration (begin and complete), two-step
+  enrolment (`BeginTotpSetup`, `VerifyTotpSetup`), `RequestPhoneVerification`, `VerifyPhoneCode`,
+  `LinkIdentity`, `ChangePassword`, `CreateAgent` and every tenant-admin call
+  (each one that needs an active owner or admin of the tenant, in the
+  membership and the domain services) read the caller's account and the
+  token's session from the store, never the session cache. A managed caller
+  whose account is not active is `FAILED_PRECONDITION`; one whose session has
+  ended, belongs to another account or is not named (a token without `sid`)
+  is `UNAUTHENTICATED`. The credential calls also hold a managed caller to its
+  standing in its tenant: set up, an active membership, a tenant that is not
+  suspended (`FAILED_PRECONDITION` otherwise). Each refusal logs
+  `managed_account_refused` with the
+  `path` and `reason`. Personal callers are not read for; they cost one
+  account read on a tenant-admin call.
+- **Agents.** An account a tenant manages may now own agents (created for
+  it, transferred or offered to it, or reassigned to it) while it stands in
+  its tenant: set up, active, with an active membership of a tenant that is
+  not suspended. `CreateAgent` from the account itself also needs a live
+  session (the fence). An agent whose managed owner falls out of standing
+  holds no session, and a suspension, removal or reset deactivates the
+  account's agents, which stay deactivated until the owner reactivates them.
+- **Short access tokens.** A managed account's access tokens last
+  `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` (default 60; boot refuses more
+  than 60 while `GATEWAY_MANAGED_ACCOUNTS_ENABLED` is on, and a negative value
+  always; never longer than `GATEWAY_JWT_EXPIRY_SECONDS`), and a sign-in
+  reports that in `expires_in`. The same cap applies to every token of an
+  agent a managed account owns: its session tokens, its delegated and machine
+  tokens, and its teammate-key tokens (an agent whose owner cannot be read
+  gets the short lifetime). Services that verify access tokens themselves
+  therefore stop honouring a suspended, removed or reset managed account, and
+  its agents, within a minute, and its refresh is refused. Personal accounts'
+  and their agents' tokens are unchanged.
+- **With managed accounts off** no managed account exists, so nothing
+  changes but the account read on tenant-admin calls.
+- **Go API.** `MembershipService.ListTenantMembers`,
+  `ListTenantInvitations`, `CheckManagedAddresses`, `DomainService.ListTenantDomains` and
+  `AuthService.CreateAgent` gain a `SessionSignIn` after the caller's id. A
+  `DomainService` with no account store (`WithAccounts`) refuses every
+  tenant-admin call, as it cannot read the caller.
+
 ## Next — a help request about a managed account goes to its tenant (migration `0070_add_managed_help_notices`, schema 70; audit event `managed_account_help_requested`; `GATEWAY_MANAGED_HELP_MAX_PER_TENANT`, `GATEWAY_MANAGED_HELP_MAX_PER_SOURCE`, `GATEWAY_TENANT_MEMBERS_PAGE_URL`; `ManagedHelpStore`, `AdminHelpRouter` (Go API))
 
 Someone who cannot sign in to an account a tenant manages can only be helped

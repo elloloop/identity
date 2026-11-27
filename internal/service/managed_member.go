@@ -205,7 +205,7 @@ func (s *MembershipService) ResetManagedAccount(ctx context.Context, callerID st
 			zap.String("to", redactEmail(deliveryAddress)))...)
 		return nil, fmt.Errorf("%w: delivery_address is not a usable address", ErrInvalidArgument)
 	}
-	callerMembership, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID)
+	callerMembership, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn)
 	if err != nil {
 		return refuse("not_permitted", err)
 	}

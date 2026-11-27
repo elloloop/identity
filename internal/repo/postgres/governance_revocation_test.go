@@ -389,7 +389,7 @@ func TestGovernanceRevocation_FailedSelfServiceVerifyRevokesNothing(t *testing.T
 	e := f.seedEveryone(ctx, t)
 	own := f.seedAuthority(ctx, t, owner)
 
-	svc := service.NewDomainService(f.domains, f.tenants, f.members, noTXT{}, &config.Config{}, nil)
+	svc := service.NewDomainService(f.domains, f.tenants, f.members, noTXT{}, &config.Config{}, nil).WithAccounts(f.repo)
 	pctx := service.WithProjectScope(ctx, &service.ProjectScope{
 		ProjectID: f.project, Access: service.ProjectAccessConfig{Mode: service.AccessModeOpen},
 	})

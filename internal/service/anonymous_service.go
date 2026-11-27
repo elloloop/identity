@@ -143,7 +143,7 @@ func (s *AuthService) SignInAnonymously(ctx context.Context, ipAddr, userAgent s
 		User:         u,
 		AccessToken:  access,
 		RefreshToken: refresh,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    s.accessTokenExpiresIn(u),
 	}, nil
 }
 

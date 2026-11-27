@@ -69,6 +69,9 @@ type TeammateKeyService struct {
 	// standing judges a managed grantor's or owner's standing in its tenant
 	// (WithManagedStanding); its zero value refuses every managed account.
 	standing managedStanding
+	// managedAccessSeconds caps the lifetime of a token a managed account
+	// stands behind (GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS).
+	managedAccessSeconds int64
 }
 
 // WithManagedStanding wires the readers that judge whether a managed
@@ -130,7 +133,7 @@ func NewTeammateKeyService(cfg *config.Config, credentials DirectoryCredentialSt
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &TeammateKeyService{credentials: credentials, base: base, signer: teammateSigner, issuer: cfg.JWTIssuer, audience: cfg.JWTAudience, defaultProject: cfg.DefaultProjectID, audit: auditLog, logger: logger, now: time.Now, metrics: metrics}, nil
+	return &TeammateKeyService{credentials: credentials, base: base, signer: teammateSigner, issuer: cfg.JWTIssuer, audience: cfg.JWTAudience, defaultProject: cfg.DefaultProjectID, audit: auditLog, logger: logger, now: time.Now, metrics: metrics, managedAccessSeconds: int64(cfg.ManagedAccessTokenExpiry() / time.Second)}, nil
 }
 
 func (s *TeammateKeyService) repo(project string) TeammateKeyRepository {
@@ -304,7 +307,8 @@ func (s *TeammateKeyService) Exchange(ctx context.Context, keyID string, proof A
 	if challenge == nil || challenge.KeyID != key.ID || challenge.CreatedAtMs > now.UnixMilli() || challenge.ExpiresAtMs <= now.UnixMilli() || !verifyTeammateSignature(key, []byte(challenge.Message), proof.Signature) {
 		return nil, ErrUnauthenticated
 	}
-	if err = s.ownerStandsBehind(ctx, project, key); err != nil {
+	managed, err := s.ownerStandsBehind(ctx, project, key)
+	if err != nil {
 		return nil, err
 	}
 	consumed, stopsAtMs, err := repo.ConsumeTeammateKeyChallenge(ctx, challenge.ID, key.ID, now.UnixMilli())
@@ -318,6 +322,9 @@ func (s *TeammateKeyService) Exchange(ctx context.Context, keyID string, proof A
 	expiresAt := issuedAt + config.TeammateAccessSeconds
 	if stopsAtMs != 0 {
 		expiresAt = min(expiresAt, stopsAtMs/1000)
+	}
+	if managed {
+		expiresAt = min(expiresAt, issuedAt+s.managedAccessSeconds)
 	}
 	lifetime := expiresAt - issuedAt
 	if lifetime <= 0 {
@@ -353,30 +360,34 @@ func (s *TeammateKeyService) activeKey(ctx context.Context, keyID string) (*Team
 // key's tokens as the grant rule would refuse a new grant. The grantor, and
 // the teammate's owner, must also be in standing in the tenant that manages
 // their account, if one does (managedStanding), so suspending or removing a
-// managed member stops the tokens at the next exchange.
-func (s *TeammateKeyService) ownerStandsBehind(ctx context.Context, project string, key *TeammateKey) error {
+// managed member stops the tokens at the next exchange. It reports whether
+// either is an account a tenant manages, whose tokens are short-lived.
+func (s *TeammateKeyService) ownerStandsBehind(ctx context.Context, project string, key *TeammateKey) (bool, error) {
 	users := s.base.WithProject(project)
 	teammate, err := users.GetUser(ctx, key.TeammateID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
+		return false, err
 	}
 	owner, err := users.GetUser(ctx, key.OwnerUserID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
+		return false, err
 	}
 	if !mayGrantHire(owner, teammate) {
-		return ErrUnauthenticated
+		return false, ErrUnauthenticated
 	}
 	if err := standingRefusal(s.standing.refuse(ctx, project, owner)); err != nil {
-		return err
+		return false, err
 	}
 	teammateOwner := owner
 	if teammate.OwnerUserID != owner.ID {
 		if teammateOwner, err = users.GetUser(ctx, teammate.OwnerUserID); err != nil && !errors.Is(err, ErrNotFound) {
-			return err
+			return false, err
 		}
 	}
-	return standingRefusal(s.standing.ownerStands(ctx, project, teammateOwner))
+	if err := standingRefusal(s.standing.ownerStands(ctx, project, teammateOwner)); err != nil {
+		return false, err
+	}
+	return owner.ManagedByTenantID != "" || (teammateOwner != nil && teammateOwner.ManagedByTenantID != ""), nil
 }
 
 // standingRefusal is err as a teammate exchange answers it: a standing

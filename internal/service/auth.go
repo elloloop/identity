@@ -2455,7 +2455,7 @@ func (s *AuthService) issueTokensWithSessionStart(ctx context.Context, user *Use
 		claims.SID = sid
 	}
 
-	accessToken, err := s.signer.SignAccessToken(ctx, claims, s.cfg.JWTExpiry())
+	accessToken, err := s.signer.SignAccessToken(ctx, claims, s.accessTokenExpiry(ctx, user))
 	if err != nil {
 		return "", "", fmt.Errorf("creating access token: %w", err)
 	}

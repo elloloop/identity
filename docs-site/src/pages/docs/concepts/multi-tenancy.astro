@@ -828,8 +828,7 @@ RestoreTenantMember(tenant_id, user_id)
     joining one by domain, accepting any invitation, leaving its tenant,
     changing its email, adding a recovery email (<code>FAILED_PRECONDITION</code>
     with <code>POLICY</code>: its tenant recovers it with a reset), linking a
-    provider, deleting itself, owning an agent
-    (created for it, offered to it, accepted by it or reassigned to it), and
+    provider, deleting itself, and
     merging with another account on either side. It signs in through no
     OAuth provider, since no tenant owns one yet: a provider account at the
     same address would otherwise control it. While it waits to be set up it is
@@ -842,6 +841,25 @@ RestoreTenantMember(tenant_id, user_id)
     purge ends
     its set-up links first, the stored-email repair leaves it alone, and it
     forms no tenant from its domain.
+  </p>
+  <p id="managed-session-fence">
+    A managed account's access token can outlive the write that took the
+    account back: another replica may still cache its session for up to
+    <code>GATEWAY_SESSION_CACHE_TTL_SECONDS</code>. So every call that
+    attaches a way in (a passkey, two-step, a phone, a
+    provider link, a password, an agent) and every tenant-admin call reads the
+    account and the token's session from the store, not the cache, and
+    refuses a managed caller whose account is not active
+    (<code>FAILED_PRECONDITION</code>) or whose session has ended or is not
+    named (<code>UNAUTHENTICATED</code>). A personal caller is never read
+    for. A managed account's access tokens (<code>managed: true</code>) last
+    <code>GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS</code>, a minute by
+    default, so a service that verifies tokens itself stops honouring one
+    within a minute of a suspension, removal or reset, and the refresh that
+    follows is refused. A managed account may own agents while it stands in its tenant (set
+    up, active, an active membership); an agent whose managed owner falls out
+    of standing holds no session, and a suspension, removal or reset
+    deactivates its agents.
   </p>
   <p>
     <code>RevokeTenantInvitation</code> on a set-up link also deletes its

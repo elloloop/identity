@@ -154,15 +154,6 @@ func TestMerge_RefusesAManagedAccountOnEitherSide(t *testing.T) {
 	require.ErrorIs(t, err, ErrManagedAccount, "an admin merging into a managed account")
 }
 
-func TestCreateAgent_RefusesAManagedOwner(t *testing.T) {
-	f := newAgentFixture(t)
-	managed := seedManaged(f.repo, "ann@acme.example.com", StatusActive)
-	_, err := f.svc.CreateAgent(context.Background(), managed.ID, "Helper", "", "", "", "", "managed-key")
-	require.ErrorIs(t, err, ErrManagedAccount)
-	_, err = f.svc.CreateAgent(context.Background(), f.admin.ID, "Helper", "", managed.ID, "", "", "admin-key")
-	require.ErrorIs(t, err, ErrManagedAccount, "an admin cannot give a managed account an agent either")
-}
-
 func TestRequestEmailChange_RefusesAManagedAccount(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestAuthService(t, repo)
@@ -228,7 +219,9 @@ func TestMembership_RefusesAManagedAccountsSelfServicePaths(t *testing.T) {
 	f.seedMember(mTestProject, mTestTenant, mInviteeID, RoleAdmin)
 	f.seedAdmin(mTestProject, mTestTenant, "owner-2")
 	f.seedMember(mTestProject, mTestTenant, mAdminID, RoleAdmin)
-	err = f.svc.RemoveTenantMember(ctx, mInviteeID, SessionSignIn{}, mTestTenant, mInviteeID, "", "")
+	sessions := newFakeRepo()
+	f.svc.WithAccounts(sessions)
+	err = f.svc.RemoveTenantMember(ctx, mInviteeID, liveSession(t, sessions, mInviteeID), mTestTenant, mInviteeID, "", "")
 	require.ErrorIs(t, err, ErrManagedAccount, "a managed admin cannot leave")
 	err = f.svc.RemoveTenantMember(ctx, mAdminID, SessionSignIn{}, mTestTenant, mAdminID, "", "")
 	require.NoError(t, err, "a personal admin still may")
@@ -324,10 +317,12 @@ func TestRepairStoredEmails_SkipsManagedAccounts(t *testing.T) {
 
 func TestLinkIdentity_RefusesAManagedAccount(t *testing.T) {
 	repo := newFakeRepo()
-	svc := newTestAuthService(t, repo)
+	svc := newTestAuthService(t, repo).WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed))
 	ctx := context.Background()
 	managed := seedManaged(repo, "ann@acme.example.com", StatusActive)
-	_, err := svc.LinkIdentity(ctx, managed.ID, SessionSignIn{AuthTimeSec: svc.nowMs() / 1000, AMR: []string{AMRCredentialEnrollment}},
+	signIn := liveSession(t, repo, managed.ID)
+	signIn.AMR = []string{AMRCredentialEnrollment}
+	_, err := svc.LinkIdentity(ctx, managed.ID, signIn,
 		fakeOAuthCode("ann@acme.example.com", "Ann", "", "google"), "google", "https://app/cb", "", "", "")
 	require.ErrorIs(t, err, ErrManagedAccount)
 	links, err := repo.ListOAuthIdentitiesForUser(ctx, managed.ID)

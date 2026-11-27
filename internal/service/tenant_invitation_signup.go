@@ -203,7 +203,7 @@ func (s *AuthService) SignUpWithTenantInvitation(ctx context.Context, rawToken, 
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    s.accessTokenExpiresIn(user),
 	}, nil
 }
 

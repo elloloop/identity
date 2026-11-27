@@ -78,7 +78,7 @@ func (s *MembershipService) TransferTenantOwnership(ctx context.Context, callerI
 	if newOwnerID == callerID {
 		return nil, fmt.Errorf("%w: user_id is the caller", ErrInvalidArgument)
 	}
-	caller, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID)
+	caller, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn)
 	if err != nil {
 		return nil, err
 	}

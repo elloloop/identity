@@ -69,7 +69,7 @@ func TestSetTenantMemberRole_PromotesAndDemotesAndAudits(t *testing.T) {
 	f := newRoleFixture()
 	ctx := withTenantsProject(false)
 
-	_, err := f.svc.ListTenantMembers(ctx, ssOtherID, ownTenant)
+	_, err := f.svc.ListTenantMembers(ctx, ssOtherID, SessionSignIn{}, ownTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied, "a member does not govern")
 
 	got, err := f.svc.SetTenantMemberRole(ctx, ssOwnerID, SessionSignIn{}, " "+ownTenant+" ", " "+ssOtherID+" ", " Admin ", "203.0.113.7", "test-agent")
@@ -89,7 +89,7 @@ func TestSetTenantMemberRole_PromotesAndDemotesAndAudits(t *testing.T) {
 		"from_role": RoleMember, "to_role": RoleAdmin, "status": MembershipStatusActive,
 	})
 
-	members, err := f.svc.ListTenantMembers(ctx, ssOtherID, ownTenant)
+	members, err := f.svc.ListTenantMembers(ctx, ssOtherID, SessionSignIn{}, ownTenant)
 	require.NoError(t, err, "the promoted admin governs at once")
 	assert.Len(t, members, 2)
 	mine, err := f.svc.ListMyTenants(ctx, ssOtherID, SessionSignIn{})
@@ -104,7 +104,7 @@ func TestSetTenantMemberRole_PromotesAndDemotesAndAudits(t *testing.T) {
 	assert.Equal(t, 2, f.audit.countByEventTypeActorTarget(roleChangedEvent, ssOwnerID, ssOtherID))
 	assert.Equal(t, RoleAdmin, f.audit.detailsOf(roleChangedEvent)[1]["previous_role"])
 	assert.Equal(t, 2, f.logs.FilterMessage("tenant_member_role_changed").Len())
-	_, err = f.svc.ListTenantMembers(ctx, ssOtherID, ownTenant)
+	_, err = f.svc.ListTenantMembers(ctx, ssOtherID, SessionSignIn{}, ownTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied, "the demoted member no longer governs")
 	requireNothingPersonal(t, f.logs, "owner@example.test", "other@example.test")
 }
@@ -295,7 +295,7 @@ func TestSetTenantMemberRole_ASuspendedMemberStaysSuspended(t *testing.T) {
 	assert.Equal(t, RoleAdmin, got.Role)
 	assert.Equal(t, MembershipStatusSuspended, got.Status)
 	assert.Equal(t, MembershipStatusSuspended, f.audit.detailsOf(roleChangedEvent)[0]["status"])
-	_, err = f.svc.ListTenantMembers(ctx, ssOtherID, ownTenant)
+	_, err = f.svc.ListTenantMembers(ctx, ssOtherID, SessionSignIn{}, ownTenant)
 	require.ErrorIs(t, err, ErrPermissionDenied, "a suspended admin does not govern")
 
 	restored, err := f.svc.RestoreTenantMember(ctx, ssOwnerID, SessionSignIn{}, ownTenant, ssOtherID, "", "")

@@ -170,7 +170,9 @@ func TestRefreshToken_ManagedStandingIsReadOnce(t *testing.T) {
 
 // A tenant's account owns no agent: an agent a managed account somehow
 // owns gets no session, even while the owner is in good standing.
-func TestAgentSession_ManagedOwnerStandsBehindNoAgent(t *testing.T) {
+// An agent whose owner a tenant manages holds a session while the owner
+// stands in its tenant, and none once the owner's membership is not active.
+func TestAgentSession_ManagedOwnerStandsBehindItsAgentWhileInStanding(t *testing.T) {
 	f := newAgentFixture(t)
 	reader := &managedMembershipsMock{get: membershipIn(MembershipStatusActive)}
 	f.svc.WithManagedMemberships(reader, tenantIn(TenantStatusClaimed))
@@ -181,16 +183,21 @@ func TestAgentSession_ManagedOwnerStandsBehindNoAgent(t *testing.T) {
 	f.repo.mu.Unlock()
 
 	_, _, _, err := f.svc.RefreshToken(context.Background(), refresh, "", "", "")
+	require.NoError(t, err, "an owner in standing stands behind its agent")
+
+	_, refresh = issueAgentTokens(t, f, agent)
+	reader.get = membershipIn(MembershipStatusSuspended)
+	_, _, _, err = f.svc.RefreshToken(context.Background(), refresh, "", "", "")
 	require.ErrorIs(t, err, ErrAccountNotActive)
 	_, _, err = f.svc.issueTokensWithSessionStart(context.Background(), agent, "", "", sessionGateRefresh, 0, 0, 0, "", "", credentialEnrollment{})
-	require.ErrorIs(t, err, errAgentOwnerNotActive, "the token chokepoint refuses too")
+	require.ErrorIs(t, err, ErrAccountNotActive, "the token chokepoint refuses too")
 }
 
 func TestIsEligibleAgentOwner_IsTheOneRule(t *testing.T) {
 	require.True(t, isEligibleAgentOwner(&User{ID: "p", Kind: UserKindPerson, Status: StatusActive}))
 	require.False(t, isEligibleAgentOwner(&User{ID: "a", Kind: UserKindAgent, Status: StatusActive}))
-	require.False(t, isEligibleAgentOwner(&User{ID: "m", Kind: UserKindPerson, Status: StatusActive, ManagedByTenantID: mTestTenant, SetUpAtMs: 1}),
-		"an account a tenant manages owns no agent")
+	require.True(t, isEligibleAgentOwner(&User{ID: "m", Kind: UserKindPerson, Status: StatusActive, ManagedByTenantID: mTestTenant, SetUpAtMs: 1}),
+		"an account a tenant manages may own agents; agentOwnerStanding holds it to its standing")
 	require.False(t, isEligibleAgentOwner(nil))
 	require.True(t, isAgentOAuthAdmissionRefusal(ErrPermissionDenied))
 }
@@ -198,7 +205,8 @@ func TestIsEligibleAgentOwner_IsTheOneRule(t *testing.T) {
 // A teammate's tokens stand on its grantor's standing: a managed project
 // admin who granted the hire gets none for the teammate while suspended in
 // the tenant, a failed read stays retryable, and a restored grantor gets
-// them again. A managed lead owns no teammate, so its key gets none at all.
+// them again. A managed lead's teammate gets tokens only while the lead
+// stands in its tenant.
 func TestTeammateOwnerStandsBehind_ManagedGrantorNeedsStanding(t *testing.T) {
 	repo := newFakeRepo()
 	lead := seedPerson(repo, "lead@example.com")
@@ -212,16 +220,16 @@ func TestTeammateOwnerStandsBehind_ManagedGrantorNeedsStanding(t *testing.T) {
 	key := &TeammateKey{OwnerUserID: grantor.ID, TeammateID: teammate.ID}
 	ctx := context.Background()
 
-	require.NoError(t, keys.ownerStandsBehind(ctx, mTestProject, key))
+	require.NoError(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, key)))
 	reader.get = membershipIn(MembershipStatusSuspended)
-	require.ErrorIs(t, keys.ownerStandsBehind(ctx, mTestProject, key), ErrUnauthenticated)
+	require.ErrorIs(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, key)), ErrUnauthenticated)
 	reader.get = func(string, string, string) (*TenantMembership, error) { return nil, errors.New("db down") }
-	require.ErrorIs(t, keys.ownerStandsBehind(ctx, mTestProject, key), errManagedStandingUnread, "a failed read is not a refusal for good")
+	require.ErrorIs(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, key)), errManagedStandingUnread, "a failed read is not a refusal for good")
 	reader.get = membershipIn(MembershipStatusActive)
-	require.NoError(t, keys.ownerStandsBehind(ctx, mTestProject, key))
+	require.NoError(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, key)))
 
 	unwired := &TeammateKeyService{base: repo, logger: zap.NewNop()}
-	require.ErrorIs(t, unwired.ownerStandsBehind(ctx, mTestProject, key), errManagedStandingUnread, "unwired, a managed grantor fails closed")
+	require.ErrorIs(t, standsErr(unwired.ownerStandsBehind(ctx, mTestProject, key)), errManagedStandingUnread, "unwired, a managed grantor fails closed")
 	require.Equal(t, ErrUnauthenticated, standingRefusal(ErrAccountNotActive))
 	require.NoError(t, standingRefusal(nil))
 
@@ -229,5 +237,28 @@ func TestTeammateOwnerStandsBehind_ManagedGrantorNeedsStanding(t *testing.T) {
 	lead.ManagedByTenantID, lead.SetUpAtMs = mTestTenant, 1
 	repo.mu.Unlock()
 	leadsKey := &TeammateKey{OwnerUserID: lead.ID, TeammateID: teammate.ID}
-	require.ErrorIs(t, keys.ownerStandsBehind(ctx, mTestProject, leadsKey), ErrUnauthenticated, "a managed lead's teammate gets no token")
+	require.NoError(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, leadsKey)), "a managed lead in standing")
+	reader.get = membershipIn(MembershipStatusSuspended)
+	require.ErrorIs(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, leadsKey)), ErrUnauthenticated, "a suspended managed lead's teammate gets no token")
 }
+
+func TestAgentOwnerStanding_IsTheOneRule(t *testing.T) {
+	svc := newTestAuthService(t, newFakeRepo()).WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed))
+	ctx := managedScope(admitted())
+	require.NoError(t, svc.agentOwnerStanding(ctx, &User{ID: "p", Kind: UserKindPerson, Status: StatusActive}))
+	require.ErrorIs(t, svc.agentOwnerStanding(ctx, &User{ID: "a", Kind: UserKindAgent, Status: StatusActive}), errAgentOwnerNotActive)
+	managed := &User{ID: "m", Kind: UserKindPerson, Status: StatusActive, ManagedByTenantID: mTestTenant, SetUpAtMs: 1}
+	require.NoError(t, svc.agentOwnerStanding(ctx, managed), "a managed owner in standing")
+	notSetUp := *managed
+	notSetUp.SetUpAtMs = 0
+	require.ErrorIs(t, svc.agentOwnerStanding(ctx, &notSetUp), ErrAccountNotActive)
+
+	oauth := &AgentOAuthService{auth: svc}
+	require.NoError(t, oauth.ownerStanding(ctx, managed))
+	require.ErrorIs(t, oauth.ownerStanding(ctx, &notSetUp), ErrAccountNotActive)
+	require.False(t, isAgentOAuthAdmissionRefusal(errManagedStandingUnread), "an unread standing does not end a grant")
+	require.True(t, isAgentOAuthAdmissionRefusal(ErrAccountNotActive))
+}
+
+// standsErr is the error of an ownerStandsBehind call.
+func standsErr(_ bool, err error) error { return err }

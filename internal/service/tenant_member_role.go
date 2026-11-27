@@ -81,7 +81,7 @@ func (s *MembershipService) SetTenantMemberRole(ctx context.Context, callerID st
 			ErrInvalidArgument, RoleAdmin, RoleMember))
 	}
 	fields = append(fields, zap.String("to_role", role))
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		if !errors.Is(err, ErrPermissionDenied) {
 			return refuse("store_error", err)
 		}

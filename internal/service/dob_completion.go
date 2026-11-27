@@ -265,6 +265,6 @@ func (s *AuthService) SubmitDateOfBirth(ctx context.Context, completionToken str
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    s.accessTokenExpiresIn(user),
 	}, nil
 }

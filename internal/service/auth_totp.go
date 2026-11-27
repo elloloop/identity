@@ -23,6 +23,9 @@ func (s *AuthService) BeginTotpSetup(ctx context.Context, userID string, signIn 
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
 		return "", "", nil, err
 	}
+	if err := s.fenceManagedCaller(ctx, userID, signIn, "totp_setup"); err != nil {
+		return "", "", nil, err
+	}
 	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return "", "", nil, err
@@ -88,6 +91,9 @@ func (s *AuthService) VerifyTotpSetup(ctx context.Context, userID string, signIn
 		return false, fmt.Errorf("%w: code is required", ErrInvalidArgument)
 	}
 	if err := s.refuseHeldSession(ctx, userID, signIn); err != nil {
+		return false, err
+	}
+	if err := s.fenceManagedCaller(ctx, userID, signIn, "totp_setup"); err != nil {
 		return false, err
 	}
 
@@ -208,7 +214,7 @@ func (s *AuthService) VerifyTotp(ctx context.Context, challengeID, code, ipAddr,
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    s.accessTokenExpiresIn(user),
 	}, nil
 }
 

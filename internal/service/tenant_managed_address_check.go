@@ -63,7 +63,7 @@ type ManagedAddressCheck struct {
 // creation decides again under its locks. Each refusal is logged as
 // managed_address_check_refused with its reason, and each answer as
 // managed_address_check with a count per status.
-func (s *MembershipService) CheckManagedAddresses(ctx context.Context, callerID, tenantID string, queries []ManagedAddressQuery) ([]ManagedAddressCheck, error) {
+func (s *MembershipService) CheckManagedAddresses(ctx context.Context, callerID string, signIn SessionSignIn, tenantID string, queries []ManagedAddressQuery) ([]ManagedAddressCheck, error) {
 	projectID, err := s.requireProject(ctx)
 	tenantID = strings.TrimSpace(tenantID)
 	fields := []zap.Field{zap.String("project_id", projectID), zap.String("tenant_id", tenantID), zap.String("user_id", callerID)}
@@ -86,7 +86,7 @@ func (s *MembershipService) CheckManagedAddresses(ctx context.Context, callerID,
 	if len(queries) == 0 || len(queries) > maxManagedAddressChecks {
 		return refuse("invalid_argument", fmt.Errorf("%w: name between 1 and %d addresses", ErrInvalidArgument, maxManagedAddressChecks))
 	}
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return refuse("not_permitted", err)
 	}
 	scope := ProjectScopeFromContext(ctx)

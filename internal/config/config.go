@@ -247,6 +247,17 @@ const DefaultTenantInvitationMaxPerRecipient = 10
 // GATEWAY_TENANT_INVITATION_MAX_PER_RECIPIENT accepted.
 const MaxTenantInvitationMaxPerRecipient = 1000
 
+// DefaultManagedAccessTokenExpirySeconds is the lifetime of an access token
+// issued to an account a tenant manages when
+// GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS is unset or 0.
+const DefaultManagedAccessTokenExpirySeconds = 60
+
+// MaxManagedAccessTokenExpirySeconds is the largest
+// GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS accepted where managed accounts
+// are enabled: services that verify access tokens themselves see a
+// suspension, removal or reset only when the token expires.
+const MaxManagedAccessTokenExpirySeconds = 60
+
 // DefaultManagedHelpMaxPerTenant is how many help-request notices one tenant's
 // owners and admins are sent about its managed accounts in a day when
 // GATEWAY_MANAGED_HELP_MAX_PER_TENANT is unset or 0.
@@ -1637,6 +1648,15 @@ type Config struct {
 	// access.admit_managed_accounts config. Driven by
 	// GATEWAY_MANAGED_ACCOUNTS_ENABLED.
 	ManagedAccountsEnabled bool
+	// ManagedAccessTokenExpirySeconds is the lifetime of an access token
+	// issued to an account a tenant manages (its managed claim true), from 0
+	// to 60 where managed accounts are enabled (0 selects the default, 60),
+	// and never longer than GATEWAY_JWT_EXPIRY_SECONDS. A service that
+	// verifies access tokens itself sees the account's suspension, removal
+	// or reset within this time; the refresh that follows checks the
+	// account's standing. Driven by
+	// GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS.
+	ManagedAccessTokenExpirySeconds int
 	// ManagedHelpMaxPerTenant caps how many help-request notices one tenant's
 	// owners and admins are sent about its managed accounts in a day, from 0
 	// to 1000 (0 selects the default, 20); past it a request is answered as
@@ -2071,6 +2091,7 @@ func loadFromEnv() *Config {
 		SelfServiceTenantsWindowSeconds:   envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
 		TenantSelectionEnabled:            envBool("GATEWAY_TENANT_SELECTION_ENABLED", false),
 		ManagedAccountsEnabled:            envBool("GATEWAY_MANAGED_ACCOUNTS_ENABLED", false),
+		ManagedAccessTokenExpirySeconds:   envInt("GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS", DefaultManagedAccessTokenExpirySeconds),
 		ManagedHelpMaxPerTenant:           envInt("GATEWAY_MANAGED_HELP_MAX_PER_TENANT", DefaultManagedHelpMaxPerTenant),
 		ManagedHelpMaxPerSource:           envInt("GATEWAY_MANAGED_HELP_MAX_PER_SOURCE", DefaultManagedHelpMaxPerSource),
 		TenantStatusCacheTTLSeconds:       envInt("GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS", DefaultTenantStatusCacheTTLSeconds),
@@ -2355,6 +2376,17 @@ func (c *Config) DefaultPrimaryAuthDomain() string {
 // JWTExpiry returns the JWT expiry as a time.Duration.
 func (c *Config) JWTExpiry() time.Duration {
 	return time.Duration(c.JWTExpirySeconds) * time.Second
+}
+
+// ManagedAccessTokenExpiry is the lifetime of an access token issued to an
+// account a tenant manages: the configured value, or the default when unset,
+// and never longer than JWTExpiry.
+func (c *Config) ManagedAccessTokenExpiry() time.Duration {
+	seconds := c.ManagedAccessTokenExpirySeconds
+	if seconds <= 0 {
+		seconds = DefaultManagedAccessTokenExpirySeconds
+	}
+	return min(time.Duration(seconds)*time.Second, c.JWTExpiry())
 }
 
 // AssuranceWebTokenTTL returns the WEB arm's token lifetime, falling back
@@ -3505,6 +3537,14 @@ func (c *Config) validateTenantGovernance() error {
 	if c.ManagedAccountsEnabled && c.SessionCacheTTLSeconds > MaxManagedAccountsSessionCacheTTLSeconds {
 		return fmt.Errorf("config: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs GATEWAY_SESSION_CACHE_TTL_SECONDS at most %d (got %d), so a revoked session stops on every replica within it",
 			MaxManagedAccountsSessionCacheTTLSeconds, c.SessionCacheTTLSeconds)
+	}
+	if c.ManagedAccessTokenExpirySeconds < 0 {
+		return fmt.Errorf("config: GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS=%d must not be negative (0 selects the default, %d)",
+			c.ManagedAccessTokenExpirySeconds, DefaultManagedAccessTokenExpirySeconds)
+	}
+	if c.ManagedAccountsEnabled && c.ManagedAccessTokenExpirySeconds > MaxManagedAccessTokenExpirySeconds {
+		return fmt.Errorf("config: GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS=%d must be at most %d where GATEWAY_MANAGED_ACCOUNTS_ENABLED is on",
+			c.ManagedAccessTokenExpirySeconds, MaxManagedAccessTokenExpirySeconds)
 	}
 	return nil
 }

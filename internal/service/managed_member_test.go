@@ -174,7 +174,9 @@ func TestRemoveTenantMember_ManagedAccountCannotLeave(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = f.svc.RemoveTenantMember(managedProject(true, false), managedMemberID, SessionSignIn{}, ownTenant, managedMemberID, "", "")
+	sessions := newFakeRepo()
+	f.svc.WithAccounts(sessions)
+	err = f.svc.RemoveTenantMember(managedProject(true, false), managedMemberID, liveSession(t, sessions, managedMemberID), ownTenant, managedMemberID, "", "")
 	require.ErrorIs(t, err, ErrManagedAccount)
 	assert.Equal(t, MembershipStatusActive, f.membership(t, managedMemberID).Status)
 }

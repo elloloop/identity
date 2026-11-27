@@ -881,6 +881,15 @@ account is a `users` row with `managed_by_tenant_id` set; its set-up link is a
 `tenant_invitations` row with its `user_id`, which never admits a sign-up or
 acceptance by email.
 
+A managed account's access tokens carry `managed: true` and, with every token of an agent it owns, last
+`GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` (default 60, at most 60 while
+managed accounts are enabled, never longer than `GATEWAY_JWT_EXPIRY_SECONDS`),
+so a service that verifies access tokens itself stops honouring one within a
+minute of the account's suspension, removal or reset; the refresh that
+follows checks the account's standing in its tenant and is refused. Calls
+that attach a credential or administer a tenant also read a managed caller's
+account and session from the store, never the session cache.
+
 ## Recovery emails
 
 A project can let its accounts keep **recovery emails**: additional addresses

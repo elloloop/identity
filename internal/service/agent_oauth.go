@@ -501,7 +501,7 @@ func (s *AgentOAuthService) issue(ctx context.Context, request *AgentAuthorizati
 		return nil, err
 	}
 	now := s.auth.nowMs()
-	expires := min(request.GrantExpiresAtMs, currentExpiry, now+int64(s.auth.cfg.AgentOAuthAccessSeconds)*time.Second.Milliseconds())
+	expires := managedTokenCapMs(s.auth.cfg, authority.Owner, now, min(request.GrantExpiresAtMs, currentExpiry, now+int64(s.auth.cfg.AgentOAuthAccessSeconds)*time.Second.Milliseconds()))
 	if expires/time.Second.Milliseconds() <= now/time.Second.Milliseconds() {
 		return nil, ErrAgentOAuthGrant
 	}

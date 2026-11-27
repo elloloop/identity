@@ -90,7 +90,7 @@ func (s *DomainService) SetDomainJoin(ctx context.Context, callerID string, sign
 	if d == nil {
 		return nil, fmt.Errorf("%w: domain", ErrNotFound)
 	}
-	if _, err := s.requireTenantAdmin(ctx, projectID, d.TenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, d.TenantID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	updated, changed, err := s.domains.SetDomainAllowJoin(ctx, projectID, d.ID, allowJoin)

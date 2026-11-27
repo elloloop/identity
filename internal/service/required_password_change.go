@@ -187,7 +187,7 @@ func (s *AuthService) CompleteRequiredPasswordChange(ctx context.Context, comple
 		User:         user,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    secondsToInt32(s.cfg.JWTExpirySeconds),
+		ExpiresIn:    s.accessTokenExpiresIn(user),
 	}, nil
 }
 

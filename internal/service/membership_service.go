@@ -235,7 +235,7 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 		return nil, err
 	}
 
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	if err := s.refuseManagedAddress(ctx, projectID, tenantID, normEmail); err != nil {
@@ -430,7 +430,7 @@ func (s *MembershipService) logAcceptRefused(ctx context.Context, projectID, cal
 
 // ListTenantInvitations returns every invitation in a tenant, newest first.
 // callerID must be an active owner/admin member of the tenant.
-func (s *MembershipService) ListTenantInvitations(ctx context.Context, callerID, tenantID string) ([]*TenantInvitation, error) {
+func (s *MembershipService) ListTenantInvitations(ctx context.Context, callerID string, signIn SessionSignIn, tenantID string) ([]*TenantInvitation, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
@@ -442,7 +442,7 @@ func (s *MembershipService) ListTenantInvitations(ctx context.Context, callerID,
 	if tenantID == "" {
 		return nil, fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
 	}
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	return s.invitations.ListInvitationsForTenant(ctx, projectID, tenantID)
@@ -493,7 +493,7 @@ func (s *MembershipService) RevokeTenantInvitation(ctx context.Context, callerID
 	if invitationID == "" {
 		return refuse("invalid_argument", fmt.Errorf("%w: missing invitation_id", ErrInvalidArgument))
 	}
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return refuse("not_permitted", err)
 	}
 	var inv *TenantInvitation
@@ -534,7 +534,7 @@ func (s *MembershipService) RevokeTenantInvitation(ctx context.Context, callerID
 // ListTenantMembers returns every membership in a tenant, each with the kind
 // of account its member has (AccountKind). callerID must be an active
 // owner/admin member of the tenant.
-func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, tenantID string) ([]*TenantMembership, error) {
+func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID string, signIn SessionSignIn, tenantID string) ([]*TenantMembership, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
@@ -546,7 +546,7 @@ func (s *MembershipService) ListTenantMembers(ctx context.Context, callerID, ten
 	if tenantID == "" {
 		return nil, fmt.Errorf("%w: missing tenant_id", ErrInvalidArgument)
 	}
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	members, err := s.memberships.ListMembershipsForTenant(ctx, projectID, tenantID)
@@ -590,7 +590,7 @@ func (s *MembershipService) RemoveTenantMember(ctx context.Context, callerID str
 	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
 		return err
 	}
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return err
 	}
 	if targetUserID == callerID {
@@ -646,7 +646,7 @@ func (s *MembershipService) SuspendTenantMember(ctx context.Context, callerID st
 	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
 		return nil, err
 	}
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	if targetUserID == callerID {
@@ -689,7 +689,7 @@ func (s *MembershipService) RestoreTenantMember(ctx context.Context, callerID st
 	if err := s.refuseHeldSession(ctx, projectID, callerID, signIn); err != nil {
 		return nil, err
 	}
-	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
+	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID, signIn); err != nil {
 		return nil, err
 	}
 	if targetUserID == callerID {
@@ -894,24 +894,56 @@ func (s *MembershipService) refuseHeldSession(ctx context.Context, projectID, ca
 }
 
 // requireTenantAdmin is authorizeTenantAdmin over this service's stores.
-func (s *MembershipService) requireTenantAdmin(ctx context.Context, projectID, tenantID, callerID string) (*TenantMembership, error) {
-	return authorizeTenantAdmin(ctx, s.memberships, s.tenants, projectID, tenantID, callerID)
+func (s *MembershipService) requireTenantAdmin(ctx context.Context, projectID, tenantID, callerID string, signIn SessionSignIn) (*TenantMembership, error) {
+	return authorizeTenantAdmin(ctx, tenantAdminCheck{
+		memberships: s.memberships, tenants: s.tenants, users: s.users, accounts: s.accounts, logger: s.logger,
+	}, projectID, tenantID, callerID, signIn)
+}
+
+// tenantAdminCheck is what authorizeTenantAdmin reads: the memberships and
+// tenants, the caller's account (users) and, for an account a tenant
+// manages, its session (accounts).
+type tenantAdminCheck struct {
+	memberships MembershipStore
+	tenants     TenantStore
+	users       UserDirectory
+	accounts    Repository
+	logger      *zap.Logger
 }
 
 // authorizeTenantAdmin is the rule every tenant-admin RPC of both the
 // membership and the domain service applies: it returns the caller's
 // membership when that is an active owner/admin one and the tenant may be
 // governed (requireGovernableTenant), and refuses with ErrPermissionDenied
-// otherwise. Only an admin learns that a tenant is suspended.
-func authorizeTenantAdmin(ctx context.Context, memberships MembershipStore, tenants TenantStore, projectID, tenantID, callerID string) (*TenantMembership, error) {
-	m, err := memberships.GetMembership(ctx, projectID, tenantID, callerID)
+// otherwise. Only an admin learns that a tenant is suspended. A caller whose
+// account a tenant manages must also be active and ask from a session that
+// has not ended (fenceManagedSession), read from the session store, so a
+// token outliving a reset, suspension or removal administers nothing. With
+// no account directory the caller cannot be read, and every caller is
+// refused (ErrServiceUnavailable).
+func authorizeTenantAdmin(ctx context.Context, c tenantAdminCheck, projectID, tenantID, callerID string, signIn SessionSignIn) (*TenantMembership, error) {
+	m, err := c.memberships.GetMembership(ctx, projectID, tenantID, callerID)
 	if err != nil {
 		return nil, err
 	}
 	if m == nil || m.Status != MembershipStatusActive || !isAdminRole(m.Role) {
 		return nil, ErrPermissionDenied
 	}
-	if err := requireGovernableTenant(ctx, tenants, projectID, tenantID); err != nil {
+	if err := requireGovernableTenant(ctx, c.tenants, projectID, tenantID); err != nil {
+		return nil, err
+	}
+	if c.users == nil {
+		return nil, fmt.Errorf("%w: the caller's account cannot be read", ErrServiceUnavailable)
+	}
+	caller, err := c.users.GetUserInProject(ctx, projectID, callerID)
+	if err != nil {
+		return nil, err
+	}
+	var sessions Repository
+	if c.accounts != nil {
+		sessions = c.accounts.WithProject(projectID)
+	}
+	if err := fenceManagedSession(ctx, sessions, c.logger, caller, signIn, "tenant_admin"); err != nil {
 		return nil, err
 	}
 	return m, nil
