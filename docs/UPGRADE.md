@@ -1,5 +1,52 @@
 # Upgrade guide
 
+## Next — an invitation may carry a note from its inviter: `CreateTenantInvitationRequest.note` (additive field; off by default behind `tenants.invitation_notes` / `GATEWAY_TENANT_INVITATION_NOTES_ENABLED`; no migration)
+
+An administrator inviting someone had no way to tell them anything in the
+invitation itself, such as the address their account will use.
+
+- **`CreateTenantInvitationRequest.note`** (field 4) is optional plain text the
+  invitation email shows, labelled "A note from the administrator who invited
+  you" and set apart from the rest: quoted line by line in the text part, and
+  escaped in a block of its own in the HTML part, after the invitation and
+  before the link. An empty note, or one that is only whitespace, sends the
+  email byte for byte as before.
+- **Off by default.** A project turns it on with
+  `{ "tenants": { "invitation_notes": true } }` in its `config_json`; the
+  default project takes it from `GATEWAY_TENANT_INVITATION_NOTES_ENABLED`
+  (default `false`), which, like the other tenant switches, needs the postgres
+  driver: the server refuses to boot with it on any other. Without it a note
+  is `FAILED_PRECONDITION`.
+- **Never on a self-service tenant.** A tenant made through `CreateTenant` cannot
+  attach a note (`FAILED_PRECONDITION`), as its name never appears in the
+  email either: the text would be its creator's, sent under the service's
+  name. The check follows the owner-or-admin one, so only an owner or admin
+  learns it.
+- **What a note may hold.** The note and each of its lines are trimmed and a
+  CRLF break is read as LF. Then `INVALID_ARGUMENT` for: more than 280
+  characters; more than 4 lines; a blank line; a control character other than
+  the line break, or an invisible formatting character, bidirectional controls
+  among them (the zero-width joiner and non-joiner are allowed); or anything
+  that reads as a link: `<`, `>`, `](`, `://`, one of `mailto:`, `tel:`,
+  `sms:`, `callto:`, `javascript:`, `vbscript:`, `data:` or `file:` directly
+  followed by a non-space, a domain or dotted IPv4 address, or an address that
+  is not a plain ASCII email address. A domain is a word of two or more
+  dot-separated labels ending in one of at least two letters (any script) or a
+  punycode label; a word is a run of letters, marks, digits and `-._+@` with
+  its edge punctuation dropped, so `e.g.`, `v1.2` and a sentence's full stop
+  pass, while `done.See` does not. The check reads fullwidth, circled and
+  mathematical letters as the letters they imitate (NFKC), ignores the
+  zero-width joiner and non-joiner, and reads an ideographic full stop between
+  two words of a script other than Chinese, Japanese or Korean as a dot. A
+  plain email address such as `jane@example.com` is allowed. The refusal does
+  not repeat the note.
+- **Not stored.** The note is not kept with the invitation: a resend is a new
+  `CreateTenantInvitation`, which carries its own note. No log line carries it.
+- **Go API.** `MembershipService.CreateTenantInvitation` takes the note after
+  the role; `ProjectTenantsConfig` gains `InvitationNotes` and `config.Config`
+  `TenantInvitationNotesEnabled`; `service.ErrInvitationNoteNotAllowed` is the
+  new refusal.
+
 ## Next — an owner or admin sets a member's role: `SetTenantMemberRole` (additive RPC and audit event `tenant_member_role_changed`; no migration; `MembershipStore.SetMemberRole` (Go API))
 
 A tenant member's role changed only by `TransferTenantOwnership`, so an

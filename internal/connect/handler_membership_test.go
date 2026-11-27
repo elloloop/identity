@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -428,6 +429,69 @@ func TestCreateTenantInvitation_Handler_ReportsEmailSendStatus(t *testing.T) {
 			}
 			if created.Msg.GetInvitation().GetId() == "" {
 				t.Fatal("the invitation is created whatever its email's status")
+			}
+		})
+	}
+}
+
+// capturingMailer records the messages it is handed and accepts each.
+type capturingMailer struct{ sent []email.Message }
+
+func (m *capturingMailer) Send(_ context.Context, msg email.Message) error {
+	m.sent = append(m.sent, msg)
+	return nil
+}
+
+// The request's note reaches the invitation email where the project allows
+// notes, and each refusal of one surfaces with its code: FAILED_PRECONDITION
+// where notes are not allowed or the tenant is one a user created,
+// INVALID_ARGUMENT for a note that reads as a link.
+func TestCreateTenantInvitation_Handler_Note(t *testing.T) {
+	const note = "Your mail address will be jane@example.com"
+	notesScope := func(on bool) *service.ProjectScope {
+		return &service.ProjectScope{ProjectID: testProjectID, Tenants: service.ProjectTenantsConfig{InvitationNotes: on}}
+	}
+	for _, tc := range []struct {
+		name      string
+		allowed   bool
+		createdBy string
+		note      string
+		want      connect.Code
+	}{
+		{"allowed", true, "", note, 0},
+		{"project does not allow notes", false, "", note, connect.CodeFailedPrecondition},
+		{"self-service tenant", true, "owner-1", note, connect.CodeFailedPrecondition},
+		{"link", true, "", "Sign in at https://example.test", connect.CodeInvalidArgument},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			members := &connectMembershipStore{member: &service.TenantMembership{
+				Role: service.RoleOwner, Status: service.MembershipStatusActive,
+			}}
+			tenants := &connectTenantStore{tenant: &service.Tenant{ID: "tenant-1", Status: service.TenantStatusClaimed, CreatedBy: tc.createdBy}}
+			mailer := &capturingMailer{}
+			svc := service.NewMembershipService(newConnectInvitationStore(), members, tenants,
+				&connectUserDirectory{}, mailer, true, &config.Config{}, zap.NewNop())
+			srv := startMembershipServerInScope(t, svc, notesScope(tc.allowed))
+
+			_, err := srv.client.CreateTenantInvitation(context.Background(),
+				withAuth(&identitypb.CreateTenantInvitationRequest{
+					TenantId: "tenant-1", Email: "invitee@acme.com", Role: service.RoleMember, Note: tc.note,
+				}, "owner-1"))
+			if tc.want != 0 {
+				requireCode(t, err, tc.want)
+				if len(mailer.sent) != 0 {
+					t.Fatalf("a refused invitation sent %d emails", len(mailer.sent))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CreateTenantInvitation: %v", err)
+			}
+			if len(mailer.sent) != 1 {
+				t.Fatalf("emails sent = %d, want 1", len(mailer.sent))
+			}
+			if msg := mailer.sent[0]; !strings.Contains(msg.Text, "> "+note) || !strings.Contains(msg.HTML, note) {
+				t.Fatalf("the email does not carry the note:\n%s\n%s", msg.Text, msg.HTML)
 			}
 		})
 	}

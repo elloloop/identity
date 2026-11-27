@@ -189,13 +189,20 @@ const (
 // the resend cooldown has passed revokes the open invitation and sends a new
 // one.
 //
+// note is shown in the email and never stored, so a resend carries the note
+// its own call passes. A blank one is none; any other is
+// normalizeInvitationNote's, and refused with ErrInvitationNoteNotAllowed
+// unless the project allows notes (ProjectTenantsConfig.InvitationNotes) and
+// the tenant is not one a user created, for the reason tenantDisplayName
+// never names such a tenant.
+//
 // Every invitation sends an email, so the store refuses one past the limits
 // (see invitationLimits): ErrInvitationLimited past the per-tenant cap,
 // ErrInviterLimited past the caller's cap across all their tenants,
 // ErrInvitationRecipientLimited past the tenant's cap for the address,
 // and ErrInvitationResendTooSoon inside the per-recipient cooldown. Each
 // refusal is logged.
-func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, emailAddr, role string) (*CreatedInvitation, error) {
+func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID string, signIn SessionSignIn, tenantID, emailAddr, role, note string) (*CreatedInvitation, error) {
 	projectID, err := s.requireProject(ctx)
 	if err != nil {
 		return nil, err
@@ -218,9 +225,21 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	if err != nil {
 		return nil, err
 	}
+	note, err = normalizeInvitationNote(note)
+	if err != nil {
+		return nil, err
+	}
+	if note != "" && !ProjectScopeFromContext(ctx).Tenants.InvitationNotes {
+		return nil, fmt.Errorf("%w: the project does not allow notes on invitations", ErrInvitationNoteNotAllowed)
+	}
 
 	if _, err := s.requireTenantAdmin(ctx, projectID, tenantID, callerID); err != nil {
 		return nil, err
+	}
+	if note != "" {
+		if err := s.requireNoteableTenant(ctx, projectID, tenantID); err != nil {
+			return nil, err
+		}
 	}
 	if s.mailerDelivers {
 		if err := requireProjectEmailDelivery(ctx, projectID, s.projects); err != nil {
@@ -257,7 +276,7 @@ func (s *MembershipService) CreateTenantInvitation(ctx context.Context, callerID
 	}
 	inv.ID = id
 
-	sendErr := s.sendInvitationEmail(ctx, inv, rawToken)
+	sendErr := s.sendInvitationEmail(ctx, inv, rawToken, note)
 	out := &CreatedInvitation{Invitation: inv}
 	switch {
 	case !inv.TokenOnlyInEmail:
@@ -660,10 +679,26 @@ func memberChangeDetails(m *TenantMembership) map[string]any {
 	}
 }
 
+// requireNoteableTenant refuses, with ErrInvitationNoteNotAllowed, a note on
+// an invitation to a tenant a user created: like its name, which the email
+// never shows, such a tenant's text is nobody's but its creator's, and the
+// service would be sending it under its own name.
+func (s *MembershipService) requireNoteableTenant(ctx context.Context, projectID, tenantID string) error {
+	t, err := s.tenants.GetTenant(ctx, projectID, tenantID)
+	if err != nil {
+		return err
+	}
+	if t == nil || t.CreatedBy != "" {
+		return fmt.Errorf("%w: a tenant a user created cannot attach one", ErrInvitationNoteNotAllowed)
+	}
+	return nil
+}
+
 // sendInvitationEmail renders and sends the branded tenant invitation email
-// carrying the raw token, and returns why it was not sent. Every line it and
-// the mailer log carries the invitation id and the request's trace id.
-func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *TenantInvitation, rawToken string) error {
+// carrying the raw token and note, if any, and returns why it was not sent.
+// Every line it and the mailer log carries the invitation id and the
+// request's trace id, and none carries the note.
+func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *TenantInvitation, rawToken, note string) error {
 	fields := invitationLogFields(ctx, inv.ID)
 	ctx = email.ContextWithLogFields(ctx, fields...)
 	logger := s.logger.With(fields...)
@@ -685,6 +720,7 @@ func (s *MembershipService) sendInvitationEmail(ctx context.Context, inv *Tenant
 		"Role":        inv.Role,
 		"ExpiresIn":   formatExpiresIn(s.invitationTTL()),
 		"Link":        link,
+		"NoteLines":   invitationNoteLines(note),
 	}))
 	if err != nil {
 		logger.Warn("tenant_invitation_render_failed", zap.String("to", redactEmail(inv.Email)), zap.Error(err))
@@ -865,6 +901,15 @@ func normalizeInvitationRole(role string) (string, error) {
 		return "", fmt.Errorf("%w: role %q (want %q, %q or %q)",
 			ErrInvalidArgument, role, RoleMember, RoleAdmin, RoleOwner)
 	}
+}
+
+// invitationNoteLines is note split into the lines the email shows, or nil
+// for none.
+func invitationNoteLines(note string) []string {
+	if note == "" {
+		return nil
+	}
+	return strings.Split(note, "\n")
 }
 
 // invitationGreeting derives a friendly greeting name from the recipient

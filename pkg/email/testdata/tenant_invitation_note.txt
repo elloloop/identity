@@ -1,0 +1,15 @@
+Acme
+
+Hi jane,
+
+A tenant administrator has invited you to join Acme Widgets as a member. Use the link below to accept and become a member.
+
+A note from the administrator who invited you:
+> Your mail address will be jane@example.com
+> See you on Monday.
+
+https://auth.example.com/auth/accept-invitation?token=abc
+
+This invitation expires in 7 days. If you weren't expecting it, you can safely ignore this email.
+
+Need help? Contact support@example.com.

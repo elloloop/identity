@@ -103,9 +103,9 @@ type ProjectConfig struct {
 	// issues none. See ProjectAccountsConfig.
 	Accounts ProjectAccountsConfig `json:"accounts"`
 
-	// Tenants holds the project's self-service tenant policy: whether a
-	// signed-in user may create a tenant they own. Default OFF. See
-	// ProjectTenantsConfig.
+	// Tenants holds the project's tenant policy: whether a signed-in user may
+	// create a tenant they own, and whether invitations may carry a note.
+	// Default OFF. See ProjectTenantsConfig.
 	Tenants ProjectTenantsConfig `json:"tenants"`
 
 	// RecoveryEmails holds the project's policy for the additional addresses

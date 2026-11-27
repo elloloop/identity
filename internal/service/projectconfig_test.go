@@ -534,6 +534,17 @@ func TestParseProjectConfig_TenantsSelfService(t *testing.T) {
 	cfg, err = ParseProjectConfig(`{"cors":{"allowed_origins":["https://a.example.test"]}}`)
 	require.NoError(t, err)
 	assert.False(t, cfg.Tenants.SelfService)
+	assert.False(t, cfg.Tenants.InvitationNotes)
+}
+
+func TestParseProjectConfig_TenantsInvitationNotes(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := ParseProjectConfig(`{"tenants":{"invitation_notes":true}}`)
+	require.NoError(t, err)
+	assert.True(t, cfg.Tenants.InvitationNotes)
+	assert.False(t, cfg.Tenants.SelfService, "each switch is its own")
+	require.NoError(t, cfg.Validate())
 }
 
 func TestParseProjectConfig_OAuth_HostClients_Present(t *testing.T) {

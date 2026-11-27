@@ -11,6 +11,10 @@
   <h1 style="font-size: 20px; margin: 0 0 16px;">You're invited to join {{if .TenantName}}{{.TenantName}}{{else}}a team{{end}}</h1>
   <p style="font-size: 15px; line-height: 1.5;">Hi {{.UserName}},</p>
   <p style="font-size: 15px; line-height: 1.5;">{{.InviterName}} has invited you to join {{if .TenantName}}<strong>{{.TenantName}}</strong>{{else}}a team{{end}} as a {{.Role}}. Click the button below to accept and become a member.</p>
+  {{- if .NoteLines}}
+  <p style="font-size: 13px; color: #666; margin: 16px 0 4px;">A note from the administrator who invited you:</p>
+  <blockquote style="font-size: 15px; line-height: 1.5; margin: 0 0 16px; padding: 8px 12px; border-left: 3px solid #ccc; background: #f6f6f6;">{{range $i, $line := .NoteLines}}{{if $i}}<br>{{end}}{{$line}}{{end}}</blockquote>
+  {{- end}}
   <p style="margin: 24px 0;">
     <a href="{{.Link}}" style="display: inline-block; background: #111; color: #fff; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-size: 15px;">Accept invitation</a>
   </p>

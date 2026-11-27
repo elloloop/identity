@@ -24,7 +24,7 @@ func (h *IdentityHandler) CreateTenantInvitation(
 		return nil, toConnectError(service.ErrUnauthenticated)
 	}
 
-	created, err := h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId, req.Msg.Email, req.Msg.Role)
+	created, err := h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.GetTenantId(), req.Msg.GetEmail(), req.Msg.GetRole(), req.Msg.GetNote())
 	if err != nil {
 		return nil, toConnectError(err)
 	}

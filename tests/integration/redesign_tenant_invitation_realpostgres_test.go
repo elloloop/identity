@@ -272,3 +272,41 @@ func TestRedesign_TenantInvitation_TokenHandedOutBeforeMailIsConfigured(t *testi
 		t.Fatalf("membership = %+v, want the invitee in the inviting tenant", got)
 	}
 }
+
+// TestRedesign_TenantInvitation_NoteFollowsTheServerSetting drives a note
+// through the whole stack against a real Postgres: the default project takes
+// its invitation-note switch from GATEWAY_TENANT_INVITATION_NOTES_ENABLED, so
+// with it on an owner's note is in the mailed invitation, and with it off, the
+// default, the same call is FAILED_PRECONDITION and sends nothing.
+func TestRedesign_TenantInvitation_NoteFollowsTheServerSetting(t *testing.T) {
+	const note = "Your mail address will be jane@example.com"
+	invite := func(h *RedesignHarness, owner ownerCaller) (string, error) {
+		invitee := fmt.Sprintf("note-%d@example-corp.com", time.Now().UnixNano())
+		h.Mailer.Reset()
+		_, err := owner.client.CreateTenantInvitation(context.Background(), connect.NewRequest(&identitypb.CreateTenantInvitationRequest{
+			TenantId: owner.tenantID, Email: invitee, Role: service.RoleMember, Note: note,
+		}))
+		return invitee, err
+	}
+
+	on := startRedesignHarnessWith(t, func(c *config.Config) { c.TenantInvitationNotesEnabled = true })
+	invitee, err := invite(on, signupOwner(t, on, "invitation-note-on"))
+	if err != nil {
+		t.Fatalf("CreateTenantInvitation with notes on: %v", err)
+	}
+	sent := on.Mailer.Sent()
+	if len(sent) != 1 || sent[0].To != invitee {
+		t.Fatalf("emails = %+v, want the one invitation", sent)
+	}
+	if !strings.Contains(sent[0].Text, "> "+note) || !strings.Contains(sent[0].HTML, note) {
+		t.Fatalf("the invitation does not carry the note:\n%s", sent[0].Text)
+	}
+
+	off := startRedesignHarness(t)
+	if _, err := invite(off, signupOwner(t, off, "invitation-note-off")); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("CreateTenantInvitation with notes off = %v, want FailedPrecondition", err)
+	}
+	if sent := off.Mailer.Sent(); len(sent) != 0 {
+		t.Fatalf("a refused invitation sent %d emails", len(sent))
+	}
+}

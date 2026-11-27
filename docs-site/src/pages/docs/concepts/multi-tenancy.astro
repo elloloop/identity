@@ -459,6 +459,45 @@ RestoreTenantMember(tenant_id, user_id)
     suspended in the tenant cannot accept one
     (<code>PERMISSION_DENIED</code>; the invitation stays open).
   </p>
+  <p id="invitation-notes">
+    An invitation may carry a short plain-text <code>note</code>, such as
+    "Your mail address will be jane@example.com", which its email shows
+    labelled as a note from the administrator who invited the recipient, set
+    apart from the rest of the email: quoted in the text part, and escaped in
+    a block of its own in the HTML part. It is off by default; the Project
+    turns it on in its <code>config_json</code> (the default Project takes it
+    from <code>GATEWAY_TENANT_INVITATION_NOTES_ENABLED</code>):
+  </p>
+  <Code code={`{ "tenants": { "invitation_notes": true } }`} lang="json" />
+  <p>
+    Without it, or on a tenant made through <code>CreateTenant</code>, whose
+    text the service never puts in its email, a note is
+    <code>FAILED_PRECONDITION</code>; an empty one (or only whitespace) sends
+    the email exactly as without the field. The note travels in an email the
+    service sends under its own name, so it is kept short and unable to carry
+    a link. The note and each of its lines are trimmed, and a CRLF break is
+    read as LF; it is then <code>INVALID_ARGUMENT</code> when it is longer
+    than 280 characters, has more than 4 lines or a blank line, carries a
+    control character other than the line break or an invisible formatting
+    character (a bidirectional control among them; the zero-width joiner and
+    non-joiner that scripts and emoji need are allowed), or reads as a link:
+    <code>&lt;</code>, <code>&gt;</code>, <code>](</code>,
+    <code>://</code>, a scheme such as <code>mailto:</code> or
+    <code>tel:</code> directly followed by text, a domain or dotted IPv4
+    address, or an address that is not a plain ASCII email address. A word
+    reads as a domain when it is two or more dot-separated labels ending in
+    one of at least two letters, in any script, or a punycode one, so
+    <code>example.com</code>, <code>www.example</code> and a lookalike such
+    as one with a Cyrillic letter are refused, while <code>e.g.</code>,
+    <code>v1.2</code> and a full stop ending a sentence are not; a full stop
+    with no space after it (<code>done.See</code>) reads as a domain. The
+    check reads fullwidth, circled and mathematical letters as the letters
+    they imitate, and an ideographic full stop between two words of a script
+    other than Chinese, Japanese or Korean as a dot. A plain email address
+    such as <code>jane@example.com</code> is allowed. The note is not stored:
+    a resend is a new <code>CreateTenantInvitation</code>, which carries its
+    own note.
+  </p>
   <p>
     An owner or admin withdraws a pending invitation, and its link stops
     working at once:

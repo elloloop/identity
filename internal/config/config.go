@@ -1546,6 +1546,13 @@ type Config struct {
 	// tenants.self_service in their own config_json. Default OFF. Driven by
 	// GATEWAY_SELF_SERVICE_TENANTS_ENABLED.
 	SelfServiceTenantsEnabled bool
+	// TenantInvitationNotesEnabled lets an owner or admin of a tenant of the
+	// DEFAULT project attach a short plain-text note to an invitation, which
+	// its email shows (CreateTenantInvitationRequest.note); a self-service
+	// tenant never can. Other projects turn it on with
+	// tenants.invitation_notes in their own config_json. Default OFF. Driven
+	// by GATEWAY_TENANT_INVITATION_NOTES_ENABLED.
+	TenantInvitationNotesEnabled bool
 	// SelfServiceTenantsMaxPerUser caps how many tenants one user may create
 	// in each window, from 0 to 1000 (0 selects the default, 10); a creation
 	// past it is RESOURCE_EXHAUSTED. Deployment-wide. Driven by
@@ -1979,6 +1986,7 @@ func loadFromEnv() *Config {
 		AgentOAuthResourceCredentialsJSON: envStr("GATEWAY_AGENT_OAUTH_RESOURCE_CREDENTIALS_JSON", ""),
 		AgentsMaxPerOwner:                 envInt("GATEWAY_AGENTS_MAX_PER_OWNER", DefaultAgentsMaxPerOwner),
 		SelfServiceTenantsEnabled:         envBool("GATEWAY_SELF_SERVICE_TENANTS_ENABLED", false),
+		TenantInvitationNotesEnabled:      envBool("GATEWAY_TENANT_INVITATION_NOTES_ENABLED", false),
 		SelfServiceTenantsMaxPerUser:      envInt("GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", DefaultSelfServiceTenantsMaxPerUser),
 		SelfServiceTenantsWindowSeconds:   envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
 		TenantSelectionEnabled:            envBool("GATEWAY_TENANT_SELECTION_ENABLED", false),
@@ -3371,6 +3379,9 @@ func (c *Config) validateTenantGovernance() error {
 	if c.RepoDriver != "" && c.RepoDriver != "postgres" {
 		if c.SelfServiceTenantsEnabled {
 			return fmt.Errorf("config: GATEWAY_SELF_SERVICE_TENANTS_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
+		}
+		if c.TenantInvitationNotesEnabled {
+			return fmt.Errorf("config: GATEWAY_TENANT_INVITATION_NOTES_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
 		}
 		if c.TenantSelectionEnabled {
 			return fmt.Errorf("config: GATEWAY_TENANT_SELECTION_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)

@@ -1056,7 +1056,10 @@ func New(deps Deps) (*Built, error) {
 			// from the access mode: the two gate different things.
 			Anonymous: service.ProjectAnonymousConfig{Enabled: deps.Config.AnonymousEnabled},
 			Accounts:  defaultAccounts,
-			Tenants:   service.ProjectTenantsConfig{SelfService: deps.Config.SelfServiceTenantsEnabled},
+			Tenants: service.ProjectTenantsConfig{
+				SelfService:     deps.Config.SelfServiceTenantsEnabled,
+				InvitationNotes: deps.Config.TenantInvitationNotesEnabled,
+			},
 		},
 		projectResolver,
 		logger,
@@ -1325,6 +1328,9 @@ func checkTenantFeatures(deps Deps, logger *zap.Logger) error {
 	}
 	if cfg.SelfServiceTenantsEnabled && !membershipServiceServed(deps) {
 		return errors.New("app: GATEWAY_SELF_SERVICE_TENANTS_ENABLED needs the tenant, membership and invitation stores, which only the postgres driver provides")
+	}
+	if cfg.TenantInvitationNotesEnabled && !membershipServiceServed(deps) {
+		return errors.New("app: GATEWAY_TENANT_INVITATION_NOTES_ENABLED needs the tenant, membership and invitation stores, which only the postgres driver provides")
 	}
 	if cfg.TenantSelectionEnabled {
 		logger.Info("tenant_selection_enabled", zap.Duration("status_cache_ttl", cfg.TenantStatusCacheTTL()))

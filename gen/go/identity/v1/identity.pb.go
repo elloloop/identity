@@ -14684,10 +14684,28 @@ func (x *TenantInvitation) GetCreatedAt() *timestamppb.Timestamp {
 }
 
 type CreateTenantInvitationRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	Email         string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
-	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"` // "member" (default) | "admin" | "owner"
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Email    string                 `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	Role     string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"` // "member" (default) | "admin" | "owner"
+	// note is optional plain text the invitation email shows, labelled as a
+	// note from the administrator who sent it and set apart from the rest of
+	// the email; empty (or only whitespace) sends the email without one. The
+	// project must allow notes (tenants.invitation_notes in its config_json,
+	// or GATEWAY_TENANT_INVITATION_NOTES_ENABLED for the default project), and
+	// a tenant a user created cannot attach one: FAILED_PRECONDITION otherwise.
+	// The note and each of its lines are trimmed and a CRLF break is read as
+	// LF. INVALID_ARGUMENT for a note longer than 280 characters, of more than
+	// 4 lines, with a blank line, with a control character other than the line
+	// break or an invisible formatting character (a bidirectional control
+	// among them), or that reads as a link: "<", ">", "](", "://", a scheme
+	// such as "mailto:" or "tel:" directly followed by text, a domain or
+	// dotted IPv4 address ("www.example", "example.com", "exаmple.com" in a
+	// lookalike script, or the same in fullwidth letters), or an address that
+	// is not a plain ASCII email address. A plain email address such as
+	// "jane@example.com" is allowed. The note is not stored: a resend is a new
+	// CreateTenantInvitation call, which carries its own note.
+	Note          string `protobuf:"bytes,4,opt,name=note,proto3" json:"note,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14739,6 +14757,13 @@ func (x *CreateTenantInvitationRequest) GetEmail() string {
 func (x *CreateTenantInvitationRequest) GetRole() string {
 	if x != nil {
 		return x.Role
+	}
+	return ""
+}
+
+func (x *CreateTenantInvitationRequest) GetNote() string {
+	if x != nil {
+		return x.Note
 	}
 	return ""
 }
@@ -26296,11 +26321,12 @@ const file_identity_v1_identity_proto_rawDesc = "" +
 	"\vaccepted_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"acceptedAt\x129\n" +
 	"\n" +
-	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"f\n" +
+	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"z\n" +
 	"\x1dCreateTenantInvitationRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\"\xc6\x01\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x12\x12\n" +
+	"\x04note\x18\x04 \x01(\tR\x04note\"\xc6\x01\n" +
 	"\x1eCreateTenantInvitationResponse\x12=\n" +
 	"\n" +
 	"invitation\x18\x01 \x01(\v2\x1d.identity.v1.TenantInvitationR\n" +
