@@ -15,7 +15,10 @@ does there may outlast the reset.
   token's session from the store, never the session cache. A managed caller
   whose account is not active is `FAILED_PRECONDITION`; one whose session has
   ended, belongs to another account or is not named (a token without `sid`)
-  is `UNAUTHENTICATED`. Each refusal logs `managed_account_refused` with the
+  is `UNAUTHENTICATED`. The credential calls also hold a managed caller to its
+  standing in its tenant: set up, an active membership, a tenant that is not
+  suspended (`FAILED_PRECONDITION` otherwise). Each refusal logs
+  `managed_account_refused` with the
   `path` and `reason`. Personal callers are not read for; they cost one
   account read on a tenant-admin call.
 - **Agents.** An account a tenant manages may now own agents (created for
@@ -29,10 +32,13 @@ does there may outlast the reset.
   `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` (default 60; boot refuses more
   than 60 while `GATEWAY_MANAGED_ACCOUNTS_ENABLED` is on, and a negative value
   always; never longer than `GATEWAY_JWT_EXPIRY_SECONDS`), and a sign-in
-  reports that in `expires_in`. Services that verify access tokens
-  themselves therefore stop honouring a suspended, removed or reset managed
-  account within a minute, and its refresh is refused. Personal accounts'
-  tokens are unchanged.
+  reports that in `expires_in`. The same cap applies to every token of an
+  agent a managed account owns: its session tokens, its delegated and machine
+  tokens, and its teammate-key tokens (an agent whose owner cannot be read
+  gets the short lifetime). Services that verify access tokens themselves
+  therefore stop honouring a suspended, removed or reset managed account, and
+  its agents, within a minute, and its refresh is refused. Personal accounts'
+  and their agents' tokens are unchanged.
 - **With managed accounts off** no managed account exists, so nothing
   changes but the account read on tenant-admin calls.
 - **Go API.** `MembershipService.ListTenantMembers`,

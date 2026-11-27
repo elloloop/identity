@@ -92,7 +92,7 @@ for the tenant.
   refresh tokens in the same transaction, and the replica that wrote it drops
   them from its session cache. Other replicas, and services that verify
   access tokens themselves, would otherwise honour a token until it expires,
-  so a managed account's access tokens (`managed: true`) last
+  so a managed account's access tokens (`managed: true`), and every token of an agent it owns, last
   `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS`, 60 by default and at most 60
   while managed accounts are enabled, and its refresh rechecks its standing.
   Calls that attach a credential (a passkey, two-step, a

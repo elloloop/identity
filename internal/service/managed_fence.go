@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/elloloop/identity/internal/config"
+
 	"go.uber.org/zap"
 )
 
@@ -53,29 +55,59 @@ func fenceManagedSession(ctx context.Context, repo Repository, logger *zap.Logge
 }
 
 // fenceManagedCaller is fenceManagedSession on userID's account in the
-// request's store.
+// request's store, and, for an account a tenant manages, its standing in
+// that tenant (refuseManagedAccount): set up, an active membership, a
+// tenant that is not suspended.
 func (s *AuthService) fenceManagedCaller(ctx context.Context, userID string, signIn SessionSignIn, path string) error {
 	user, err := s.repo(ctx).GetUser(ctx, userID)
 	if err != nil {
 		return err
 	}
-	return fenceManagedSession(ctx, s.repo(ctx), s.logger, user, signIn, path)
+	if err := fenceManagedSession(ctx, s.repo(ctx), s.logger, user, signIn, path); err != nil {
+		return err
+	}
+	if user == nil {
+		return nil
+	}
+	return s.refuseManagedAccount(ctx, user)
 }
 
 // accessTokenExpiry is how long an access token issued to user lasts: an
-// account a tenant manages gets GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS,
-// so a service that verifies tokens itself stops honouring one within a
-// minute of a suspension, removal or reset, and every other account
-// GATEWAY_JWT_EXPIRY_SECONDS.
-func (s *AuthService) accessTokenExpiry(user *User) time.Duration {
+// account a tenant manages, and an agent such an account owns, get
+// GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS, so a service that verifies
+// tokens itself stops honouring one within a minute of a suspension, removal
+// or reset; every other account GATEWAY_JWT_EXPIRY_SECONDS. An agent whose
+// owner cannot be read gets the short lifetime.
+func (s *AuthService) accessTokenExpiry(ctx context.Context, user *User) time.Duration {
 	if user.ManagedByTenantID != "" {
 		return s.cfg.ManagedAccessTokenExpiry()
+	}
+	if user.IsAgent() && user.OwnerUserID != "" {
+		owner, err := s.repo(ctx).GetUser(ctx, user.OwnerUserID)
+		if err != nil || owner == nil || owner.ManagedByTenantID != "" {
+			return s.cfg.ManagedAccessTokenExpiry()
+		}
 	}
 	return s.cfg.JWTExpiry()
 }
 
-// accessTokenExpiresIn is accessTokenExpiry in whole seconds, as a sign-in
-// reports it.
+// accessTokenExpiresIn is how long, in whole seconds, the access token a
+// sign-in issues to user, a person, lasts.
 func (s *AuthService) accessTokenExpiresIn(user *User) int32 {
-	return secondsToInt32(int(s.accessTokenExpiry(user) / time.Second))
+	expiry := s.cfg.JWTExpiry()
+	if user.ManagedByTenantID != "" {
+		expiry = s.cfg.ManagedAccessTokenExpiry()
+	}
+	return secondsToInt32(int(expiry / time.Second))
+}
+
+// managedTokenCapMs caps expiresAtMs, a delegated or machine token's expiry
+// issued at nowMs for an agent whose owner is owner, at
+// GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS when a tenant manages the
+// owner.
+func managedTokenCapMs(cfg *config.Config, owner *User, nowMs, expiresAtMs int64) int64 {
+	if owner == nil || owner.ManagedByTenantID == "" {
+		return expiresAtMs
+	}
+	return min(expiresAtMs, nowMs+cfg.ManagedAccessTokenExpiry().Milliseconds())
 }

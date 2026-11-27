@@ -308,3 +308,61 @@ func TestManagedAgentOwner_EveryPathFollowsItsStanding(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, oauth.ownerStanding(ctx, managed))
 }
+
+// Every token an agent of a managed owner gets lasts the managed lifetime
+// too: its session tokens here, and its delegated and machine tokens
+// through managedTokenCapMs. An agent of a personal owner keeps the usual
+// lifetime, and one whose owner cannot be read gets the short one.
+func TestAccessTokenExpiry_AgentsOfManagedOwnersGetAMinute(t *testing.T) {
+	f := newAgentFixture(t)
+	f.svc.cfg.JWTExpirySeconds = 900
+	managed := seedManaged(f.repo, "ann@acme.example.com", StatusActive)
+	f.svc.WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed))
+	ctx := context.Background()
+
+	managedAgent := seedAgent(f.repo, managed.ID)
+	access, _, err := f.svc.issueTokensWithSessionStart(ctx, managedAgent, "", "", sessionGateRefresh, 0, 0, 0, "", "", credentialEnrollment{})
+	require.NoError(t, err)
+	assert.Equal(t, time.Minute, tokenLifetime(t, access))
+
+	personalAgent := seedAgent(f.repo, f.owner.ID)
+	access, _, err = f.svc.issueTokensWithSessionStart(ctx, personalAgent, "", "", sessionGateRefresh, 0, 0, 0, "", "", credentialEnrollment{})
+	require.NoError(t, err)
+	assert.Equal(t, 15*time.Minute, tokenLifetime(t, access))
+
+	assert.Equal(t, time.Minute, f.svc.accessTokenExpiry(ctx, &User{ID: "x", Kind: UserKindAgent, OwnerUserID: "owner-gone"}), "an unread owner gets the short lifetime")
+
+	now := time.Now().UnixMilli()
+	far := now + (10 * time.Minute).Milliseconds()
+	assert.Equal(t, now+time.Minute.Milliseconds(), managedTokenCapMs(f.svc.cfg, managed, now, far), "a delegated or machine token of a managed owner")
+	assert.Equal(t, far, managedTokenCapMs(f.svc.cfg, f.owner, now, far), "a personal owner's")
+	assert.Equal(t, far, managedTokenCapMs(f.svc.cfg, nil, now, far))
+	soon := now + (10 * time.Second).Milliseconds()
+	assert.Equal(t, soon, managedTokenCapMs(f.svc.cfg, managed, now, soon), "a shorter expiry stands")
+}
+
+// The credential calls hold a managed caller to its standing in its tenant
+// as well as to a live session: a suspended tenant, or a membership that is
+// not active, refuses them.
+func TestManagedSessionFence_CredentialCallsNeedTheTenantsStanding(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRepo()
+	svc := newTestAuthService(t, repo)
+	managed := seedManaged(repo, "ann@acme.example.com", StatusActive)
+	live := liveSession(t, repo, managed.ID)
+	tenants := tenantIn(TenantStatusClaimed)
+	memberships := &managedMembershipsMock{get: membershipIn(MembershipStatusActive)}
+	svc.WithManagedMemberships(memberships, tenants)
+
+	_, _, _, err := svc.BeginTotpSetup(ctx, managed.ID, live)
+	require.NoError(t, err)
+
+	tenants.status = func(string, string) (string, error) { return TenantStatusSuspended, nil }
+	_, _, _, err = svc.BeginTotpSetup(ctx, managed.ID, live)
+	require.ErrorIs(t, err, ErrAccountNotActive, "a suspended tenant")
+
+	tenants.status = func(string, string) (string, error) { return TenantStatusClaimed, nil }
+	memberships.get = membershipIn(MembershipStatusSuspended)
+	_, _, err = svc.BeginPasskeyRegistration(ctx, managed.ID, live, "laptop", false)
+	require.ErrorIs(t, err, ErrAccountNotActive, "a suspended membership")
+}

@@ -881,7 +881,7 @@ account is a `users` row with `managed_by_tenant_id` set; its set-up link is a
 `tenant_invitations` row with its `user_id`, which never admits a sign-up or
 acceptance by email.
 
-A managed account's access tokens carry `managed: true` and last
+A managed account's access tokens carry `managed: true` and, with every token of an agent it owns, last
 `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` (default 60, at most 60 while
 managed accounts are enabled, never longer than `GATEWAY_JWT_EXPIRY_SECONDS`),
 so a service that verifies access tokens itself stops honouring one within a

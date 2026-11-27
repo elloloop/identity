@@ -317,7 +317,7 @@ func TestRepairStoredEmails_SkipsManagedAccounts(t *testing.T) {
 
 func TestLinkIdentity_RefusesAManagedAccount(t *testing.T) {
 	repo := newFakeRepo()
-	svc := newTestAuthService(t, repo)
+	svc := newTestAuthService(t, repo).WithManagedMemberships(&managedMembershipsMock{get: membershipIn(MembershipStatusActive)}, tenantIn(TenantStatusClaimed))
 	ctx := context.Background()
 	managed := seedManaged(repo, "ann@acme.example.com", StatusActive)
 	signIn := liveSession(t, repo, managed.ID)

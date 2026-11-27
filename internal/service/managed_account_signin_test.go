@@ -220,16 +220,16 @@ func TestTeammateOwnerStandsBehind_ManagedGrantorNeedsStanding(t *testing.T) {
 	key := &TeammateKey{OwnerUserID: grantor.ID, TeammateID: teammate.ID}
 	ctx := context.Background()
 
-	require.NoError(t, keys.ownerStandsBehind(ctx, mTestProject, key))
+	require.NoError(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, key)))
 	reader.get = membershipIn(MembershipStatusSuspended)
-	require.ErrorIs(t, keys.ownerStandsBehind(ctx, mTestProject, key), ErrUnauthenticated)
+	require.ErrorIs(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, key)), ErrUnauthenticated)
 	reader.get = func(string, string, string) (*TenantMembership, error) { return nil, errors.New("db down") }
-	require.ErrorIs(t, keys.ownerStandsBehind(ctx, mTestProject, key), errManagedStandingUnread, "a failed read is not a refusal for good")
+	require.ErrorIs(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, key)), errManagedStandingUnread, "a failed read is not a refusal for good")
 	reader.get = membershipIn(MembershipStatusActive)
-	require.NoError(t, keys.ownerStandsBehind(ctx, mTestProject, key))
+	require.NoError(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, key)))
 
 	unwired := &TeammateKeyService{base: repo, logger: zap.NewNop()}
-	require.ErrorIs(t, unwired.ownerStandsBehind(ctx, mTestProject, key), errManagedStandingUnread, "unwired, a managed grantor fails closed")
+	require.ErrorIs(t, standsErr(unwired.ownerStandsBehind(ctx, mTestProject, key)), errManagedStandingUnread, "unwired, a managed grantor fails closed")
 	require.Equal(t, ErrUnauthenticated, standingRefusal(ErrAccountNotActive))
 	require.NoError(t, standingRefusal(nil))
 
@@ -237,9 +237,9 @@ func TestTeammateOwnerStandsBehind_ManagedGrantorNeedsStanding(t *testing.T) {
 	lead.ManagedByTenantID, lead.SetUpAtMs = mTestTenant, 1
 	repo.mu.Unlock()
 	leadsKey := &TeammateKey{OwnerUserID: lead.ID, TeammateID: teammate.ID}
-	require.NoError(t, keys.ownerStandsBehind(ctx, mTestProject, leadsKey), "a managed lead in standing")
+	require.NoError(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, leadsKey)), "a managed lead in standing")
 	reader.get = membershipIn(MembershipStatusSuspended)
-	require.ErrorIs(t, keys.ownerStandsBehind(ctx, mTestProject, leadsKey), ErrUnauthenticated, "a suspended managed lead's teammate gets no token")
+	require.ErrorIs(t, standsErr(keys.ownerStandsBehind(ctx, mTestProject, leadsKey)), ErrUnauthenticated, "a suspended managed lead's teammate gets no token")
 }
 
 func TestAgentOwnerStanding_IsTheOneRule(t *testing.T) {
@@ -259,3 +259,6 @@ func TestAgentOwnerStanding_IsTheOneRule(t *testing.T) {
 	require.False(t, isAgentOAuthAdmissionRefusal(errManagedStandingUnread), "an unread standing does not end a grant")
 	require.True(t, isAgentOAuthAdmissionRefusal(ErrAccountNotActive))
 }
+
+// standsErr is the error of an ownerStandsBehind call.
+func standsErr(_ bool, err error) error { return err }
