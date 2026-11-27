@@ -1054,3 +1054,23 @@ func (s *InvitationStore) ManagedAccountsAmong(ctx context.Context, projectID, t
 	}
 	return out, nil
 }
+
+// RevokeSetupLinksOf implements service.ManagedSetupStore.
+func (s *InvitationStore) RevokeSetupLinksOf(ctx context.Context, projectID, userID string) error {
+	const op = "RevokeSetupLinksOf"
+	if projectID == "" || userID == "" {
+		return fmt.Errorf("%w: project_id and user_id are required", service.ErrInvalidArgument)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return wrapPgErr(op, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := revokePendingSetupLinks(ctx, tx, projectID, userID); err != nil {
+		return wrapPgErr(op, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return wrapPgErr(op+"(commit)", err)
+	}
+	return nil
+}

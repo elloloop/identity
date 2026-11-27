@@ -2114,12 +2114,16 @@ func (s *AuthService) projectID(ctx context.Context) string {
 // is a no-op for a personal/public email domain (gmail, outlook, …), since
 // those never imply a company. Auto-formation is best-effort: a failure is
 // logged but never fails the signup — the user's account already exists.
+// An account a tenant manages forms no tenant: it belongs to its own.
 func (s *AuthService) maybeAutoFormTenant(ctx context.Context, user *User) {
 	if s.autoFormer == nil || user == nil {
 		return
 	}
 	projectID := s.projectID(ctx)
 	if projectID == "" {
+		return
+	}
+	if refuseManagedAccountPath(ctx, s.logger, projectID, user, "auto_form_tenant") != nil {
 		return
 	}
 	// Split on the last '@' (via emailDomain) so the auto-formed tenant keys on

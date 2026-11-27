@@ -214,6 +214,9 @@ func (s *MembershipService) JoinTenantByDomain(ctx context.Context, callerID, te
 	if caller == nil {
 		return nil, fmt.Errorf("%w: caller", ErrNotFound)
 	}
+	if err := refuseManagedAccountPath(ctx, s.logger, projectID, caller, "join_tenant_by_domain"); err != nil {
+		return nil, err
+	}
 	if !isActivePerson(caller) {
 		return nil, fmt.Errorf("%w: only an active, signed-up person may join a tenant", ErrPermissionDenied)
 	}

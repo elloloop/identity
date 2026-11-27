@@ -104,3 +104,27 @@ func TestInvitationStore_OnlyAnOwnerRevokesAnOwnersLink(t *testing.T) {
 	_, err = store.RevokeManagedSetup(ctx, f.projectID, f.tenantID, members.Invitation.ID, admin)
 	require.NoError(t, err, "an admin revokes a member's link")
 }
+
+// TestInvitationStore_RevokeSetupLinksOf: every pending set-up link of the
+// account is revoked, and revoking none is not an error.
+func TestInvitationStore_RevokeSetupLinksOf(t *testing.T) {
+	dsn := memberRoleDSN(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f := newJoinFixture(ctx, t, dsn)
+	store := NewInvitationStore(f.accounts)
+	issued, err := store.CreateManagedSetup(ctx, service.ManagedSetup{
+		ProjectID: f.projectID, TenantID: f.tenantID, Address: "ann@acme.com", Domain: "acme.com",
+		DisplayName: "Ann", DeliveryEmail: "ann@example.net", Role: service.RoleMember, InvitedBy: f.other,
+		TokenHash: "ann-link", ExpiresAtMs: time.Now().Add(time.Hour).UnixMilli(),
+		Limits: service.InvitationLimits{MaxPerTenant: 10, WindowStartMs: 0},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, store.RevokeSetupLinksOf(ctx, f.projectID, issued.User.ID))
+	link, err := store.GetInvitationByTokenHash(ctx, f.projectID, "ann-link")
+	require.NoError(t, err)
+	require.Equal(t, service.InvitationStatusRevoked, link.Status)
+	require.NoError(t, store.RevokeSetupLinksOf(ctx, f.projectID, issued.User.ID), "revoking none is not an error")
+	require.ErrorIs(t, store.RevokeSetupLinksOf(ctx, f.projectID, ""), service.ErrInvalidArgument)
+}

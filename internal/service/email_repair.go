@@ -122,6 +122,7 @@ const (
 	repairReasonNotGmail        = "the spellings differ by a +tag outside Gmail, which can be another person's mailbox"
 	repairReasonUnverified      = "an account's email is not verified, so nothing proves it belongs to the mailbox's owner"
 	repairReasonIDPManaged      = "an identity provider manages one of the accounts"
+	repairReasonTenantManaged   = "a tenant manages one of the accounts, and keeps its address as it gave it"
 	repairReasonNoProviderSplit = "neither or both accounts are linked to a sign-in provider"
 	repairSourceMerge           = "email_repair"
 	gmailCanonicalDomain        = "@gmail.com"
@@ -231,6 +232,12 @@ func (s *AdminService) planMailbox(ctx context.Context, repo Repository, g *mail
 	for _, u := range g.live {
 		if u.ID != item.UserID {
 			item.OtherIDs = append(item.OtherIDs, u.ID)
+		}
+	}
+	for _, u := range g.live {
+		if u.ManagedByTenantID != "" {
+			item.Reason = repairReasonTenantManaged
+			return item
 		}
 	}
 	// releasable reports whether the merged-away holder of the canonical

@@ -241,6 +241,10 @@ type ManagedSetupStore interface {
 	// ManagedAccountsAmong reports which of userIDs are accounts tenantID
 	// manages: the returned set holds exactly those. It locks nothing.
 	ManagedAccountsAmong(ctx context.Context, projectID, tenantID string, userIDs []string) (map[string]bool, error)
+	// RevokeSetupLinksOf revokes every pending set-up link of userID, as
+	// RevokeManagedSetup does for an account it deletes. Revoking none is
+	// not an error.
+	RevokeSetupLinksOf(ctx context.Context, projectID, userID string) error
 }
 
 // ManagedMemberStore changes the membership and the account of a managed

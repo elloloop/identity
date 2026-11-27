@@ -155,6 +155,9 @@ func (s *AdminService) DeleteUser(ctx context.Context, actorID, targetUserID str
 	if u == nil {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
+	if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), u, "admin_delete_user"); err != nil {
+		return err
+	}
 	return s.purgeUser(ctx, actorID, u, false)
 }
 
@@ -207,6 +210,11 @@ func (s *AdminService) UpdateUser(ctx context.Context, actorID string, signIn Se
 	}
 	if target != nil && userFromNode(target).IsAgent() {
 		return nil, fmt.Errorf("%w: an agent account is edited with UpdateAgent", ErrInvalidArgument)
+	}
+	if target != nil {
+		if err := refuseManagedAccountPath(ctx, s.logger, s.projectID(ctx), userFromNode(target), "admin_update_user"); err != nil {
+			return nil, err
+		}
 	}
 
 	patch := map[string]any{ufUpdatedAt: nowMs()}

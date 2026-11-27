@@ -71,6 +71,9 @@ func (s *AuthService) RequestRecoveryEmail(ctx context.Context, userID string, s
 	if err != nil {
 		return err
 	}
+	if err := s.refuseManagedRecoveryEmail(ctx, user); err != nil {
+		return err
+	}
 	if err := requireProvenPrimaryEmail(user); err != nil {
 		return err
 	}
@@ -203,6 +206,9 @@ func (s *AuthService) VerifyRecoveryEmail(ctx context.Context, userID string, si
 	}
 	user, err := s.recoveryEmailCaller(ctx, userID, signIn, cfg)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.refuseManagedRecoveryEmail(ctx, user); err != nil {
 		return nil, err
 	}
 	if err := requireProvenPrimaryEmail(user); err != nil {
