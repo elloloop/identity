@@ -773,6 +773,9 @@ func (s *AuthService) ReactivateAgent(ctx context.Context, callerID, agentID, ip
 			map[string]any{"step": "agent_status", "status": agent.Status})
 		return fmt.Errorf("%w: agent is %s", ErrAccountNotActive, agent.Status)
 	}
+	if err := s.reactivationOwnerStands(ctx, callerID, agent, ip, userAgent); err != nil {
+		return err
+	}
 	now := s.nowMs()
 	if err := s.repo(ctx).UpdateUser(ctx, agent.ID, map[string]any{
 		"status":     StatusActive,
@@ -784,6 +787,40 @@ func (s *AuthService) ReactivateAgent(ctx context.Context, callerID, agentID, ip
 	s.auditAgentAction(ctx, agentOpReactivate, callerID, agent.ID, true, ip, userAgent, nil)
 	s.emitAgentEvent(ctx, events.EventUserUpdated, agent)
 	return nil
+}
+
+// reactivationOwnerStands refuses to reactivate an agent whose owner does
+// not stand behind it (agentOwnerStanding): a managed owner that is
+// suspended, removed or unset-up, or an owner that is not active, gets no
+// agent back. An orphan, whose owner is gone, is left to the admin, as it
+// holds no session either way. A standing that cannot be read is refused
+// with that error, so the caller may retry.
+func (s *AuthService) reactivationOwnerStands(ctx context.Context, callerID string, agent *User, ip, userAgent string) error {
+	if agent.OwnerUserID == "" {
+		return nil
+	}
+	owner, err := s.repo(ctx).GetUser(ctx, agent.OwnerUserID)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("fetch agent owner: %w", err)
+	}
+	if !isPermanentPerson(owner) {
+		return nil
+	}
+	err = s.agentOwnerStanding(ctx, owner)
+	if err == nil {
+		return nil
+	}
+	if isManagedStandingUnread(err) {
+		s.auditAgentAction(ctx, agentOpReactivate, callerID, agent.ID, false, ip, userAgent,
+			map[string]any{"step": "owner_standing_unread", "owner_user_id": owner.ID})
+		return err
+	}
+	s.auditAgentAction(ctx, agentOpReactivate, callerID, agent.ID, false, ip, userAgent,
+		map[string]any{"step": "owner_not_eligible", "owner_user_id": owner.ID})
+	return errAgentOwnerNotActive
 }
 
 // DeleteAgent erases an agent through the same hard-delete cascade the

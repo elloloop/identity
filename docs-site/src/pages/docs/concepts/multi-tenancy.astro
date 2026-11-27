@@ -358,7 +358,9 @@ RestoreTenantMember(tenant_id, user_id)
   <p>
     So a person locked out of a managed account asks for help with
     <code>RequestAdminHelp</code>, and the request goes to the tenant, not
-    to the project's admins: its active owners and admins are mailed a
+    to the project's admins (unless the tenant has no active owner or admin
+    to tell, or the lookup cannot run, when it is filed for the project's
+    admins as any other): its active owners and admins are mailed a
     notice, "Ann (ann@acme.example.com) asked for help signing in.", naming
     the account by its stored name and address and carrying nothing the
     person wrote, with an Open Members button to
@@ -857,14 +859,27 @@ RestoreTenantMember(tenant_id, user_id)
     named (<code>UNAUTHENTICATED</code>). A personal caller is never read
     for. A managed account's access tokens (<code>managed: true</code>) last
     <code>GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS</code>, a minute by
-    default, so a service that verifies tokens itself stops honouring one
+    default and never longer, even with managed accounts switched off, so a service that verifies tokens itself stops honouring one
     within a minute of a suspension, removal or reset, and the refresh that
     follows is refused. A managed account may own agents while it stands in its tenant (set
     up, active, an active membership); an agent whose managed owner falls out
     of standing holds no session, and a suspension, removal or reset
     deactivates its agents. A restore does not reactivate them:
     <code>RestoreTenantMember</code> answers how many stay off
-    (<code>agents_left_deactivated</code>), and the owner reactivates each.
+    (<code>agents_left_deactivated</code>, counted at the restore: every
+    agent of the account then deactivated), and the owner reactivates each,
+    which <code>ReactivateAgent</code> allows only while the owner stands in
+    its tenant, for the owner and for an admin alike.
+  </p>
+  <p>
+    Switching <code>GATEWAY_MANAGED_ACCOUNTS_ENABLED</code> off stops new
+    managed accounts, set-ups and resets, and sends help requests to the
+    project's admins; the managed accounts that exist keep every
+    restriction, their one-minute tokens, and their sign-out on suspension or
+    removal. The server no longer insists on
+    <code>GATEWAY_REVOCATION_MODE=session</code> and a session cache TTL of
+    at most 60 once the switch is off, so keep both while any managed
+    account exists.
   </p>
   <p>
     <code>RevokeTenantInvitation</code> on a set-up link also deletes its

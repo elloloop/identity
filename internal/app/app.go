@@ -916,6 +916,11 @@ func New(deps Deps) (*Built, error) {
 			return nil, err
 		}
 	}
+	if deps.Config.ManagedAccountsEnabled {
+		if authSvc, err = authSvc.WithManagedHelpMetrics(deps.MetricsRegistry); err != nil {
+			return nil, err
+		}
+	}
 	adminSvc := service.NewAdminService(repo, deps.DB, deps.Config.DefaultProjectID, auditLog, deps.Config, mailer, logger).
 		WithEventPublisher(eventPublisher).
 		WithManagedSetups(deps.ManagedSetups)

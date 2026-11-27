@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/elloloop/identity/internal/config"
 	"github.com/elloloop/identity/pkg/audit"
@@ -289,6 +291,7 @@ func TestResetManagedAccount_ResetsNotifiesAndSendsTheSetUpLink(t *testing.T) {
 	}
 	assert.Equal(t, []string{managedAddress, managedRecovery, managedDelivery}, to, "the notices go first, then the link")
 	assert.Contains(t, f.mailer.sent[0].Text, "contact your organization's administrator")
+	assert.Contains(t, f.mailer.sent[0].Text, "Hi Ann,", "an operator's tenant greets by the account's name")
 	assert.Contains(t, f.mailer.last().Text, "token=")
 	assert.Equal(t, asked.TokenHash, sha256Hex(extractTokenFromLink(t, f.mailer.last().Text)))
 
@@ -297,7 +300,7 @@ func TestResetManagedAccount_ResetsNotifiesAndSendsTheSetUpLink(t *testing.T) {
 		"project_id": ssProject, "tenant_id": ownTenant, "role": RoleMember,
 		"delivery_email": redactEmail(managedDelivery), "sessions_ended": float64(1),
 		"agents_deactivated": []any{"agent-1"}, "review": managedResetReviewNote,
-		"owners_told": false,
+		"owners_notice_due": false,
 	}}, f.audit.detailsOf(string(audit.EventManagedAccountReset)))
 	assert.Equal(t, [][2]string{{"203.0.113.7", "test-agent"}}, f.audit.clientsOf(string(audit.EventManagedAccountReset)))
 }
@@ -399,6 +402,22 @@ func TestResetManagedAccount_SelfServiceTenantAdmittedByItsOwnSwitch(t *testing.
 	_, err := f.svc.ResetManagedAccount(managedProject(true, true), ssOwnerID, freshSignIn(), ownTenant, managedMemberID, managedDelivery, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, managedMemberID, asked.UserID)
+	require.Equal(t, 3, f.mailer.count())
+	for _, m := range f.mailer.sent {
+		assert.Contains(t, m.Text, "Hi ann,", "a self-service tenant's typed name is not used: the notices and the link greet by the address")
+		assert.NotContains(t, m.Text, "Hi Ann,")
+	}
+}
+
+// managedAccountGreeting uses the typed name only for an operator's tenant.
+func TestManagedAccountGreeting(t *testing.T) {
+	ann := &User{Email: "ann@acme.example.com", Name: "Ann"}
+	greeting, tenant := managedAccountGreeting(&Tenant{Name: "Acme"}, ann)
+	assert.Equal(t, [2]string{"Ann", "Acme"}, [2]string{greeting, tenant})
+	greeting, tenant = managedAccountGreeting(&Tenant{Name: "Acme", CreatedBy: "u-owner"}, ann)
+	assert.Equal(t, [2]string{"ann", ""}, [2]string{greeting, tenant})
+	greeting, tenant = managedAccountGreeting(nil, ann)
+	assert.Equal(t, [2]string{"ann", ""}, [2]string{greeting, tenant})
 }
 
 func TestResetManagedAccount_StoreRefusalsPassThrough(t *testing.T) {
@@ -487,7 +506,7 @@ func TestResetManagedAccount_AdminResettingAnAdminTellsTheOwners(t *testing.T) {
 			} else {
 				assert.Equal(t, []string{"owner@example.test"}, told, "the active owner only")
 			}
-			assert.Equal(t, tc.ownersTold > 0, f.audit.detailsOf(string(audit.EventManagedAccountReset))[0]["owners_told"])
+			assert.Equal(t, tc.ownersTold > 0, f.audit.detailsOf(string(audit.EventManagedAccountReset))[0]["owners_notice_due"])
 			notified := f.audit.detailsOf(string(audit.EventManagedAccountResetOwnersNotified))
 			if tc.ownersTold == 0 {
 				assert.Empty(t, notified)
@@ -590,6 +609,38 @@ func TestResetManagedAccount_BadDeliveryAddressIsNotEchoed(t *testing.T) {
 	_, err := f.svc.ResetManagedAccount(managedProject(true, false), ssOwnerID, freshSignIn(), ownTenant, managedMemberID, "not-an-address@", "", "")
 	require.ErrorIs(t, err, ErrInvalidArgument)
 	assert.NotContains(t, err.Error(), "not-an-address")
+}
+
+// Each argument refusal is logged as managed_account_reset_refused with its
+// reason, and an unusable delivery address only redacted.
+func TestResetManagedAccount_InvalidArgumentsAreLogged(t *testing.T) {
+	f := newManagedFixture(t)
+	core, logs := observer.New(zap.InfoLevel)
+	f.svc.logger = zap.New(core)
+	for _, tc := range []struct {
+		name, userID, delivery, reason string
+	}{
+		{"no user", " ", managedDelivery, "invalid_argument"},
+		{"own account", ssOwnerID, managedDelivery, "own_account"},
+		{"unusable delivery address", managedMemberID, "not-an-address@", "invalid_argument"},
+	} {
+		logs.TakeAll()
+		_, err := f.svc.ResetManagedAccount(managedProject(true, false), ssOwnerID, freshSignIn(), ownTenant, tc.userID, tc.delivery, "", "")
+		require.ErrorIs(t, err, ErrInvalidArgument, tc.name)
+		lines := logs.FilterMessage("managed_account_reset_refused").AllUntimed()
+		require.Len(t, lines, 1, tc.name)
+		fields := lines[0].ContextMap()
+		assert.Equal(t, tc.reason, fields["reason"], tc.name)
+		assert.Equal(t, ownTenant, fields["tenant_id"], tc.name)
+		for _, l := range logs.All() {
+			for _, v := range l.ContextMap() {
+				assert.NotEqual(t, "not-an-address@", v, "%s: the raw address is never logged", tc.name)
+			}
+		}
+		if tc.delivery == "not-an-address@" {
+			assert.Equal(t, redactEmail(tc.delivery), fields["to"])
+		}
+	}
 }
 
 // Restoring a managed account says how many of its agents stay

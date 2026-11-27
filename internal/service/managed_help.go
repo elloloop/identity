@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/elloloop/identity/internal/config"
@@ -104,14 +105,36 @@ func (s *AuthService) WithManagedHelp(store ManagedHelpStore) *AuthService {
 	return s
 }
 
+// WithManagedHelpMetrics counts, as
+// identity_managed_help_limited_total{outcome}, the help requests about a
+// managed account that a daily cap kept from its tenant (outcome
+// tenant_limited or source_limited), registered with reg (nil registers
+// with a fresh registry, for tests). A rising count is a tenant being
+// flooded with requests, or one locked-out member asking again and again.
+func (s *AuthService) WithManagedHelpMetrics(reg prometheus.Registerer) (*AuthService, error) {
+	if reg == nil {
+		reg = prometheus.NewRegistry()
+	}
+	limited := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "identity_managed_help_limited_total",
+		Help: "Help requests about a managed account that a daily cap kept from its tenant, labelled by outcome.",
+	}, []string{"outcome"})
+	if err := reg.Register(limited); err != nil {
+		return nil, fmt.Errorf("managed help metrics: %w", err)
+	}
+	s.managedHelpLimited = limited
+	return s, nil
+}
+
 // RouteAdminHelp implements AdminHelpRouter. Where managed accounts are
 // enabled, a request is looked up off the request path (dispatchEmailSend),
 // so neither the answer nor its timing says whether the address is a managed
 // account: a request about an active or suspended managed account goes to
 // the owners and admins of the tenant that manages it (RecordManagedHelp
-// decides whether they are told) and never to the project's admins, and any
-// other request, or one about a tenant with no owner or admin to tell, is
-// filed as ordinary files it. The notice carries nothing the caller wrote,
+// decides whether they are told), not to the project's admins, unless the
+// tenant has no active owner or admin to tell, the lookup cannot run (a
+// dropped dispatch) or managed accounts are off; those, and any other
+// request, are filed as ordinary files it. A store error files nothing. The notice carries nothing the caller wrote,
 // nor their IP address or user agent; the audit entry keeps those and the
 // reason. Where managed accounts are off, or the project sends no email,
 // ordinary files every request at once, as it always has; a dispatch that is
@@ -167,6 +190,9 @@ func (s *AuthService) routeAdminHelpNow(ctx context.Context, address, reason, so
 		s.logger.Info("managed_account_help_not_sent", fields...)
 		if rec.Outcome != ManagedHelpDuplicate {
 			s.auditManagedHelp(ctx, rec, false, reason, sourceIP, userAgent)
+			if s.managedHelpLimited != nil {
+				s.managedHelpLimited.WithLabelValues(rec.Outcome).Inc()
+			}
 		}
 		return
 	}

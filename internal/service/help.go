@@ -66,16 +66,28 @@ func (s *HelpService) RequestAdminHelp(
 	if email == "" || !strings.Contains(email, "@") {
 		return errors.New("valid email is required")
 	}
-	if len(reason) > 1024 {
-		reason = reason[:1024]
-	}
+	reason = helpReason(reason)
 	file := func(ctx context.Context) { s.fileHelpRequest(ctx, email, reason, sourceIP, userAgent) }
 	if s.router == nil {
 		file(ctx)
 		return nil
 	}
-	s.router.RouteAdminHelp(ctx, email, strings.TrimSpace(reason), sourceIP, userAgent, file)
+	s.router.RouteAdminHelp(ctx, email, reason, sourceIP, userAgent, file)
 	return nil
+}
+
+// helpReasonMaxBytes is the most of a help request's reason that is kept.
+const helpReasonMaxBytes = 1024
+
+// helpReason is the caller's reason as a help request keeps it, the one
+// both the filed request and the managed audit entry carry: trimmed, then
+// cut to helpReasonMaxBytes without splitting a character.
+func helpReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if len(reason) <= helpReasonMaxBytes {
+		return reason
+	}
+	return strings.TrimSpace(strings.ToValidUTF8(reason[:helpReasonMaxBytes], ""))
 }
 
 // fileHelpRequest files a help request for the project's admins, at most 3
@@ -108,7 +120,7 @@ func (s *HelpService) fileHelpRequest(ctx context.Context, email, reason, source
 
 	data := map[string]any{
 		hfEmail:           email,
-		hfReason:          strings.TrimSpace(reason),
+		hfReason:          reason,
 		hfSourceIP:        sourceIP,
 		hfUserAgent:       truncate(userAgent, 512),
 		hfStatus:          "pending",

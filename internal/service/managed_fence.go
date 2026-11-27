@@ -76,13 +76,16 @@ func (s *AuthService) fenceManagedCaller(ctx context.Context, userID string, sig
 // account a tenant manages, and an agent such an account owns, get
 // GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS, so a service that verifies
 // tokens itself stops honouring one within a minute of a suspension, removal
-// or reset; every other account GATEWAY_JWT_EXPIRY_SECONDS. An agent whose
-// owner cannot be read gets the short lifetime.
+// or reset; every other account GATEWAY_JWT_EXPIRY_SECONDS. An agent with
+// no owner, or whose owner cannot be read, gets the short lifetime.
 func (s *AuthService) accessTokenExpiry(ctx context.Context, user *User) time.Duration {
 	if user.ManagedByTenantID != "" {
 		return s.cfg.ManagedAccessTokenExpiry()
 	}
-	if user.IsAgent() && user.OwnerUserID != "" {
+	if user.IsAgent() {
+		if user.OwnerUserID == "" {
+			return s.cfg.ManagedAccessTokenExpiry()
+		}
 		owner, err := s.repo(ctx).GetUser(ctx, user.OwnerUserID)
 		if err != nil || owner == nil || owner.ManagedByTenantID != "" {
 			return s.cfg.ManagedAccessTokenExpiry()

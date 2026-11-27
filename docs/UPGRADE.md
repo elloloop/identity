@@ -1,5 +1,62 @@
 # Upgrade guide
 
+## Next — managed-account polish: a deactivated agent comes back only behind an owner in standing; the managed token ceiling always holds; `owners_notice_due`; `identity_managed_help_limited_total` (no migration; audit detail renamed; one metric)
+
+- **`ReactivateAgent` needs the owner's standing.** An agent whose owner is a
+  managed account that is suspended, removed or not set up, or an owner that
+  is not active, is not reactivated, by its owner or by an admin:
+  `FAILED_PRECONDITION`, audited as `agent_reactivated` unsuccessful with
+  `step` `owner_not_eligible`. An owner whose standing cannot be read is
+  refused with that error (`step` `owner_standing_unread`) and may be
+  retried. An orphan, whose owner is gone, is reactivated as before.
+- **The one-minute ceiling always holds.**
+  `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` above 60 is used as 60 even
+  with `GATEWAY_MANAGED_ACCOUNTS_ENABLED` off (boot still refuses it with the
+  switch on), so managed accounts that exist when the switch is turned off
+  keep one-minute tokens. An agent with no owner now gets the short lifetime
+  too, as one whose owner cannot be read already did.
+- **Switching managed accounts off.** The switch gates new managed accounts,
+  set-ups, resets and the tenant routing of help requests; the accounts that
+  exist keep their restrictions, and suspending or removing one still ends
+  its sessions at once. Boot no longer requires
+  `GATEWAY_REVOCATION_MODE=session` or a session cache TTL of at most 60 once
+  the switch is off: keep both while any managed account exists, or another
+  replica may serve a suspended account's session until its cache expires.
+- **Suspension and restore.** After a managed account is suspended or
+  removed, its refresh tokens are refused with `UNAUTHENTICATED`, and its
+  access tokens stop within a minute. Restoring the membership does not
+  reactivate the agents the suspension, removal or reset deactivated:
+  `RestoreTenantMemberResponse.agents_left_deactivated` counts them at the
+  moment of the restore (every agent of the account then deactivated), and
+  the owner reactivates each with `ReactivateAgent`.
+- **Audit detail renamed.** `managed_account_reset`'s `owners_told` is now
+  `owners_notice_due`: it says the reset was one admin's of another, so the
+  owners are due a notice, which is sent off the request path;
+  `managed_account_reset_owners_notified` records how many it reached.
+  Readers of the old key should read both until their retained events age
+  out.
+- **Greetings.** The reset notice greets the account as the set-up email
+  does: by the name its admin typed only for a tenant an operator created,
+  and by the address's local part for a self-service tenant.
+- **Help requests.**
+  - A request a daily cap kept from its tenant is counted in
+    **`identity_managed_help_limited_total{outcome}`** (`tenant_limited`,
+    `source_limited`). Alert when it rises: a tenant is being flooded, or
+    one member keeps asking.
+  - The reason is trimmed and cut to 1024 bytes once, on a character
+    boundary, so the filed request and the managed audit entry carry the
+    same text.
+  - A request about a managed account goes to its tenant, not the project's
+    admins, except when the tenant has no active owner or admin to tell, the
+    lookup could not run, or managed accounts are off; those are filed for
+    the project's admins as before.
+  - The source key is an HMAC under a key derived from
+    `GATEWAY_TOTP_RECOVERY_PEPPER`; rotating the pepper restarts every
+    source's daily count.
+- **Config reference.** `GATEWAY_MANAGED_HELP_*` is listed under Projects &
+  tenancy, `GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS` under JWT & tokens
+  and `GATEWAY_TENANT_MEMBERS_PAGE_URL` under Email & branding.
+
 ## Next — restoring a managed account says how many of its agents stay off (additive field `RestoreTenantMemberResponse.agents_left_deactivated`; no migration; `MembershipService.RestoreTenantMember` returns a `RestoredMember` (Go API))
 
 Suspending, removing or resetting an account a tenant manages deactivates its

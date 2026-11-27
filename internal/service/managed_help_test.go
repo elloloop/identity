@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -111,6 +114,8 @@ func TestRouteAdminHelp_NoNoticeOutsideTheCaps(t *testing.T) {
 	} {
 		t.Run(outcome, func(t *testing.T) {
 			f := newManagedHelpFixture(t)
+			_, err := f.svc.WithManagedHelpMetrics(nil)
+			require.NoError(t, err)
 			f.store.record = func(ManagedHelpRequest) (*ManagedHelpRecorded, error) { return managedHelpRecord(outcome), nil }
 
 			f.routed("ann@acme.example.com")
@@ -118,6 +123,8 @@ func TestRouteAdminHelp_NoNoticeOutsideTheCaps(t *testing.T) {
 			assert.Zero(t, f.filed)
 			assert.Empty(t, f.rec.Sent())
 			assert.Equal(t, audited, f.audit.countByEventType(string(audit.EventManagedAccountHelpRequested)))
+			assert.InDelta(t, float64(audited), testutil.ToFloat64(f.svc.managedHelpLimited.WithLabelValues(outcome)), 0,
+				"a cap's refusal is counted as identity_managed_help_limited_total; a duplicate is not")
 		})
 	}
 }
@@ -140,7 +147,7 @@ func TestRouteAdminHelp_StoreErrorFilesNothing(t *testing.T) {
 
 	f.routed("ann@acme.example.com")
 
-	assert.Zero(t, f.filed, "a request that may be about a managed account never reaches the project's admins")
+	assert.Zero(t, f.filed, "a request the store could not judge is not filed for the project's admins")
 	assert.Empty(t, f.rec.Sent())
 }
 
@@ -301,4 +308,28 @@ func TestManagedHelpNotice_NamesTheAccountAndLinksToMembers(t *testing.T) {
 	notice := managedHelpNotice(f.svc.cfg, rec)
 	assert.Equal(t, "ann@acme.example.com asked for help signing in", notice.headline)
 	assert.Equal(t, "ann@acme.example.com asked for help signing in.", notice.detail)
+}
+
+// The reason is normalised once: the router and the filed request see the
+// same trimmed reason, cut to helpReasonMaxBytes on a character boundary.
+func TestHelpReason(t *testing.T) {
+	assert.Equal(t, "help me", helpReason("  help me \n"))
+	long := strings.Repeat("a", helpReasonMaxBytes-1) + "é" + "tail"
+	got := helpReason(long)
+	assert.Equal(t, strings.Repeat("a", helpReasonMaxBytes-1), got, "a split character is dropped whole")
+	assert.True(t, utf8.ValidString(got))
+	assert.LessOrEqual(t, len(helpReason(strings.Repeat("ü", 2000))), helpReasonMaxBytes)
+
+	db := newFakeDB()
+	svc := newTestHelpService(db)
+	require.NoError(t, svc.RequestAdminHelp(context.Background(), "ann@acme.example.com", "  locked out  ", "203.0.113.7", "test-agent"))
+	nodes, err := db.QueryNodes(context.Background(), "", "", typeAdminHelpReq, nil)
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	assert.Equal(t, "locked out", nodes[0].Payload[hfReason], "the filed request keeps the same reason")
+
+	router := &recordingRouter{}
+	svc = newTestHelpService(newFakeDB()).WithAdminHelpRouter(router)
+	require.NoError(t, svc.RequestAdminHelp(context.Background(), "ann@acme.example.com", "  locked out  ", "203.0.113.7", "test-agent"))
+	assert.Equal(t, []string{"ann@acme.example.com|locked out|203.0.113.7|test-agent"}, router.calls)
 }

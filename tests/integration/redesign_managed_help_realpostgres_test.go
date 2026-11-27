@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	identitypb "github.com/elloloop/identity/gen/go/identity/v1"
 	"github.com/elloloop/identity/internal/config"
@@ -66,5 +67,39 @@ func TestRedesign_ManagedHelp_OffTellsNoTenant(t *testing.T) {
 	requestAdminHelp(t, off, m.address)
 	if sent := off.Mailer.Sent(); len(sent) != 0 {
 		t.Fatalf("with managed accounts off the request mailed %+v", sent)
+	}
+}
+
+// TestRedesign_ManagedHelp_SameAnswerForEveryAddress: the reply to a help
+// request is the same for a managed account, a personal account and an
+// address with no account, so it says nothing about who has one.
+func TestRedesign_ManagedHelp_SameAnswerForEveryAddress(t *testing.T) {
+	h := startManagedHarness(t, func(*config.Config) {})
+	m := newManagedMember(t, h, "managed-help-same")
+	client := brandedClient(h, "")
+	var answers []*identitypb.RequestAdminHelpResponse
+	var headers []string
+	for _, addr := range []string{m.address, ownerAddress(t, h, m.ownerID), "nobody-" + m.mt.domain + "@example.org"} {
+		resp, err := client.RequestAdminHelp(context.Background(), connect.NewRequest(&identitypb.RequestAdminHelpRequest{Email: addr, Reason: "locked out"}))
+		if err != nil {
+			t.Fatalf("RequestAdminHelp(%s): %v", addr, err)
+		}
+		answers = append(answers, resp.Msg)
+		var keys []string
+		for k := range resp.Header() {
+			if k != "Date" {
+				keys = append(keys, k)
+			}
+		}
+		slices.Sort(keys)
+		headers = append(headers, strings.Join(keys, ","))
+	}
+	for i := 1; i < len(answers); i++ {
+		if !proto.Equal(answers[0], answers[i]) {
+			t.Fatalf("answer %d = %v, want the same as %v", i, answers[i], answers[0])
+		}
+		if headers[i] != headers[0] {
+			t.Fatalf("answer %d headers = %q, want %q", i, headers[i], headers[0])
+		}
 	}
 }

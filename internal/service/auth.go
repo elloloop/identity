@@ -1652,6 +1652,9 @@ type AuthService struct {
 	// tenants that manage them (WithManagedHelp); nil sends every help
 	// request to the project's admins.
 	managedHelp ManagedHelpStore
+	// managedHelpLimited counts the help requests a daily cap kept from
+	// their tenant, by outcome (WithManagedHelpMetrics); nil counts none.
+	managedHelpLimited *prometheus.CounterVec
 
 	// autoFormer, when set (postgres driver only), auto-forms a tenant from
 	// a new user's company email domain at signup. nil disables the

@@ -392,7 +392,7 @@ func TestRedesign_ManagedMember_AdminResettingAnAdminTellsTheOwner(t *testing.T)
 		t.Fatalf("owner's notice = %q, want who reset which account", text)
 	}
 	event := waitForAuditEvent(t, h, m.userID, string(audit.EventManagedAccountReset))
-	if event.ActorUserID != m.mt.admin.userID || event.Details["owners_told"] != true {
+	if event.ActorUserID != m.mt.admin.userID || event.Details["owners_notice_due"] != true {
 		t.Fatalf("reset event = %+v, want the admin's reset telling the owners", event)
 	}
 	told := waitForAuditEvent(t, h, m.userID, string(audit.EventManagedAccountResetOwnersNotified))

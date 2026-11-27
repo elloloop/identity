@@ -257,7 +257,7 @@ func (s *MembershipService) ResetManagedAccount(ctx context.Context, callerID st
 				"sessions_ended":     len(done.RevokedSessionIDs),
 				"agents_deactivated": done.DeactivatedAgentIDs,
 				"review":             managedResetReviewNote,
-				"owners_told":        notifyOwners,
+				"owners_notice_due":  notifyOwners,
 			}),
 		)
 	}
@@ -276,16 +276,36 @@ func (s *MembershipService) ResetManagedAccount(ctx context.Context, callerID st
 	return out, nil
 }
 
+// managedAccountGreeting is how an email to account, which tenant t
+// manages, greets it, and the tenant name it may show: the name the
+// tenant's admin typed only for a tenant an operator created (CreatedBy
+// empty), whose names are vetted; for a self-service tenant, or one that
+// could not be read (t nil), the address's local part and no tenant name.
+func managedAccountGreeting(t *Tenant, account *User) (greeting, tenantName string) {
+	if t != nil && t.CreatedBy == "" {
+		return account.Name, tenantNameOf(t)
+	}
+	return invitationGreeting(account.Email), ""
+}
+
 // sendResetNotices tells every address the account had before its reset
-// that the tenant took it back. Best-effort: a notice that cannot be rendered
+// that the tenant took it back, greeting it as the set-up email does
+// (managedAccountGreeting). Best-effort: a notice that cannot be rendered
 // or sent is logged, and the reset stands.
 func (s *MembershipService) sendResetNotices(ctx context.Context, done *ManagedResetDone) {
 	const headline = "Your account was reset by your organization"
 	detail := "An administrator of the organization that manages your account reset it: it was signed out everywhere, and its password, passkeys, two-step methods, recovery emails and phone were removed. The organization has sent a new set-up link."
 	advice := "If you did not expect this, contact your organization's administrator."
+	t, err := s.tenants.GetTenant(ctx, done.Invitation.ProjectID, done.Invitation.TenantID)
+	if err != nil {
+		s.logger.Warn("managed_account_reset_notice_tenant_lookup_failed",
+			zap.String("user_id", done.User.ID), zap.String("tenant_id", done.Invitation.TenantID), zap.Error(err))
+		t = nil
+	}
+	greeting, _ := managedAccountGreeting(t, done.User)
 	brand := resolveBranding(ctx, s.config(), "")
 	for _, addr := range done.NoticeEmails {
-		html, text, err := renderAccountNotice(brand, done.User.Name, accountNotice{headline: headline, detail: detail, advice: advice})
+		html, text, err := renderAccountNotice(brand, greeting, accountNotice{headline: headline, detail: detail, advice: advice})
 		if err == nil {
 			msg := email.Message{To: addr, From: s.config().SMTPFrom, Subject: headline, HTML: html, Text: text}
 			brand.applyTo(&msg)

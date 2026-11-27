@@ -836,6 +836,11 @@ func TestManagedAccessTokenExpiry(t *testing.T) {
 	if got := c.ManagedAccessTokenExpiry(); got != 30*time.Second {
 		t.Fatalf("set = %v, want 30s", got)
 	}
+	c.ManagedAccessTokenExpirySeconds = 3600
+	if got := c.ManagedAccessTokenExpiry(); got != MaxManagedAccessTokenExpirySeconds*time.Second {
+		t.Fatalf("an hour with managed accounts off = %v, want the one-minute ceiling", got)
+	}
+	c.ManagedAccessTokenExpirySeconds = 30
 	c.JWTExpirySeconds = 20
 	if got := c.ManagedAccessTokenExpiry(); got != 20*time.Second {
 		t.Fatalf("over the access-token expiry = %v, want it capped at 20s", got)
