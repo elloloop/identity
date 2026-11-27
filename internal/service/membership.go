@@ -83,7 +83,19 @@ type TenantInvitation struct {
 	// (GetTenantInvitation). It is false for an invitation stored before it
 	// was recorded, whose token may have gone anywhere.
 	TokenOnlyInEmail bool
+	// UserID is set on a managed account's set-up link: the account it sets
+	// up, whose address is Email. "" on an ordinary invitation.
+	UserID string
+	// DeliveryEmail is where a set-up link was sent; "" on an ordinary
+	// invitation, which goes to Email.
+	DeliveryEmail string
+	// SetupEpoch is the account's setup_epoch the link was issued for; only
+	// a link whose epoch is the account's current one sets it up.
+	SetupEpoch int64
 }
+
+// IsManagedSetup reports whether inv is a managed account's set-up link.
+func (inv *TenantInvitation) IsManagedSetup() bool { return inv.UserID != "" }
 
 // UserTenant is a tenant a user may act in: an active membership in a
 // claimed tenant, with the role the user holds there and how the membership
@@ -222,8 +234,10 @@ type MembershipStore interface {
 	// leaves the tenant without an owner. In the same step it records the
 	// removal, which keeps the user from joining the tenant through their
 	// email's domain (JoinByDomain) until a membership from another source
-	// lets them back in. Returns the membership as it stood when removed;
-	// an unknown row is a no-op that returns (nil, nil) and records nothing.
+	// lets them back in, and revokes the user's pending managed-account
+	// set-up links, so no old link brings them back. Returns the membership as
+	// it stood when removed; an unknown row is a no-op that returns (nil, nil)
+	// and records nothing.
 	RemoveMembership(ctx context.Context, projectID, tenantID, userID string) (*TenantMembership, error)
 	// JoinByDomain makes userID an active member of the tenant through
 	// their email's domain, the verified domain domainID: role member,
@@ -309,7 +323,9 @@ type InvitationStore interface {
 	// transaction it revokes any existing pending invitation for the same
 	// (project, tenant, lower(email)) and inserts the new one, with
 	// inv.TokenOnlyInEmail as given. A blank id is generated and written
-	// back. Returns the new invitation id.
+	// back. Returns the new invitation id. An address with a pending managed
+	// set-up link in the tenant is ErrManagedByThisTenant, and nothing is
+	// revoked.
 	//
 	// limits bounds how many invitations the tenant, the inviter and the
 	// recipient account for; the checks and the insert run serialised per
@@ -346,7 +362,9 @@ type OpenInvitationReader interface {
 	// addressed to email (canonical form), in a tenant that can still take
 	// members (claimed or latent) and was not created through self-service
 	// CreateTenant (its CreatedBy is empty), from an inviter who is still an
-	// active owner or admin of that tenant, or (nil, nil).
+	// active owner or admin of that tenant, or (nil, nil). A managed
+	// account's set-up link (IsManagedSetup) is never open: it admits no
+	// sign-up or acceptance by email.
 	OpenInvitationForEmail(ctx context.Context, projectID, email string, nowMs int64) (*TenantInvitation, error)
 	// OpenInvitationForToken returns the invitation in the project whose
 	// hashed token is tokenHash when it is open as OpenInvitationForEmail

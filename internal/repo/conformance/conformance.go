@@ -2890,6 +2890,7 @@ func RunConformance(t *testing.T, driver Driver) {
 	runRecoveryEmailConformance(t, driver)
 	runPhoneClaimConformance(t, driver)
 	runPasswordChangeRequiredConformance(t, driver)
+	runManagedAccountConformance(t, driver)
 	runAccountMergeConformance(t, driver)
 	runAgentAccountsConformance(t, driver)
 	runAgentCreationConformance(t, driver)

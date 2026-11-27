@@ -45,6 +45,11 @@ const (
 	// `RevocationModeSession`, where cache TTL bounds the revocation
 	// latency.
 	RevocationModeTTLAccessTokenCap = 900
+
+	// MaxManagedAccountsSessionCacheTTLSeconds bounds how long another
+	// replica may keep serving a session a managed-account suspension,
+	// removal or reset revoked, from its in-process session cache.
+	MaxManagedAccountsSessionCacheTTLSeconds = 60
 )
 
 // Web-assurance provider names accepted in GATEWAY_ASSURANCE_WEB_PROVIDER.
@@ -1564,6 +1569,16 @@ type Config struct {
 	// rejects every outstanding one at once. Driven by
 	// GATEWAY_TENANT_SELECTION_ENABLED.
 	TenantSelectionEnabled bool
+	// ManagedAccountsEnabled lets tenant owners and admins create accounts
+	// their tenant manages, on a domain verified for it. Default off; it gates
+	// new managed-account writes only, while the restrictions on managed
+	// accounts that already exist always apply. Postgres only, and only with
+	// GATEWAY_REVOCATION_MODE=session and GATEWAY_SESSION_CACHE_TTL_SECONDS of
+	// at most MaxManagedAccountsSessionCacheTTLSeconds, as signing a managed
+	// account out must end its sessions on every replica within that bound. A project also opts in through its
+	// access.admit_managed_accounts config. Driven by
+	// GATEWAY_MANAGED_ACCOUNTS_ENABLED.
+	ManagedAccountsEnabled bool
 	// TenantStatusCacheTTLSeconds bounds how long the access-token check may
 	// serve a selected tenant's status from its in-process cache, from 0 to
 	// 300 (default 30), where 0 reads the tenant on every request that
@@ -1982,6 +1997,7 @@ func loadFromEnv() *Config {
 		SelfServiceTenantsMaxPerUser:      envInt("GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", DefaultSelfServiceTenantsMaxPerUser),
 		SelfServiceTenantsWindowSeconds:   envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
 		TenantSelectionEnabled:            envBool("GATEWAY_TENANT_SELECTION_ENABLED", false),
+		ManagedAccountsEnabled:            envBool("GATEWAY_MANAGED_ACCOUNTS_ENABLED", false),
 		TenantStatusCacheTTLSeconds:       envInt("GATEWAY_TENANT_STATUS_CACHE_TTL_SECONDS", DefaultTenantStatusCacheTTLSeconds),
 		AuditRetentionDays:                envInt("GATEWAY_AUDIT_RETENTION_DAYS", DefaultAuditRetentionDays),
 
@@ -3375,6 +3391,16 @@ func (c *Config) validateTenantGovernance() error {
 		if c.TenantSelectionEnabled {
 			return fmt.Errorf("config: GATEWAY_TENANT_SELECTION_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
 		}
+		if c.ManagedAccountsEnabled {
+			return fmt.Errorf("config: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
+		}
+	}
+	if c.ManagedAccountsEnabled && c.RevocationMode != RevocationModeSession {
+		return fmt.Errorf("config: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs GATEWAY_REVOCATION_MODE=session (got %q)", c.RevocationMode)
+	}
+	if c.ManagedAccountsEnabled && c.SessionCacheTTLSeconds > MaxManagedAccountsSessionCacheTTLSeconds {
+		return fmt.Errorf("config: GATEWAY_MANAGED_ACCOUNTS_ENABLED needs GATEWAY_SESSION_CACHE_TTL_SECONDS at most %d (got %d), so a revoked session stops on every replica within it",
+			MaxManagedAccountsSessionCacheTTLSeconds, c.SessionCacheTTLSeconds)
 	}
 	return nil
 }
