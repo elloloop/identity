@@ -502,8 +502,10 @@ RestoreTenantMember(tenant_id, user_id)
     non-joiner that scripts and emoji need are allowed), or reads as a link:
     <code>&lt;</code>, <code>&gt;</code>, <code>](</code>,
     <code>://</code>, a scheme such as <code>mailto:</code> or
-    <code>tel:</code> directly followed by text, a domain or dotted IPv4
-    address, or an address that is not a plain ASCII email address. A word
+    <code>tel:</code> directly followed by text, any word directly followed
+    by <code>:</code> and an address (<code>sip:jane@example.com</code>), a
+    domain or dotted IPv4 address, or an address that is not a plain ASCII
+    email address as typed. A word
     reads as a domain when it is two or more dot-separated labels ending in
     one of at least two letters, in any script, or a punycode one, so
     <code>example.com</code>, <code>www.example</code> and a lookalike such
@@ -513,7 +515,9 @@ RestoreTenantMember(tenant_id, user_id)
     check reads fullwidth, circled and mathematical letters as the letters
     they imitate, and an ideographic full stop between two words of a script
     other than Chinese, Japanese or Korean as a dot. A plain email address
-    such as <code>jane@example.com</code> is allowed. The note is not stored:
+    such as <code>jane@example.com</code> is allowed, recognised in the note
+    as sent rather than read that way, so one written with a fullwidth or
+    small at sign, or a fullwidth dot, is refused. The note is not stored:
     a resend is a new <code>CreateTenantInvitation</code>, which carries its
     own note.
   </p>

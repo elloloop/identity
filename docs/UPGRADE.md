@@ -38,8 +38,9 @@ invitation itself, such as the address their account will use.
   among them (the zero-width joiner and non-joiner are allowed); or anything
   that reads as a link: `<`, `>`, `](`, `://`, one of `mailto:`, `tel:`,
   `sms:`, `callto:`, `javascript:`, `vbscript:`, `data:` or `file:` directly
-  followed by a non-space, a domain or dotted IPv4 address, or an address that
-  is not a plain ASCII email address. A domain is a word of two or more
+  followed by a non-space, any word directly followed by `:` and an address
+  (`sip:jane@example.com`), a domain or dotted IPv4 address, or an address that
+  is not a plain ASCII email address as typed. A domain is a word of two or more
   dot-separated labels ending in one of at least two letters (any script) or a
   punycode label; a word is a run of letters, marks, digits and `-._+@` with
   its edge punctuation dropped, so `e.g.`, `v1.2` and a sentence's full stop
@@ -47,8 +48,9 @@ invitation itself, such as the address their account will use.
   mathematical letters as the letters they imitate (NFKC), ignores the
   zero-width joiner and non-joiner, and reads an ideographic full stop between
   two words of a script other than Chinese, Japanese or Korean as a dot. A
-  plain email address such as `jane@example.com` is allowed. The refusal does
-  not repeat the note.
+  plain email address such as `jane@example.com` is allowed, recognised in the
+  note as sent rather than folded, so one written with a fullwidth or small at
+  sign, or a fullwidth dot, is refused. The refusal does not repeat the note.
 - **Not stored.** The note is not kept with the invitation: a resend is a new
   `CreateTenantInvitation`, which carries its own note. No log line carries it.
 - **Go API.** `MembershipService.CreateTenantInvitation` takes the note after

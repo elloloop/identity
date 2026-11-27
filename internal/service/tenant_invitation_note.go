@@ -80,13 +80,21 @@ func normalizeInvitationNote(note string) (string, error) {
 //
 //   - "<" or ">", which HTML markup and autolinks need, and "](", which a
 //     markdown link needs;
-//   - "://" anywhere, and a scheme of noteURLSchemes directly followed by ":"
-//     and a non-space;
-//   - a word that is an address but not a plain ASCII email address
-//     (noteEmailAddress);
+//   - "://" anywhere, a scheme of noteURLSchemes directly followed by ":"
+//     and a non-space, and any word directly followed by ":" and an address,
+//     such as "sip:jane@example.com";
+//   - a word holding "@" that is not, as the note spells it before folding, a
+//     plain ASCII email address (noteEmailAddress);
 //   - any other word of at least two dot-separated labels ending in a label of
 //     two or more letters, or in a punycode label, such as "www.example",
 //     "example.com" or "пример.рф", and a dotted IPv4 address.
+//
+// The email address is the one thing allowed that folding could forge: a
+// fullwidth or small at sign, or a fullwidth dot, folds into one, while the
+// email shows the unfolded note, whose ASCII remainder a mail client links.
+// So an address is recognised only in the note as sent, and blanked out
+// before the rest is folded and judged; whatever still holds "@" after
+// folding was not typed as a plain address and is refused.
 //
 // A word is a run of letters, marks, digits and "-", ".", "_", "+", "@", with
 // any leading or trailing "-", ".", "_" or "+" dropped, so "e.g." and "v1.2"
@@ -102,19 +110,40 @@ func noteLinkLike(note string) bool {
 			return true
 		}
 	}
-	for _, word := range strings.FieldsFunc(folded, func(r rune) bool { return !isNoteWordRune(r) }) {
+	if hasSchemeBeforeAddress(folded) {
+		return true
+	}
+	for _, word := range strings.FieldsFunc(foldNote(withoutEmailAddresses(note)), func(r rune) bool { return !isNoteWordRune(r) }) {
 		word = strings.Trim(word, "-._+")
-		if strings.Contains(word, "@") {
-			if !noteEmailAddress(word) {
-				return true
-			}
-			continue
-		}
-		if noteDomainLike(word) {
+		if strings.Contains(word, "@") || noteDomainLike(word) {
 			return true
 		}
 	}
 	return false
+}
+
+// withoutEmailAddresses is note with each word that is a plain ASCII email
+// address (noteEmailAddress) replaced by a space.
+func withoutEmailAddresses(note string) string {
+	var b strings.Builder
+	word := 0
+	blank := func(end int) {
+		if noteEmailAddress(strings.Trim(note[word:end], "-._+")) {
+			b.WriteByte(' ')
+		} else {
+			b.WriteString(note[word:end])
+		}
+	}
+	for i, r := range note {
+		if isNoteWordRune(r) {
+			continue
+		}
+		blank(i)
+		b.WriteRune(r)
+		word = i + utf8.RuneLen(r)
+	}
+	blank(len(note))
+	return b.String()
 }
 
 // foldNote is note in the form noteLinkLike judges: without the zero-width
@@ -158,6 +187,25 @@ func hasSchemePrefix(s, scheme string) bool {
 		}
 		offset = i + len(prefix)
 	}
+}
+
+// hasSchemeBeforeAddress reports whether a word of s is directly followed by
+// ":" and a word holding "@", the shape of a link to an address under any
+// scheme, listed in noteURLSchemes or not.
+func hasSchemeBeforeAddress(s string) bool {
+	for i, r := range s {
+		if r != ':' || i == 0 || !isNoteWordRune(lastRune(s[:i])) {
+			continue
+		}
+		rest := s[i+1:]
+		if end := strings.IndexFunc(rest, func(r rune) bool { return !isNoteWordRune(r) }); end >= 0 {
+			rest = rest[:end]
+		}
+		if strings.Contains(rest, "@") {
+			return true
+		}
+	}
+	return false
 }
 
 func isNoteWordRune(r rune) bool {
