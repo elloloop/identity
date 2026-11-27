@@ -693,10 +693,14 @@ type IdentityServiceClient interface {
 	// unchanged. Notices go to every address the account had. The caller must
 	// be an active owner or admin of the managing tenant, a tenant that is not
 	// suspended, with a recent sign-in (PERMISSION_DENIED otherwise); only an
-	// owner may reset an owner, and naming the caller is INVALID_ARGUMENT. A
+	// owner may reset an owner, an admin may reset another admin's account, and
+	// naming the caller is INVALID_ARGUMENT. Every reset is audited. As with
+	// CreateTenantInvitation for a managed account, the new link's token goes
+	// only into its email and is never returned, so the call needs a mail
+	// provider (FAILED_PRECONDITION without one). A
 	// user_id that is not a managed account of tenant_id with an active or
 	// suspended membership is NOT_FOUND. Resets are limited per delivery
-	// address (RESOURCE_EXHAUSTED). Audited. Available only on the postgres
+	// address (RESOURCE_EXHAUSTED). Available only on the postgres
 	// control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.
 	ResetManagedAccount(ctx context.Context, in *ResetManagedAccountRequest, opts ...grpc.CallOption) (*ResetManagedAccountResponse, error)
@@ -3476,10 +3480,14 @@ type IdentityServiceServer interface {
 	// unchanged. Notices go to every address the account had. The caller must
 	// be an active owner or admin of the managing tenant, a tenant that is not
 	// suspended, with a recent sign-in (PERMISSION_DENIED otherwise); only an
-	// owner may reset an owner, and naming the caller is INVALID_ARGUMENT. A
+	// owner may reset an owner, an admin may reset another admin's account, and
+	// naming the caller is INVALID_ARGUMENT. Every reset is audited. As with
+	// CreateTenantInvitation for a managed account, the new link's token goes
+	// only into its email and is never returned, so the call needs a mail
+	// provider (FAILED_PRECONDITION without one). A
 	// user_id that is not a managed account of tenant_id with an active or
 	// suspended membership is NOT_FOUND. Resets are limited per delivery
-	// address (RESOURCE_EXHAUSTED). Audited. Available only on the postgres
+	// address (RESOURCE_EXHAUSTED). Available only on the postgres
 	// control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.
 	ResetManagedAccount(context.Context, *ResetManagedAccountRequest) (*ResetManagedAccountResponse, error)
