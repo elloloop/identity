@@ -756,13 +756,16 @@ func TestManagedAccountRPCs_ReturnUnimplemented(t *testing.T) {
 	}
 }
 
-// A request for a tenant-managed account is refused with POLICY whatever the
-// membership service, so it never becomes an ordinary invitation to its
-// delivery address.
+// A request for a tenant-managed account is refused with POLICY, so it never
+// becomes an ordinary invitation to its delivery address; with no membership
+// service the call is Unimplemented, as every membership call is.
 func TestCreateTenantInvitation_ManagedAccountFieldsRefused(t *testing.T) {
 	t.Parallel()
-	for _, svc := range []*service.MembershipService{nil, newMembershipSvc(nil, nil, nil, nil)} {
-		srv := startMembershipServer(t, svc)
+	_, err := startMembershipServer(t, nil).client.CreateTenantInvitation(context.Background(),
+		withAuth(&identitypb.CreateTenantInvitationRequest{TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann"}, "u1"))
+	requireCode(t, err, connect.CodeUnimplemented)
+	{
+		srv := startMembershipServer(t, newMembershipSvc(nil, nil, nil, nil))
 		for name, req := range map[string]*identitypb.CreateTenantInvitationRequest{
 			"all":              {TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann", AccountDomain: "acme.example.com", DisplayName: "Ann"},
 			"account_username": {TenantId: "t", Email: "ann.home@example.com", AccountUsername: "ann"},

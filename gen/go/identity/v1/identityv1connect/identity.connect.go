@@ -1103,7 +1103,7 @@ type IdentityServiceClient interface {
 	// provider (FAILED_PRECONDITION without one). A
 	// user_id that is not a managed account of tenant_id with an active or
 	// suspended membership is NOT_FOUND. Resets are limited per delivery
-	// address (RESOURCE_EXHAUSTED). Audited. Available only on the postgres
+	// address (RESOURCE_EXHAUSTED). Available only on the postgres
 	// control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.
 	ResetManagedAccount(context.Context, *connect.Request[v1.ResetManagedAccountRequest]) (*connect.Response[v1.ResetManagedAccountResponse], error)
@@ -4283,7 +4283,7 @@ type IdentityServiceHandler interface {
 	// provider (FAILED_PRECONDITION without one). A
 	// user_id that is not a managed account of tenant_id with an active or
 	// suspended membership is NOT_FOUND. Resets are limited per delivery
-	// address (RESOURCE_EXHAUSTED). Audited. Available only on the postgres
+	// address (RESOURCE_EXHAUSTED). Available only on the postgres
 	// control-plane driver; the memory and SQLite drivers return
 	// Unimplemented.
 	ResetManagedAccount(context.Context, *connect.Request[v1.ResetManagedAccountRequest]) (*connect.Response[v1.ResetManagedAccountResponse], error)

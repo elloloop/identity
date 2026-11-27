@@ -17,15 +17,15 @@ func (h *IdentityHandler) CreateTenantInvitation(
 	ctx context.Context,
 	req *connect.Request[identitypb.CreateTenantInvitationRequest],
 ) (*connect.Response[identitypb.CreateTenantInvitationResponse], error) {
-	if err := refuseManagedAccountRequest(req.Msg); err != nil {
-		return nil, err
-	}
 	if h.members == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented, service.ErrUnimplemented)
 	}
 	userID := authenticatedUserID(req.Header())
 	if userID == "" {
 		return nil, toConnectError(service.ErrUnauthenticated)
+	}
+	if err := refuseManagedAccountRequest(req.Msg); err != nil {
+		return nil, err
 	}
 
 	created, err := h.members.CreateTenantInvitation(ctx, userID, authenticatedSignIn(req.Header()), req.Msg.TenantId, req.Msg.Email, req.Msg.Role)
