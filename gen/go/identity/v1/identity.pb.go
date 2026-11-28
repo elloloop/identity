@@ -20218,9 +20218,11 @@ type GetProjectSettingsResponse struct {
 	// settings_json is a JSON object holding the part of the project's config
 	// its members may edit: the sections access, age_gate, anonymous, cors,
 	// guardian, jurisdictions, login, recovery_emails and tenants, and from
-	// accounts the fields email_signup and username_signup. A section the
-	// project has not set is absent. Everything else in the project's config
-	// is the operator's and is never returned here.
+	// accounts the fields email_signup and username_signup. They are the
+	// settings as the server reads them, under their canonical names: a field
+	// at its default is absent, and so is a section with none set. Everything
+	// else in the project's config is the operator's and is never returned
+	// here.
 	SettingsJson string `protobuf:"bytes,1,opt,name=settings_json,json=settingsJson,proto3" json:"settings_json,omitempty"`
 	// version identifies the config these settings were read from; send it
 	// back as UpdateProjectSettingsRequest.expected_version.

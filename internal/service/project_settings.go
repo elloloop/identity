@@ -44,34 +44,64 @@ var memberEditableSettings = map[string][]string{
 // jsonNull is the JSON literal that clears a section to its default.
 const jsonNull = "null"
 
+// emptyJSONObject is the config of a project that has set nothing.
+const emptyJSONObject = "{}"
+
+// jsonZeroValues are the JSON encodings of a Go zero value: what a config
+// field holds when its key is absent.
+var jsonZeroValues = []string{jsonNull, "false", "0", `""`, "[]", emptyJSONObject}
+
+// ErrProjectConfigAmbiguous is returned when a member's write would have to
+// merge into a section the stored config spells more than one way. The
+// parser reads every spelling, in an order the merge cannot reproduce, so
+// the write is refused rather than guessed at; the project's operator
+// rewrites the config with one spelling. Mapped to CodeFailedPrecondition.
+var ErrProjectConfigAmbiguous = errors.New("the project's stored config spells a section more than one way; its operator must correct it")
+
 // MemberSettings returns the member-editable part of a project's config_json
-// as a JSON object: each editable section the config sets, and of a
-// field-restricted section only its editable fields. A section the config
-// does not set is absent.
+// as a JSON object, read through the config parser: each editable section,
+// and of a field-restricted section only its editable fields, under the
+// names and with the values ParseProjectConfig gives them. A field at its
+// default is absent, and so is a section with none set, since to the parser
+// an absent key and a zero value are the same thing.
+//
+// It is the parsed config, not the stored text, on purpose. encoding/json
+// reads keys without regard to case, so a stored "Access", or an
+// "access"."Mode", governs sign-in as surely as the canonical spelling does;
+// a view cut from the text could show a member one value while the server
+// enforced another. Reading through the parser makes what a member sees
+// exactly what is in force. The price is that a key this server's parser
+// does not know is not shown, and is not kept when a member saves the
+// section it is in.
 func MemberSettings(configJSON string) (string, error) {
-	config, err := decodeJSONObject(configJSON)
+	if strings.TrimSpace(configJSON) == "" {
+		configJSON = emptyJSONObject
+	}
+	parsed, err := ParseProjectConfig(configJSON)
 	if err != nil {
 		return "", fmt.Errorf("stored project config: %w", err)
 	}
+	canonical, err := json.Marshal(parsed)
+	if err != nil {
+		return "", fmt.Errorf("stored project config: %w", err)
+	}
+	sections, err := decodeJSONObject(string(canonical))
+	if err != nil {
+		return "", fmt.Errorf("stored project config: %w", err)
+	}
+
 	out := make(map[string]json.RawMessage, len(memberEditableSettings))
 	for section, fields := range memberEditableSettings {
-		raw, ok := lookupFold(config, section)
-		if !ok || isJSONNull(raw) {
-			continue
-		}
-		if fields == nil {
-			out[section] = raw
-			continue
-		}
-		stored, err := decodeJSONObject(string(raw))
+		values, err := decodeJSONObject(string(sections[section]))
 		if err != nil {
 			return "", fmt.Errorf("stored project config: section %s: %w", section, err)
 		}
-		visible := make(map[string]json.RawMessage, len(fields))
-		for _, field := range fields {
-			if v, ok := lookupFold(stored, field); ok {
-				visible[field] = v
+		visible := make(map[string]json.RawMessage, len(values))
+		for field, value := range values {
+			if isJSONZero(value) || (fields != nil && !slices.Contains(fields, field)) {
+				continue
 			}
+			visible[field] = value
 		}
 		if len(visible) == 0 {
 			continue
@@ -104,8 +134,10 @@ func MemberSettings(configJSON string) (string, error) {
 // sets, so the value written is the one the parser reads.
 //
 // It returns ErrInvalidArgument for settings that are not a JSON object or
-// that name something not editable. It does not judge the result: the caller
-// validates the returned config as any other config write.
+// that name something not editable, and ErrProjectConfigAmbiguous for a
+// field-restricted section the stored config spells more than one way, whose
+// operator fields it could not carry over faithfully. It does not judge the
+// result: the caller validates the returned config as any other config write.
 func ApplyMemberSettings(configJSON, settingsJSON string) (next string, changed []string, err error) {
 	config, err := decodeJSONObject(configJSON)
 	if err != nil {
@@ -130,16 +162,27 @@ func ApplyMemberSettings(configJSON, settingsJSON string) (next string, changed 
 		if !editable {
 			return "", nil, fmt.Errorf("%w: %q is not a setting a project's members can change", ErrInvalidArgument, section)
 		}
-		before, _ := lookupFold(config, section)
+		spellings := foldedKeys(config, section)
+		if fields != nil && len(spellings) > 1 {
+			return "", nil, fmt.Errorf("%w: %s", ErrProjectConfigAmbiguous, section)
+		}
+		var before json.RawMessage
+		if len(spellings) > 0 {
+			before = config[spellings[0]]
+		}
 		after, err := mergeSection(section, fields, before, settings[section])
 		if err != nil {
 			return "", nil, err
 		}
-		deleteFold(config, section)
+		for _, spelled := range spellings {
+			delete(config, spelled)
+		}
 		if after != nil {
 			config[section] = after
 		}
-		if !sameJSON(before, after) {
+		// Collapsing several spellings into one changes what the parser reads
+		// even when the value written equals one of them.
+		if len(spellings) > 1 || !sameJSON(before, after) {
 			changed = append(changed, section)
 		}
 	}
@@ -218,18 +261,6 @@ func decodeJSONObject(text string) (map[string]json.RawMessage, error) {
 	return object, nil
 }
 
-// lookupFold returns object's value for key, preferring the exact spelling
-// and otherwise the spelling encoding/json would read as key.
-func lookupFold(object map[string]json.RawMessage, key string) (json.RawMessage, bool) {
-	if v, ok := object[key]; ok {
-		return v, true
-	}
-	for _, spelled := range foldedKeys(object, key) {
-		return object[spelled], true
-	}
-	return nil, false
-}
-
 // deleteFold removes every spelling of key from object.
 func deleteFold(object map[string]json.RawMessage, key string) {
 	for _, spelled := range foldedKeys(object, key) {
@@ -252,6 +283,11 @@ func foldedKeys(object map[string]json.RawMessage, key string) []string {
 
 func isJSONNull(raw json.RawMessage) bool {
 	return string(bytes.TrimSpace(raw)) == jsonNull
+}
+
+// isJSONZero reports whether raw encodes a Go zero value.
+func isJSONZero(raw json.RawMessage) bool {
+	return slices.Contains(jsonZeroValues, string(bytes.TrimSpace(raw)))
 }
 
 // sameJSON reports whether two raw values are the same JSON, ignoring

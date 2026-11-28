@@ -1420,7 +1420,8 @@ type IdentityServiceClient interface {
 	// access mode, so nobody can sign up or sign in to it until its owner sets
 	// one with UpdateProjectSettings. FAILED_PRECONDITION unless
 	// GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED is on; RESOURCE_EXHAUSTED
-	// once the caller owns GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT projects;
+	// once the caller owns GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT projects,
+	// or past the per-address budget GATEWAY_RATE_LIMIT_SIGNUP_PER_IP sizes;
 	// INVALID_ARGUMENT for a blank or over-long name. There is no idempotency
 	// key: a retry after a lost response may create a second project, which the
 	// limit bounds and ListMyProjects shows.
@@ -1435,7 +1436,9 @@ type IdentityServiceClient interface {
 	// UpdateProjectSettings changes the member-editable part of a project's
 	// config and records project_settings_updated with the sections changed.
 	// Refused as GetProjectSettings is; INVALID_ARGUMENT and ABORTED as
-	// UpdateProjectSettingsRequest describes.
+	// UpdateProjectSettingsRequest describes; FAILED_PRECONDITION when the
+	// write names accounts and the stored config spells that section more
+	// than one way, which the project's operator corrects.
 	UpdateProjectSettings(context.Context, *connect.Request[v1.UpdateProjectSettingsRequest]) (*connect.Response[v1.UpdateProjectSettingsResponse], error)
 	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
 	// sets/rotates one provider (encrypting any plaintext secret server-side and
@@ -4682,7 +4685,8 @@ type IdentityServiceHandler interface {
 	// access mode, so nobody can sign up or sign in to it until its owner sets
 	// one with UpdateProjectSettings. FAILED_PRECONDITION unless
 	// GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED is on; RESOURCE_EXHAUSTED
-	// once the caller owns GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT projects;
+	// once the caller owns GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT projects,
+	// or past the per-address budget GATEWAY_RATE_LIMIT_SIGNUP_PER_IP sizes;
 	// INVALID_ARGUMENT for a blank or over-long name. There is no idempotency
 	// key: a retry after a lost response may create a second project, which the
 	// limit bounds and ListMyProjects shows.
@@ -4697,7 +4701,9 @@ type IdentityServiceHandler interface {
 	// UpdateProjectSettings changes the member-editable part of a project's
 	// config and records project_settings_updated with the sections changed.
 	// Refused as GetProjectSettings is; INVALID_ARGUMENT and ABORTED as
-	// UpdateProjectSettingsRequest describes.
+	// UpdateProjectSettingsRequest describes; FAILED_PRECONDITION when the
+	// write names accounts and the stored config spells that section more
+	// than one way, which the project's operator corrects.
 	UpdateProjectSettings(context.Context, *connect.Request[v1.UpdateProjectSettingsRequest]) (*connect.Response[v1.UpdateProjectSettingsResponse], error)
 	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
 	// sets/rotates one provider (encrypting any plaintext secret server-side and

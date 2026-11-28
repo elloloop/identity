@@ -82,6 +82,21 @@ server serves, with their own account and no admin secret.
   case, so `"OAuth"` and `accounts."Domain"` are refused, not folded onto the
   name the parser would read them as, and a write removes every other
   spelling of the section or field it sets.
+- **A member is shown the parsed config, not the stored text.** For the same
+  reason, a stored `"Access"`, or an `"access"."Mode"`, governs sign-in as
+  surely as the canonical spelling. `GetProjectSettings` therefore reads
+  through `ParseProjectConfig` and returns the editable sections under their
+  canonical names, so what a member sees is exactly what is in force,
+  whatever an operator's blob looks like. A field at its default is absent.
+  A write that would merge into `accounts` when the stored config spells
+  that section more than one way is refused (`ErrProjectConfigAmbiguous`):
+  the parser reads the operator's fields from every spelling, in an order
+  the merge cannot reproduce.
+- **Creation is budgeted per address as well as per account.**
+  `CreateProject` spends a per-IP budget the size of the sign-up budget
+  (`GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`), as `CreateTenant` does: the
+  per-account limit bounds what one account owns, and this bounds one
+  address making accounts to get around it.
 - **One rule for a valid config.** A member's merged config passes the checks
   an operator's `UpsertProjectConfig` does (`validateProjectConfigJSON`,
   `checkNewHostKeys`) before it is stored.
@@ -115,6 +130,11 @@ server serves, with their own account and no admin secret.
   the console created, reachable by the operator only.
 - A member cannot read the operator's sections at all, so the console shows
   an incomplete picture of a project an operator has also configured.
+- The console reads and writes a section as this server's parser knows it.
+  A key the parser does not know is not shown and is not kept when a member
+  saves that section, so during a rollout that adds a field to an editable
+  section, a member saving it through a replica on the old version drops
+  the new field.
 - `platform_admins` stays what it was: a bootstrap record with no sign-in.
   This ADR does not build its login; an operator who wants a page uses a
   console account with the projects they are a member of.

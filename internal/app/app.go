@@ -506,6 +506,16 @@ func buildRateLimits(cfg *config.Config) []middleware.PathLimit {
 			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
 		},
 		{
+			// Project creation by an authenticated console account: each
+			// admitted call inserts a project, a membership and a credential
+			// row, and a project is an isolation shard. The per-account limit
+			// bounds what one account owns; this bounds one address making
+			// accounts to get around it. The signup budget, for the same
+			// reason as tenant creation.
+			PathPrefix: identityconnectgen.IdentityServiceCreateProjectProcedure, Tag: "project_create",
+			Limiter: middleware.NewFixedWindowLimiter(window, cfg.RateLimitSignupPerIP, 0),
+		},
+		{
 			// A domain registration writes a claim row and a verification
 			// looks up a DNS name the caller chose. The per-tenant cap bounds
 			// one tenant; this bounds one address spreading calls across

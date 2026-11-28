@@ -276,4 +276,20 @@ func TestProjectConsoleRPCs_RefusalCodes(t *testing.T) {
 		requireCode(t, update(``, 0), connect.CodeInvalidArgument)
 		assert.JSONEq(t, "{}", store.config[projectID], "no refused update reached the store")
 	})
+
+	t.Run("a section the stored config spells two ways is FailedPrecondition", func(t *testing.T) {
+		t.Parallel()
+		h, store := newConsoleHandler(true)
+		created, err := h.CreateProject(ctx, consoleRequest(&identitypb.CreateProjectRequest{Name: "Acme"}, consoleTestOwner))
+		require.NoError(t, err)
+		projectID := created.Msg.GetProject().GetProjectId()
+		const stored = `{"Accounts":{"domain":"accounts.example.com"},"accounts":{"email_signup":"self"}}`
+		store.config[projectID] = stored
+
+		_, err = h.UpdateProjectSettings(ctx, consoleRequest(&identitypb.UpdateProjectSettingsRequest{
+			ProjectId: projectID, SettingsJson: `{"accounts":{"email_signup":"admin"}}`,
+		}, consoleTestOwner))
+		requireCode(t, err, connect.CodeFailedPrecondition)
+		assert.Equal(t, stored, store.config[projectID], "the refused write left the config as it was")
+	})
 }

@@ -40,6 +40,11 @@ import { Code } from "astro-expressive-code/components";
     </tbody>
   </table>
   </div>
+  <p>
+    Creating a project also spends a per-address budget the size of
+    <code>GATEWAY_RATE_LIMIT_SIGNUP_PER_IP</code>, so one address cannot make
+    accounts to get around the per-account limit.
+  </p>
 
   <h2 id="accounts">Who signs in</h2>
   <p>
@@ -111,7 +116,9 @@ VALUES ('<project id>', '<account id>', 'owner', (extract(epoch FROM now()) * 10
   </table>
   </div>
   <p>
-    A member's change passes the same validation as an operator's
+    Settings are shown as the server reads them: under their canonical
+    names, with a setting at its default left out. A member's change passes
+    the same validation as an operator's
     <code>UpsertProjectConfig</code>. It governs sign-ins once the server's
     project cache expires
     (<code>GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS</code>, 30 by

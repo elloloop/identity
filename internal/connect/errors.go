@@ -144,6 +144,7 @@ func toConnectError(err error) *connect.Error {
 		errors.Is(err, service.ErrAgentsDisabled),
 		errors.Is(err, service.ErrSelfServiceTenantsDisabled),
 		errors.Is(err, service.ErrSelfServiceProjectsDisabled),
+		errors.Is(err, service.ErrProjectConfigAmbiguous),
 		errors.Is(err, service.ErrTenantSelectionDisabled),
 		errors.Is(err, service.ErrAgentOAuthDisabled),
 		errors.Is(err, service.ErrTeammateKeysDisabled),

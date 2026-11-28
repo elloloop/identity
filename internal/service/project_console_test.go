@@ -367,7 +367,7 @@ func TestProjectConsole_GetAndUpdateSettings(t *testing.T) {
 	f := newConsoleFixture(t, true)
 	const projectID = "project-a"
 	f.members.add(projectID, testConsoleOwner, ProjectRoleAdmin)
-	f.settings.config[projectID] = `{"oauth":{"hub":true},"accounts":{"domain":"accounts.example.com"},"tenants":{"self_service":false}}`
+	f.settings.config[projectID] = `{"oauth":{"hub":true},"accounts":{"domain":"accounts.example.com"},"tenants":{"self_service":true}}`
 	f.settings.version[projectID] = 4
 
 	settings, version, err := f.svc.GetProjectSettings(consoleCtx(), testConsoleOwner, projectID)
@@ -377,13 +377,13 @@ func TestProjectConsole_GetAndUpdateSettings(t *testing.T) {
 	if version != 4 {
 		t.Errorf("version = %d, want 4", version)
 	}
-	if want := map[string]any{"tenants": map[string]any{"self_service": false}}; !reflect.DeepEqual(decodeForTest(t, settings), want) {
+	if want := map[string]any{"tenants": map[string]any{"self_service": true}}; !reflect.DeepEqual(decodeForTest(t, settings), want) {
 		t.Fatalf("settings = %s, want %v: the operator's sections are not a member's to read", settings, want)
 	}
 
 	stored, version, err := f.svc.UpdateProjectSettings(
 		consoleCtx(), testConsoleOwner, passwordSignIn(), projectID,
-		`{"access":{"mode":"open"},"tenants":{"self_service":true}}`, 4, "203.0.113.7", "test-agent",
+		`{"access":{"mode":"open"},"tenants":{"self_service":false}}`, 4, "203.0.113.7", "test-agent",
 	)
 	if err != nil {
 		t.Fatalf("UpdateProjectSettings: %v", err)
@@ -391,10 +391,9 @@ func TestProjectConsole_GetAndUpdateSettings(t *testing.T) {
 	if version != 5 {
 		t.Errorf("version = %d, want 5", version)
 	}
-	wantSettings := map[string]any{
-		"access":  map[string]any{"mode": "open"},
-		"tenants": map[string]any{"self_service": true},
-	}
+	// A setting turned off is at its default, so it is absent from what a
+	// member is shown, while the stored config keeps what was written.
+	wantSettings := map[string]any{"access": map[string]any{"mode": "open"}}
 	if !reflect.DeepEqual(decodeForTest(t, stored), wantSettings) {
 		t.Fatalf("returned settings = %s, want %v", stored, wantSettings)
 	}
@@ -402,7 +401,7 @@ func TestProjectConsole_GetAndUpdateSettings(t *testing.T) {
 		"oauth":    map[string]any{"hub": true},
 		"accounts": map[string]any{"domain": "accounts.example.com"},
 		"access":   map[string]any{"mode": "open"},
-		"tenants":  map[string]any{"self_service": true},
+		"tenants":  map[string]any{"self_service": false},
 	}
 	if !reflect.DeepEqual(decodeForTest(t, f.settings.config[projectID]), wantConfig) {
 		t.Fatalf("stored config = %s, want %v", f.settings.config[projectID], wantConfig)

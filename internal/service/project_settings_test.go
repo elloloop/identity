@@ -42,7 +42,11 @@ func TestMemberSettings_ReturnsOnlyEditableSections(t *testing.T) {
 }
 
 func TestMemberSettings_EmptyAndUnsetConfig(t *testing.T) {
-	for _, config := range []string{"", "{}", `{"oauth": {}}`, `{"access": null}`, `{"accounts": {"domain": "accounts.example.com"}}`} {
+	for _, config := range []string{
+		"", "{}", `{"oauth": {}}`, `{"access": null}`, `{"accounts": {"domain": "accounts.example.com"}}`,
+		// Every field at its default is a section with nothing set.
+		`{"tenants": {"self_service": false}, "access": {"mode": "", "allowed_emails": [], "blocked_domains": null}, "recovery_emails": {"max": 0}}`,
+	} {
 		got, err := MemberSettings(config)
 		if err != nil {
 			t.Fatalf("MemberSettings(%q): %v", config, err)
@@ -53,19 +57,51 @@ func TestMemberSettings_EmptyAndUnsetConfig(t *testing.T) {
 	}
 }
 
-// A section an operator stored under another letter case is the section the
-// config parser reads, so it is the one a member is shown.
+// The config parser reads keys without regard to case, at every level, so a
+// member is shown the parsed config under its canonical names: a section or a
+// field an operator stored under another letter case governs sign-in, and is
+// what the console shows.
 func TestMemberSettings_ReadsTheSpellingTheParserReads(t *testing.T) {
-	got, err := MemberSettings(`{"Access": {"mode": "invite"}, "accounts": {"Email_Signup": "admin"}}`)
+	got, err := MemberSettings(`{"Access": {"Mode": "allowlist", "ALLOWED_DOMAINS": ["example.com"]}, "accounts": {"Email_Signup": "admin"}}`)
 	if err != nil {
 		t.Fatalf("MemberSettings: %v", err)
 	}
 	want := map[string]any{
-		"access":   map[string]any{"mode": "invite"},
+		"access":   map[string]any{"mode": "allowlist", "allowed_domains": []any{"example.com"}},
 		"accounts": map[string]any{"email_signup": "admin"},
 	}
 	if !reflect.DeepEqual(decodeForTest(t, got), want) {
 		t.Fatalf("settings = %s, want %v", got, want)
+	}
+}
+
+// When a stored config spells one section, or one field, more than one way,
+// the parser settles which value is in force. Whatever it settles on is what
+// a member is shown: the view is the parser's, never a second reading.
+func TestMemberSettings_AgreesWithTheParserOnDuplicateSpellings(t *testing.T) {
+	for _, config := range []string{
+		`{"ACCESS": {"mode": "closed"}, "access": {"mode": "open"}}`,
+		`{"access": {"mode": "open"}, "ACCESS": {"mode": "closed"}}`,
+		`{"Access": {"mode": "allowlist"}, "access": {"allowed_domains": ["example.com"]}}`,
+		`{"access": {"MODE": "closed", "mode": "open", "Mode": "invite"}}`,
+		`{"Tenants": {"self_service": true}, "tenants": {"self_service": false}}`,
+	} {
+		enforced, err := ParseProjectConfig(config)
+		if err != nil {
+			t.Fatalf("ParseProjectConfig(%s): %v", config, err)
+		}
+		got, err := MemberSettings(config)
+		if err != nil {
+			t.Fatalf("MemberSettings(%s): %v", config, err)
+		}
+		shown, err := ParseProjectConfig(got)
+		if err != nil {
+			t.Fatalf("the settings shown for %s do not parse: %v", config, err)
+		}
+		if !reflect.DeepEqual(shown.Access, enforced.Access) || shown.Tenants != enforced.Tenants {
+			t.Errorf("config %s: shown access %+v tenants %+v, enforced access %+v tenants %+v",
+				config, shown.Access, shown.Tenants, enforced.Access, enforced.Tenants)
+		}
 	}
 }
 
@@ -211,6 +247,39 @@ func TestApplyMemberSettings_WriteReplacesEverySpelling(t *testing.T) {
 	}
 	if parsed.Accounts.Domain != "accounts.example.com" || parsed.Accounts.EmailSignup != "off" {
 		t.Errorf("parsed accounts = %+v, want the operator's domain and the member's email_signup", parsed.Accounts)
+	}
+}
+
+// A field-restricted section the stored config spells more than one way is
+// not merged into: the parser reads the operator's fields from every
+// spelling, in an order the merge cannot reproduce, so the write is refused
+// and the config left as it was. A whole section spelled twice is simply
+// replaced, and counts as changed even when the value written equals one of
+// the spellings, since the other one stops being read.
+func TestApplyMemberSettings_DuplicateSectionSpellings(t *testing.T) {
+	next, changed, err := ApplyMemberSettings(
+		`{"Accounts": {"domain": "accounts.example.com"}, "accounts": {"email_signup": "self"}}`,
+		`{"accounts": {"email_signup": "admin"}}`,
+	)
+	if !errors.Is(err, ErrProjectConfigAmbiguous) {
+		t.Fatalf("err = %v, want ErrProjectConfigAmbiguous (next=%q changed=%v)", err, next, changed)
+	}
+	if next != "" || changed != nil {
+		t.Errorf("a refused write returned a config: next=%q changed=%v", next, changed)
+	}
+
+	next, changed, err = ApplyMemberSettings(
+		`{"Access": {"mode": "closed"}, "access": {"mode": "open"}}`,
+		`{"access": {"mode": "open"}}`,
+	)
+	if err != nil {
+		t.Fatalf("ApplyMemberSettings: %v", err)
+	}
+	if want := map[string]any{"access": map[string]any{"mode": "open"}}; !reflect.DeepEqual(decodeForTest(t, next), want) {
+		t.Fatalf("config = %s, want %v", next, want)
+	}
+	if !reflect.DeepEqual(changed, []string{"access"}) {
+		t.Errorf("changed = %v, want [access]", changed)
 	}
 }
 

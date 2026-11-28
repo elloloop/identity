@@ -13,7 +13,8 @@ Nothing changes until `GATEWAY_CONSOLE_ENABLED` is set. See
 - **Creating projects.** `GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED=true`
   lets a console account create a project it owns (`CreateProject`), up to
   `GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT` (0 to 100; 0 selects the
-  default, 10). It needs `GATEWAY_CONSOLE_ENABLED`. A project made this way
+  default, 10), and spends a per-address budget the size of
+  `GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`. It needs `GATEWAY_CONSOLE_ENABLED`. A project made this way
   has one publishable credential and **no access mode, so nobody can sign up
   or sign in to it until its owner chooses one** in the console.
 - **Who can reach it.** Console accounts are the default project's accounts,
@@ -28,7 +29,11 @@ Nothing changes until `GATEWAY_CONSOLE_ENABLED` is set. See
   `accounts.domain`, `branding`, `email_delivery`, `phone`, `passkey`,
   `assurance`, `products`) stays the operator's and is neither shown to nor
   writable by a member. A member's write passes the same validation as
-  `UpsertProjectConfig`.
+  `UpsertProjectConfig`. Settings are shown as the server reads them: under
+  their canonical names, with a field at its default left out, whatever
+  letter case an operator's blob used. A key this version does not know is
+  not shown, and is dropped when a member saves the section it is in, so let
+  a rollout finish before members edit a section it adds a field to.
 - **Existing projects.** A project an operator created has no members, so
   nobody sees it in the console. There is no RPC yet to add a member to one;
   until there is, an operator who wants a project in someone's console adds
