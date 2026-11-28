@@ -51,6 +51,11 @@ type IdentityHandler struct {
 	// with a tenant_operator credential and no secret check it (see
 	// service.ControlPlaneAdminService).
 	controlAdmin *service.ControlPlaneAdminService
+	// console backs the project console RPCs (CreateProject and friends),
+	// which a signed-in account of the default project calls. nil unless
+	// GATEWAY_CONSOLE_ENABLED is on and the build has a control plane, which
+	// disables them (CodeUnimplemented).
+	console      *service.ProjectConsoleService
 	agentOAuth   *service.AgentOAuthService
 	teammateKeys *service.TeammateKeyService
 	exchanges    *prometheus.CounterVec

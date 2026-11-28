@@ -139,6 +139,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	var projectLister service.ProjectLister
 	var directoryCredentials service.DirectoryCredentialStore
 	var platformAdminStore service.PlatformAdminStore
+	var projectMembers service.ProjectMemberStore
 	var loginPolicyStore service.LoginPolicyStore
 	var loginGovernance *service.LoginGovernance
 	if authRepo == nil || dbAdapter == nil {
@@ -178,6 +179,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		projectLister = built.ProjectLister()
 		directoryCredentials = built.DirectoryCredentialStore()
 		platformAdminStore = built.PlatformAdminStoreIface()
+		projectMembers = built.ProjectMembers()
 		loginPolicyStore = built.LoginPolicyStoreIface()
 		loginGovernance = built.LoginGovernance()
 
@@ -246,6 +248,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		Projects:              projectLister,
 		DirectoryCredentials:  directoryCredentials,
 		PlatformAdminStore:    platformAdminStore,
+		ProjectMemberStore:    projectMembers,
 		LoginPolicyStore:      loginPolicyStore,
 		LoginGovernance:       loginGovernance,
 		DNSResolver:           opts.DNSResolver,

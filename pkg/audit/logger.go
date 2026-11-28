@@ -224,6 +224,16 @@ const (
 	EventProjectCredentialCreated EventType = "project_credential_created"
 	EventProjectCredentialRevoked EventType = "project_credential_revoked"
 
+	// EventProjectCreated / EventProjectSettingsUpdated record a console
+	// account creating a project, or changing the member-editable part of one's
+	// config (ADR-0022). The actor is the console account and the event lands
+	// under the console project, where that account lives; the details carry
+	// the project acted on and, for a settings change, the names of the
+	// sections changed, never their values. A project refused for the
+	// account's project limit is recorded as a failed project_created.
+	EventProjectCreated         EventType = "project_created"
+	EventProjectSettingsUpdated EventType = "project_settings_updated"
+
 	// EventDirectoryLookup records a service resolving email addresses through
 	// LookupUsers with a directory_reader credential. The actor is
 	// "credential:<id>"; the details carry the number of addresses asked for
@@ -614,6 +624,8 @@ var validEventTypes = map[EventType]struct{}{
 	EventProjectOAuthProviderRemoved:       {},
 	EventProjectCredentialCreated:          {},
 	EventProjectCredentialRevoked:          {},
+	EventProjectCreated:                    {},
+	EventProjectSettingsUpdated:            {},
 	EventDirectoryLookup:                   {},
 	EventManagedChildAuthorization:         {},
 	EventAccountsClassified:                {},

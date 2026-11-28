@@ -3099,6 +3099,91 @@ message GetProjectConfigResponse {
   string config_json = 1;
 }
 
+// ─── Project console (a project's own members) ────────────────────────
+//
+// The people who own a project manage it with these RPCs, signed in as an
+// account of the deployment's own (default) project. They take that account's
+// access token and never the operator's admin secret.
+
+// ConsoleProject is a project as one of its members sees it.
+message ConsoleProject {
+  string project_id = 1;
+  string name = 2;
+  // role is the caller's role in the project: "owner" or "admin".
+  string role = 3;
+  // publishable_key is the project's oldest active publishable credential,
+  // the value an application sends in X-Project-Key to select the project.
+  // It is a public lookup key, not a secret. Empty when the project has none.
+  string publishable_key = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message CreateProjectRequest {
+  // name is what the project is called in the console: 1 to 100 characters
+  // after trimming.
+  string name = 1;
+}
+
+message CreateProjectResponse {
+  ConsoleProject project = 1;
+}
+
+message ListMyProjectsRequest {}
+
+message ListMyProjectsResponse {
+  // projects are the active projects the caller is a member of, oldest
+  // first.
+  repeated ConsoleProject projects = 1;
+  // can_create_project reports whether CreateProject is open on this server
+  // (GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED). It does not say whether
+  // the caller is under their project limit.
+  bool can_create_project = 2;
+}
+
+message GetProjectSettingsRequest {
+  string project_id = 1;
+}
+
+message GetProjectSettingsResponse {
+  // settings_json is a JSON object holding the part of the project's config
+  // its members may edit: the sections access, age_gate, anonymous, cors,
+  // guardian, jurisdictions, login, recovery_emails and tenants, and from
+  // accounts the fields email_signup and username_signup. They are the
+  // settings as the server reads them, under their canonical names: a field
+  // at its default is absent, and so is a section with none set. Everything
+  // else in the project's config is the operator's and is never returned
+  // here.
+  string settings_json = 1;
+  // version identifies the config these settings were read from; send it
+  // back as UpdateProjectSettingsRequest.expected_version.
+  int64 version = 2;
+}
+
+message UpdateProjectSettingsRequest {
+  string project_id = 1;
+  // settings_json is a JSON object of the sections to change, shaped as
+  // GetProjectSettingsResponse.settings_json. A section present replaces
+  // that section (in accounts, the fields named there); a section absent is
+  // left as it is; a section set to null is cleared to its default. A key
+  // that is not an editable section or field, or that the config does not
+  // have, is INVALID_ARGUMENT, and so is a result the project's config rules
+  // refuse. While the project has a product age guardrail (products, the
+  // operator's), age_gate and jurisdictions are the operator's too and
+  // writing either is INVALID_ARGUMENT. A write that changes nothing stores
+  // nothing and returns the version unchanged.
+  string settings_json = 2;
+  // expected_version is the version the caller last read. ABORTED when the
+  // project's config has changed since, so that two people editing at once
+  // cannot overwrite each other: read the settings again and retry.
+  int64 expected_version = 3;
+}
+
+message UpdateProjectSettingsResponse {
+  // settings_json and version are the settings as stored after the write.
+  string settings_json = 1;
+  int64 version = 2;
+}
+
 // ─── Per-project OAuth provider authoring (admin) ─────────────────────
 //
 // These author a project's hosted/native OAuth providers WITHOUT the
@@ -4777,6 +4862,44 @@ service IdentityService {
   // Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
   rpc UpsertProjectConfig(UpsertProjectConfigRequest) returns (UpsertProjectConfigResponse);
   rpc GetProjectConfig(GetProjectConfigRequest) returns (GetProjectConfigResponse);
+
+  // Project console (ADR-0022). The people who own a project manage it with
+  // these four RPCs. The caller is an account of the deployment's own
+  // (default) project: the Authorization header carries its access token, the
+  // request must resolve to that project, and no admin secret is involved.
+  // Served only while GATEWAY_CONSOLE_ENABLED is on, and only on the postgres
+  // control-plane driver: UNIMPLEMENTED otherwise. Every one of them answers
+  // UNAUTHENTICATED with no session, and PERMISSION_DENIED for a token of
+  // another project, for an account that is not an active person (an agent,
+  // an anonymous or managed account, one that is deactivated), and for a
+  // session a recovery hold binds; FAILED_PRECONDITION (email verification
+  // required) until the caller has verified their email.
+  //
+  // CreateProject creates a project the caller owns, with one publishable
+  // credential, and records project_created. The project starts with no
+  // access mode, so nobody can sign up or sign in to it until its owner sets
+  // one with UpdateProjectSettings. FAILED_PRECONDITION unless
+  // GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED is on; RESOURCE_EXHAUSTED
+  // once the caller owns GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT projects,
+  // or past the per-address budget GATEWAY_RATE_LIMIT_SIGNUP_PER_IP sizes;
+  // INVALID_ARGUMENT for a blank or over-long name. There is no idempotency
+  // key: a retry after a lost response may create a second project, which the
+  // limit bounds and ListMyProjects shows.
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+  // ListMyProjects lists the active projects the caller is a member of.
+  rpc ListMyProjects(ListMyProjectsRequest) returns (ListMyProjectsResponse);
+  // GetProjectSettings reads the member-editable part of a project's config.
+  // PERMISSION_DENIED for a project the caller is not a member of, an unknown
+  // or suspended one included, so the call reveals nothing about projects the
+  // caller does not belong to; INVALID_ARGUMENT for a blank project_id.
+  rpc GetProjectSettings(GetProjectSettingsRequest) returns (GetProjectSettingsResponse);
+  // UpdateProjectSettings changes the member-editable part of a project's
+  // config and records project_settings_updated with the sections changed.
+  // Refused as GetProjectSettings is; INVALID_ARGUMENT and ABORTED as
+  // UpdateProjectSettingsRequest describes; FAILED_PRECONDITION when the
+  // write names accounts and the stored config spells that section more
+  // than one way, which the project's operator corrects.
+  rpc UpdateProjectSettings(UpdateProjectSettingsRequest) returns (UpdateProjectSettingsResponse);
 
   // Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
   // sets/rotates one provider (encrypting any plaintext secret server-side and

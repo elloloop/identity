@@ -1,0 +1,2287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Project console</title>
+<style nonce="{{.Nonce}}">
+:root {
+  color-scheme: light dark;
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --sunken: #f1f2f5;
+  --line: #dde0e6;
+  --line-strong: #c2c7d0;
+  --text: #161a22;
+  --muted: #5a6373;
+  --accent: #0d6b63;
+  --accent-strong: #0a5750;
+  --accent-soft: #e2f2ef;
+  --on-accent: #ffffff;
+  --danger: #b3261e;
+  --danger-soft: #fdecea;
+  --danger-line: #f1b5b0;
+  --warn: #7a4f00;
+  --warn-soft: #fff4d6;
+  --warn-line: #e6c263;
+  --ok: #1a7446;
+  --knob: #ffffff;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
+  --radius: 10px;
+  --radius-control: 7px;
+  --topbar: 52px;
+  --sidebar: 256px;
+  --gutter: 20px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1015;
+    --surface: #151920;
+    --sunken: #1b2029;
+    --line: #272d38;
+    --line-strong: #3b4351;
+    --text: #e7eaf0;
+    --muted: #9ba4b3;
+    --accent: #4fc9ba;
+    --accent-strong: #6fd8cb;
+    --accent-soft: #11302c;
+    --on-accent: #04211d;
+    --danger: #ff9389;
+    --danger-soft: #371a18;
+    --danger-line: #6e2f2a;
+    --warn: #f3c969;
+    --warn-soft: #30270f;
+    --warn-line: #6f581c;
+    --ok: #62d394;
+    --knob: #f4f6f8;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font: 14px/1.5 var(--font); }
+h1, h2, h3, p, ul, dl, dd, fieldset, legend, pre { margin: 0; padding: 0; }
+ul { list-style: none; }
+fieldset { border: 0; min-width: 0; }
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--accent); text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1 { font-size: 22px; line-height: 1.25; font-weight: 650; letter-spacing: -0.01em; }
+h1:focus-visible { outline: none; }
+h2 { font-size: 15px; line-height: 1.35; font-weight: 650; }
+h3 { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+code { font-family: var(--mono); font-size: 13px; }
+.lead { margin-top: 4px; max-width: 64ch; color: var(--muted); }
+.help { max-width: 66ch; color: var(--muted); font-size: 13px; }
+.eyebrow { display: block; color: var(--muted); font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.spinner { width: 14px; height: 14px; flex: none; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--text); font-size: 15px; font-weight: 650; text-decoration: none; }
+.brand-mark { width: 26px; height: 26px; flex: none; }
+.mark-ground { fill: var(--accent); }
+.mark-figure { fill: none; stroke: var(--on-accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; line-height: 1; text-decoration: none; white-space: nowrap; cursor: pointer; }
+.btn:hover { background: var(--sunken); }
+.btn-primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover { border-color: var(--accent-strong); background: var(--accent-strong); }
+.btn-quiet { border-color: transparent; background: transparent; }
+.btn-small { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.btn-block { width: 100%; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.btn:disabled:hover, .btn[aria-disabled="true"]:hover { background: var(--surface); }
+.btn-primary:disabled:hover, .btn-primary[aria-disabled="true"]:hover { border-color: var(--accent); background: var(--accent); }
+.btn-quiet[aria-disabled="true"]:hover { background: transparent; }
+
+.input { width: 100%; min-height: 34px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--text); }
+.input::placeholder { color: var(--muted); opacity: 0.8; }
+.input:focus-visible { outline-offset: 0; border-color: var(--accent); }
+.input[aria-invalid="true"] { border-color: var(--danger); }
+select.input { -webkit-appearance: none; appearance: none; padding-right: 30px; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+textarea.input { display: block; min-height: 148px; margin-top: 8px; resize: vertical; font-family: var(--mono); font-size: 13px; line-height: 1.5; }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--sunken); color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.pill-unsaved { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+.pill-unsaved::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+.alert { display: flex; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunken); }
+.alert > .icon { margin-top: 2px; color: var(--muted); }
+.alert-text { display: grid; gap: 4px; min-width: 0; }
+.alert-detail { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.alert-error { border-color: var(--danger-line); background: var(--danger-soft); }
+.alert-error > .icon { color: var(--danger); }
+.alert-warn { border-color: var(--warn-line); background: var(--warn-soft); }
+.alert-warn > .icon { color: var(--warn); }
+.alert-ok > .icon { color: var(--ok); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+
+.auth { display: grid; place-items: center; min-height: 100vh; padding: 24px 16px; }
+.auth-card { width: 100%; max-width: 384px; padding: 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+.auth-card h1 { margin-top: 22px; }
+.auth-card form { display: grid; gap: 14px; margin-top: 20px; }
+.auth-message { margin-top: 16px; }
+.auth-foot { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.stack { display: grid; gap: 6px; }
+.field-label { display: block; font-weight: 600; }
+
+.skip { position: absolute; top: -48px; left: 12px; z-index: 30; }
+.skip:focus { top: 9px; }
+.topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: var(--topbar); padding: 0 var(--gutter); border-bottom: 1px solid var(--line); background: var(--surface); }
+.topbar-end { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.account { max-width: 32ch; overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+
+.frame { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); align-items: start; }
+.frame-wide { grid-template-columns: minmax(0, 1fr); }
+.sidebar { position: sticky; top: var(--topbar); height: calc(100vh - var(--topbar)); padding: 16px 12px 24px; overflow-y: auto; border-right: 1px solid var(--line); background: var(--surface); }
+.back { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; padding: 4px 8px; border-radius: 6px; color: var(--muted); font-size: 13px; text-decoration: none; }
+.back:hover { background: var(--sunken); color: var(--text); }
+.sidebar .eyebrow { margin-bottom: 6px; padding: 0 8px; }
+.nav { display: grid; gap: 2px; margin-top: 16px; }
+.nav a { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 7px; color: var(--text); font-weight: 500; text-decoration: none; }
+.nav a:hover { background: var(--sunken); }
+.nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+.nav-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--warn); }
+
+.content { width: 100%; max-width: 860px; padding: 28px 32px 72px; }
+.content:focus { outline: none; }
+.frame-wide .content { margin: 0 auto; }
+.content > * + * { margin-top: var(--gutter); }
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.footnote { color: var(--muted); font-size: 13px; }
+
+.card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px var(--gutter); }
+.card-head p { max-width: 66ch; margin-top: 2px; color: var(--muted); font-size: 13px; }
+.card-pad { padding: 0 var(--gutter) 16px; }
+.card-pad > * + * { margin-top: 12px; }
+.card-body { padding: 0 var(--gutter); }
+.card-note { margin: 0 var(--gutter) 16px; color: var(--muted); font-size: 13px; }
+.card-messages { display: grid; gap: 10px; margin: 0 var(--gutter) 16px; }
+.card-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px var(--gutter); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); background: var(--sunken); }
+.card-status { display: inline-flex; align-items: center; gap: 6px; min-height: 20px; color: var(--muted); font-size: 13px; }
+.card-status.is-unsaved { color: var(--warn); }
+.card-status.is-saved { color: var(--ok); }
+.card-status.is-blocked { color: var(--danger); }
+.card-actions { display: flex; gap: 8px; margin-left: auto; }
+
+.field { position: relative; padding: 16px 0; border-top: 1px solid var(--line); }
+.field.is-edited::before { content: ""; position: absolute; top: 16px; bottom: 16px; left: calc(-1 * var(--gutter)); width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.field .help { margin-top: 2px; }
+.field-heading { padding-top: 18px; border-top: 1px solid var(--line); }
+.field-heading + .field { padding-top: 10px; border-top: 0; }
+.field-split { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.field-text { min-width: 0; }
+.field-problem { margin-top: 6px; color: var(--danger); font-size: 13px; }
+
+.switch { -webkit-appearance: none; appearance: none; position: relative; width: 38px; height: 22px; flex: none; margin: 1px 0 0; border: 0; border-radius: 999px; background: var(--line-strong); cursor: pointer; transition: background 0.15s; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--knob); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s; }
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(16px); }
+.switch:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.choices-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.choice { position: relative; display: grid; gap: 2px; align-content: start; padding: 11px 14px 11px 40px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); cursor: pointer; }
+.choice:hover { border-color: var(--muted); }
+.choice input { position: absolute; top: 13px; left: 14px; width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.choice input:focus-visible { outline: none; }
+.choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.choice-title { font-weight: 600; }
+.choice-text { color: var(--muted); font-size: 13px; }
+
+.checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 10px 0 8px; }
+.check { display: flex; align-items: center; gap: 8px; }
+.check input { width: 16px; height: 16px; flex: none; margin: 0; accent-color: var(--accent); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 3px 2px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--sunken); font-size: 13px; }
+.chip span { overflow-wrap: anywhere; }
+.chip-remove { display: grid; place-items: center; width: 22px; height: 22px; flex: none; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.chip-remove:hover { background: var(--line); color: var(--text); }
+.chips-none { margin-top: 10px; color: var(--muted); font-size: 13px; font-style: italic; }
+.entry { display: flex; gap: 8px; margin-top: 10px; }
+.entry .input { max-width: 380px; }
+
+.number-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; }
+.input-number { width: 140px; }
+.input-hint { color: var(--muted); font-size: 13px; }
+.editor-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0 6px; }
+.select-row { max-width: 320px; margin-top: 8px; }
+
+.project-list { overflow: hidden; }
+.project-list li + li { border-top: 1px solid var(--line); }
+.project-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; color: var(--text); text-decoration: none; }
+.project-row:hover { background: var(--sunken); }
+.project-row:focus-visible { outline-offset: -2px; }
+.project-row > .icon { color: var(--muted); }
+.project-avatar { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 15px; font-weight: 700; text-transform: uppercase; }
+.project-main { display: grid; flex: 1; min-width: 0; }
+.project-name { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.project-id { overflow: hidden; color: var(--muted); font-family: var(--mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.project-date { color: var(--muted); font-size: 13px; white-space: nowrap; }
+
+.empty { display: grid; justify-items: center; gap: 10px; padding: 48px 24px; text-align: center; }
+.empty p { max-width: 48ch; color: var(--muted); }
+.empty .actions { justify-content: center; }
+.empty-mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--sunken); color: var(--muted); }
+
+.fact { display: grid; grid-template-columns: 160px minmax(0, 1fr); align-items: center; gap: 12px; padding: 12px var(--gutter); border-top: 1px solid var(--line); }
+.fact dt { color: var(--muted); font-size: 13px; }
+.copyable { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.code-value { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--sunken); overflow-wrap: anywhere; user-select: all; }
+.copy-status { color: var(--muted); font-size: 12px; }
+.code-block { padding: 12px 14px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--sunken); font-family: var(--mono); font-size: 13px; white-space: pre; }
+
+.skeleton { border-radius: 6px; background: linear-gradient(90deg, var(--sunken) 25%, var(--line) 50%, var(--sunken) 75%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+.skeleton-title { width: 180px; height: 22px; }
+.skeleton-line { height: 14px; }
+.skeleton-line.is-short { width: 55%; }
+.skeleton-block { height: 120px; border-radius: var(--radius); }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+.dialog { width: min(440px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: 0 24px 64px rgba(0, 0, 0, 0.3); }
+.dialog::backdrop { background: rgba(8, 11, 16, 0.55); }
+.dialog-body { display: grid; gap: 12px; padding: 22px 22px 18px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; background: var(--sunken); }
+
+@media (max-width: 860px) {
+  .frame { display: block; }
+  .sidebar { position: static; height: auto; padding: 12px 16px 0; border-right: 0; border-bottom: 1px solid var(--line); }
+  .back { margin-bottom: 8px; }
+  .nav { display: flex; gap: 4px; margin: 12px -16px 0; padding: 0 16px; overflow-x: auto; }
+  .nav a { padding: 10px; border-bottom: 2px solid transparent; border-radius: 0; white-space: nowrap; }
+  .nav a[aria-current="page"] { border-bottom-color: var(--accent); background: none; }
+  .content { padding: 20px 16px 56px; }
+  .choices, .choices-three, .checks { grid-template-columns: minmax(0, 1fr); }
+  .fact { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .account, .project-date { display: none; }
+  .project-row { flex-wrap: wrap; }
+  /* A phone zooms the page into a text field whose type is under 16px. */
+  input, select, textarea { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner, .skeleton { animation: none; }
+  .switch, .switch::after { transition: none; }
+}
+@media (forced-colors: active) {
+  .switch { -webkit-appearance: auto; appearance: auto; width: 16px; height: 16px; }
+  .switch::after { content: none; }
+  .choice:has(input:checked) { outline: 2px solid Highlight; }
+}
+</style>
+</head>
+<body>
+<main class="auth" id="signin">
+  <div class="auth-card">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 26 26" aria-hidden="true" focusable="false"><rect class="mark-ground" width="26" height="26" rx="7"/><circle class="mark-figure" cx="13" cy="10" r="3.5"/><path class="mark-figure" d="M13 13.5v6.5M13 17h3"/></svg>
+      <span>Project console</span>
+    </div>
+    <h1>Sign in</h1>
+    <p class="lead" id="signin-lead"></p>
+    <div class="auth-message" id="signin-message" hidden></div>
+    <form id="signin-form" method="post" novalidate>
+      <div class="stack">
+        <label class="field-label" for="signin-email">Email</label>
+        <input class="input" id="signin-email" name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      </div>
+      <div class="stack">
+        <label class="field-label" for="signin-password">Password</label>
+        <input class="input" id="signin-password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn btn-primary btn-block" id="signin-submit" type="submit">Sign in</button>
+    </form>
+    <form id="code-form" method="post" novalidate hidden>
+      <div class="stack">
+        <label class="field-label" for="code-input">Verification code</label>
+        <input class="input" id="code-input" name="code" type="text" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" aria-describedby="code-help" required>
+        <p class="help" id="code-help">The 6-digit code from your authenticator app, or one of your recovery codes.</p>
+      </div>
+      <button class="btn btn-primary btn-block" id="code-submit" type="submit">Verify</button>
+      <button class="btn btn-quiet btn-block" id="code-back" type="button">Use a different account</button>
+    </form>
+    <p class="auth-foot">New here? <a href="../auth/">Create an account</a></p>
+    <noscript><p class="auth-foot">The console needs JavaScript to run.</p></noscript>
+  </div>
+</main>
+
+<div id="app" hidden>
+  <button class="btn skip" id="skip" type="button">Skip to content</button>
+  <header class="topbar">
+    <a class="brand" href="#/">
+      <svg class="brand-mark" viewBox="0 0 26 26" aria-hidden="true" focusable="false"><rect class="mark-ground" width="26" height="26" rx="7"/><circle class="mark-figure" cx="13" cy="10" r="3.5"/><path class="mark-figure" d="M13 13.5v6.5M13 17h3"/></svg>
+      <span>Project console</span>
+    </a>
+    <div class="topbar-end">
+      <span class="account" id="account-email"></span>
+      <button class="btn btn-small" id="sign-out" type="button">Sign out</button>
+    </div>
+  </header>
+  <div class="frame" id="frame">
+    <aside class="sidebar" id="sidebar" hidden></aside>
+    <main class="content" id="main" tabindex="-1"></main>
+  </div>
+</div>
+
+<div class="visually-hidden" id="live" role="status" aria-live="polite"></div>
+
+<dialog class="dialog" id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+  <div class="dialog-body">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text"></p>
+  </div>
+  <div class="dialog-actions">
+    <button class="btn" id="confirm-cancel" type="button">Cancel</button>
+    <button class="btn btn-primary" id="confirm-accept" type="button"></button>
+  </div>
+</dialog>
+
+<dialog class="dialog" id="project-dialog" aria-labelledby="project-title">
+  <form id="project-form" method="post" novalidate>
+    <div class="dialog-body">
+      <h2 id="project-title">New project</h2>
+      <p class="help" id="project-help">You will own the project. It starts closed: nobody can sign up or sign in to it until you choose who may.</p>
+      <div class="stack">
+        <label class="field-label" for="project-name">Name</label>
+        <input class="input" id="project-name" name="name" type="text" maxlength="100" autocomplete="off" aria-describedby="project-help" required>
+      </div>
+      <div id="project-message" hidden></div>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" id="project-cancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="project-create" type="submit">Create project</button>
+    </div>
+  </form>
+</dialog>
+
+<template id="icon-check"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg></template>
+<template id="icon-close"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></template>
+<template id="icon-plus"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M3 8h10"/></svg></template>
+<template id="icon-copy"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></svg></template>
+<template id="icon-alert"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 2.5l6 10.5H2z"/><path d="M8 6.5v3M8 11.4v.1"/></svg></template>
+<template id="icon-info"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6"/><path d="M8 7.5V11M8 5v.1"/></svg></template>
+<template id="icon-back"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M7 3.5L2.5 8 7 12.5M2.5 8h11"/></svg></template>
+<template id="icon-chevron"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5L10.5 8 6 12.5"/></svg></template>
+<template id="icon-lock"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg></template>
+<template id="icon-mail"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2.5 4.5L8 8.5l5.5-4"/></svg></template>
+<template id="icon-folder"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg></template>
+
+<script nonce="{{.Nonce}}">
+(function () {
+  'use strict';
+
+  // What the server said about itself when it rendered this page.
+  const serverOptions = {{.Options}};
+
+  // ── The wire ─────────────────────────────────────────────────────────
+
+  // Relative to the page, so the console keeps working when the whole server
+  // is published under a path prefix.
+  const RPC_BASE = '../identity.v1.IdentityService/';
+  const PROJECT_KEY_HEADER = 'X-Project-Key';
+
+  const Code = Object.freeze({
+    aborted: 'aborted',
+    failedPrecondition: 'failed_precondition',
+    invalidArgument: 'invalid_argument',
+    notFound: 'not_found',
+    permissionDenied: 'permission_denied',
+    resourceExhausted: 'resource_exhausted',
+    unauthenticated: 'unauthenticated',
+    unavailable: 'unavailable',
+    unimplemented: 'unimplemented',
+    // The rest are the page's own, for an outcome no server code names: no
+    // answer arrived, the answer could not be read, or the session ended
+    // while the call was on its way.
+    network: 'network',
+    unreadable: 'unreadable',
+    sessionEnded: 'session_ended',
+    unknown: 'unknown',
+  });
+
+  // The Connect code an HTTP status stands for when the answer carries none
+  // of its own, as when a proxy in front of the server answers.
+  const CODE_BY_STATUS = Object.freeze({
+    401: Code.unauthenticated,
+    403: Code.permissionDenied,
+    404: Code.unimplemented,
+    429: Code.unavailable,
+    502: Code.unavailable,
+    503: Code.unavailable,
+    504: Code.unavailable,
+  });
+
+  // Phrases the server puts in a refusal's message, which is all that tells
+  // these refusals apart from others with the same code.
+  const EMAIL_VERIFICATION_MARK = 'email verification required';
+  const PASSWORD_CHANGE_MARK = 'password_change_required';
+  const DATE_OF_BIRTH_MARK = 'dob_required';
+  const HUMAN_CHECK_MARK = 'assurance';
+
+  class RpcError extends Error {
+    constructor(code, message) {
+      super(message || '');
+      this.code = code;
+    }
+  }
+
+  async function rpc(method, message, accessToken) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (accessToken) headers.Authorization = 'Bearer ' + accessToken;
+    let response;
+    try {
+      response = await fetch(RPC_BASE + method, { method: 'POST', headers, body: JSON.stringify(message), cache: 'no-store' });
+    } catch (cause) {
+      throw new RpcError(Code.network);
+    }
+    let answer = null;
+    try {
+      answer = await response.json();
+    } catch (cause) {
+      answer = null;
+    }
+    if (response.ok) {
+      if (!isRecord(answer)) throw new RpcError(Code.unreadable);
+      return answer;
+    }
+    const code = isRecord(answer) && typeof answer.code === 'string' && answer.code;
+    const text = isRecord(answer) && typeof answer.message === 'string' ? answer.message : '';
+    throw new RpcError(code || CODE_BY_STATUS[response.status] || Code.unknown, text);
+  }
+
+  // A call as the signed-in account. An access token is short-lived, so a
+  // call the server answers unauthenticated is retried once with a fresh one;
+  // when that does not help the session is over.
+  async function authed(method, message) {
+    const session = state.session;
+    if (!session) throw new RpcError(Code.sessionEnded);
+    const used = session.accessToken;
+    try {
+      return await rpc(method, message, used);
+    } catch (err) {
+      if (err.code !== Code.unauthenticated) throw err;
+    }
+    // Another call may have refreshed the session while this one was out.
+    if (session.accessToken === used) {
+      try {
+        await refreshSession(session);
+      } catch (err) {
+        endSession(session, SESSION_OVER);
+        throw new RpcError(Code.sessionEnded);
+      }
+    }
+    try {
+      return await rpc(method, message, session.accessToken);
+    } catch (err) {
+      if (err.code !== Code.unauthenticated) throw err;
+      endSession(session, SESSION_OVER);
+      throw new RpcError(Code.sessionEnded);
+    }
+  }
+
+  // A refresh token works once, and presenting a spent one signs the account
+  // out everywhere, so calls that fail together share one refresh.
+  function refreshSession(session) {
+    if (!session.refreshing) {
+      session.refreshing = rpc('RefreshToken', { refreshToken: session.refreshToken }).then((answer) => {
+        if (!answer.accessToken || !answer.refreshToken) throw new RpcError(Code.unauthenticated);
+        session.accessToken = answer.accessToken;
+        session.refreshToken = answer.refreshToken;
+      }).finally(() => {
+        session.refreshing = null;
+      });
+    }
+    return session.refreshing;
+  }
+
+  // ── Small tools ──────────────────────────────────────────────────────
+
+  const ENTRY_SEPARATOR = /[\s,;]+/;
+  const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const DOMAIN_LABEL = /^[a-z0-9-]{1,63}$/;
+  const NON_ASCII = /[^\u0000-\u007f]/;
+  const ORIGIN_SHAPE = /^[a-z][a-z0-9+.-]*:\/\/[^\s\/?#]+$/;
+  const MAX_DOMAIN_LENGTH = 253;
+  const COPIED_NOTICE_MS = 2500;
+  const JSON_INDENT = 2;
+
+  const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  const LIST_FORMAT = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
+
+  const TIME_UNITS = Object.freeze([
+    { seconds: 86400, one: 'day', many: 'days' },
+    { seconds: 3600, one: 'hour', many: 'hours' },
+    { seconds: 60, one: 'minute', many: 'minutes' },
+  ]);
+
+  const byId = (id) => document.getElementById(id);
+  const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+  const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const token = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
+  const hasItems = (value) => Array.isArray(value) && value.length > 0;
+  const pretty = (value) => JSON.stringify(value, null, JSON_INDENT);
+
+  let lastId = 0;
+  function uid(prefix) {
+    lastId += 1;
+    return prefix + '-' + lastId;
+  }
+
+  // Builds an element. A function-valued entry is an event listener, every
+  // other one an attribute; text only ever reaches the page as text nodes.
+  function h(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [name, value] of Object.entries(attrs || {})) {
+      if (value === false || value === null || value === undefined) continue;
+      if (typeof value === 'function') node.addEventListener(name, value);
+      else if (name === 'text') node.textContent = value;
+      else if (name === 'class') node.className = value;
+      else node.setAttribute(name, value === true ? '' : String(value));
+    }
+    for (const child of children.flat(Infinity)) {
+      if (child === false || child === null || child === undefined) continue;
+      node.append(child);
+    }
+    return node;
+  }
+
+  function icon(name) {
+    return byId('icon-' + name).content.firstElementChild.cloneNode(true);
+  }
+
+  function describedBy(...ids) {
+    return ids.filter(Boolean).join(' ') || null;
+  }
+
+  function setDisabled(button, disabled) {
+    button.setAttribute('aria-disabled', String(disabled));
+  }
+
+  function setBusy(button, busy, label) {
+    if (busy) {
+      button.dataset.label = button.textContent;
+      button.replaceChildren(h('span', { class: 'spinner', 'aria-hidden': 'true' }), label);
+    } else if (button.dataset.label !== undefined) {
+      button.textContent = button.dataset.label;
+      delete button.dataset.label;
+    }
+    button.disabled = busy;
+  }
+
+  function announce(text) {
+    const live = byId('live');
+    live.textContent = '';
+    requestAnimationFrame(() => {
+      live.textContent = text;
+    });
+  }
+
+  function spokenSeconds(total) {
+    for (const unit of TIME_UNITS) {
+      if (total >= unit.seconds && total % unit.seconds === 0) {
+        const count = total / unit.seconds;
+        return count + ' ' + (count === 1 ? unit.one : unit.many);
+      }
+    }
+    return total + (total === 1 ? ' second' : ' seconds');
+  }
+
+  function formatDate(value) {
+    const date = value ? new Date(value) : null;
+    return date && !Number.isNaN(date.getTime()) ? DATE_FORMAT.format(date) : '';
+  }
+
+  // How long the server may go on applying the settings it had read before a
+  // save, in words; empty when a save applies at once.
+  function applyDelay() {
+    const seconds = serverOptions.settingsApplyWithinSeconds;
+    return Number.isInteger(seconds) && seconds > 0 ? spokenSeconds(seconds) : '';
+  }
+
+  function applyDelayNote() {
+    const delay = applyDelay();
+    return delay ? 'After you save a change, sign-ups and sign-ins follow it within ' + delay + '.' : '';
+  }
+
+  function alertBox(kind, problem, actions) {
+    const mark = kind === 'ok' ? 'check' : kind === 'info' ? 'info' : 'alert';
+    return h('div', { class: 'alert alert-' + kind, role: kind === 'error' ? 'alert' : 'status' },
+      icon(mark),
+      h('div', { class: 'alert-text' },
+        problem.title && h('strong', { text: problem.title }),
+        h('p', { text: problem.text }),
+        problem.detail && h('p', { class: 'alert-detail', text: problem.detail }),
+        actions && h('div', { class: 'actions' }, actions)));
+  }
+
+  function showIn(container, kind, problem) {
+    container.replaceChildren(...(problem ? [alertBox(kind, problem)] : []));
+    container.hidden = !problem;
+  }
+
+  // Redraws container only when what it shows has changed, so a message a
+  // screen reader has announced is not announced again on every keystroke.
+  function showOnce(container, content, build) {
+    const key = JSON.stringify(content);
+    if (container.dataset.shown === key) return;
+    container.dataset.shown = key;
+    container.replaceChildren(...build());
+  }
+
+  // ── Words for what went wrong ────────────────────────────────────────
+
+  const SESSION_OVER = { text: 'Your session has ended. Sign in again to continue.' };
+  const UNREACHABLE = 'The server could not be reached. Check your connection and try again.';
+  const CONSOLE_OFF = 'The project console is not turned on for this server.';
+  const VERIFY_EMAIL = 'Verify your email address first. Follow the link in the message sent to you, then try again.';
+
+  function said(err) {
+    return err.message ? 'The server said: ' + err.message : '';
+  }
+
+  function mentions(err, mark) {
+    return err.message.toLowerCase().includes(mark);
+  }
+
+  function needsVerifiedEmail(err) {
+    return err.code === Code.failedPrecondition && mentions(err, EMAIL_VERIFICATION_MARK);
+  }
+
+  // What to say for a failure that reads the same wherever it happens; null
+  // when the caller has to say what it was doing.
+  function commonProblem(err) {
+    if (err.code === Code.network) return { text: UNREACHABLE };
+    if (err.code === Code.unavailable) return { text: 'The server is unavailable right now. Try again in a moment.' };
+    if (err.code === Code.unimplemented) return { text: CONSOLE_OFF };
+    if (err.code === Code.unreadable) return { text: 'The server sent an answer the console could not read.' };
+    if (needsVerifiedEmail(err)) return { text: VERIFY_EMAIL };
+    return null;
+  }
+
+  function signInProblem(err) {
+    if (err.code === Code.unauthenticated) return { text: 'That email address and password do not match an account.' };
+    if (err.code === Code.resourceExhausted) return { text: 'There were too many attempts. Wait a while, then try again.' };
+    if (err.code === Code.unavailable) return { text: 'Signing in with a password is unavailable right now. Try again in a moment.' };
+    if (err.code === Code.failedPrecondition && mentions(err, PASSWORD_CHANGE_MARK)) {
+      return { text: 'This password was issued by an administrator and has to be replaced before it works here. Sign in to your app to choose a new one, then come back.' };
+    }
+    if (err.code === Code.failedPrecondition && mentions(err, DATE_OF_BIRTH_MARK)) {
+      return { text: 'This account needs a date of birth before it can sign in. Sign in to your app to add one, then come back.' };
+    }
+    if (err.code === Code.permissionDenied && mentions(err, HUMAN_CHECK_MARK)) {
+      return { text: "This server asks for a check that you are human before a password sign-in, and the console has no way to show one. Ask the server's operator how to reach the console." };
+    }
+    if (err.code === Code.permissionDenied) return { text: 'This account is not allowed to sign in here.', detail: said(err) };
+    if (err.code === Code.invalidArgument) return { text: 'Check the email address and password.', detail: said(err) };
+    return commonProblem(err) || { text: 'Signing in did not work.', detail: said(err) };
+  }
+
+  function codeProblem(err) {
+    if (err.code === Code.unauthenticated) {
+      return { text: 'That code was not accepted. Each sign-in takes one try at the code, so enter your password again.' };
+    }
+    return signInProblem(err);
+  }
+
+  function createProblem(err) {
+    if (err.code === Code.network) {
+      return { text: 'The server could not be reached. The project may have been created all the same, so check the list before you try again.' };
+    }
+    if (err.code === Code.resourceExhausted) return { text: 'This account already owns as many projects as one account may.' };
+    if (err.code === Code.invalidArgument) return { text: 'That name cannot be used.', detail: said(err) };
+    if (err.code === Code.permissionDenied) return { text: 'This account is not allowed to create a project.', detail: said(err) };
+    const common = commonProblem(err);
+    if (common) return common;
+    if (err.code === Code.failedPrecondition) return { text: 'Projects cannot be created from this account on this server.', detail: said(err) };
+    return { text: 'The project could not be created.', detail: said(err) };
+  }
+
+  function loadProblem(err) {
+    if (err.code === Code.permissionDenied) {
+      return { text: 'You are not a member of this project, or it is no longer active.', detail: said(err) };
+    }
+    return commonProblem(err) || { text: "This project's settings could not be loaded.", detail: said(err) };
+  }
+
+  function saveProblem(err) {
+    if (err.code === Code.invalidArgument) return { text: 'The server did not accept these settings.', detail: said(err) };
+    if (err.code === Code.permissionDenied) return { text: "You are not allowed to change this project's settings.", detail: said(err) };
+    if (err.code === Code.network) return { text: UNREACHABLE + ' Your changes are still here.' };
+    const common = commonProblem(err);
+    if (common) return common;
+    if (err.code === Code.failedPrecondition) return { text: 'These settings cannot be changed from this session.', detail: said(err) };
+    return { text: 'The settings were not saved.', detail: said(err) };
+  }
+
+  // ── What a project's settings are ────────────────────────────────────
+  //
+  // Each section is one key of the settings the server hands out, edited and
+  // saved on its own. The fields, their JSON names, their allowed values and
+  // their defaults are the server's (the Project*Config types); nothing here
+  // decides what is valid, it only keeps the form from building what the
+  // server is known to refuse.
+
+  const KIND = Object.freeze({
+    heading: 'heading', choice: 'choice', toggle: 'toggle', list: 'list',
+    number: 'number', methods: 'methods', json: 'json', select: 'select',
+  });
+  const MODE = Object.freeze({ open: 'open', allowlist: 'allowlist', invite: 'invite', closed: 'closed' });
+  const SIGNUP = Object.freeze({ self: 'self', admin: 'admin', off: 'off' });
+  const ENTRY = Object.freeze({ email: 'email', domain: 'domain', origin: 'origin' });
+
+  const modeIs = (mode) => (section) => token(section.mode) === mode;
+  const modeAdmitsSomeone = (section) => [MODE.open, MODE.allowlist, MODE.invite].includes(token(section.mode));
+  const turnsSomeoneAway = (section) => section.block_public_email_domains === true || hasItems(section.blocked_domains);
+  const marketCode = (value) => (typeof value === 'string' ? value.trim().toUpperCase() : '');
+  const marketCodes = (thresholds) => (isRecord(thresholds) ? Object.keys(thresholds).map(marketCode) : []);
+
+  function refuseDomain(domain) {
+    if (domain.includes('@')) return 'Enter only the domain, not an email address.';
+    const labels = domain.split('.');
+    if (labels.length < 2) return 'Enter a domain with a dot in it, such as example.com.';
+    // An internationalized name is the server's to convert and check.
+    if (NON_ASCII.test(domain)) return '';
+    const plain = domain.length <= MAX_DOMAIN_LENGTH &&
+      labels.every((label) => DOMAIN_LABEL.test(label) && !label.startsWith('-') && !label.endsWith('-'));
+    return plain ? '' : 'Enter a plain domain such as example.com, with no wildcard, scheme or path.';
+  }
+
+  function refuseOrigin(origin) {
+    if (origin === '*' || origin === 'null') return 'List each origin by name: this entry would let every website in.';
+    return ORIGIN_SHAPE.test(origin) ? '' : 'Enter a scheme and host with nothing after it, such as https://app.example.com.';
+  }
+
+  function refuseThresholds(value) {
+    if (!isRecord(value)) return 'Enter a JSON object keyed by market code.';
+    const seen = new Set();
+    for (const [code, pair] of Object.entries(value)) {
+      const market = marketCode(code);
+      if (!market) return 'A market code cannot be blank.';
+      if (seen.has(market)) return 'The market ' + market + ' is listed more than once.';
+      seen.add(market);
+      if (!isRecord(pair) || !Number.isInteger(pair.child_max_age) || !Number.isInteger(pair.adult_age)) {
+        return market + ' needs whole numbers for child_max_age and adult_age.';
+      }
+      if (pair.child_max_age < 0) return market + ': child_max_age cannot be negative.';
+      if (pair.adult_age <= pair.child_max_age) return market + ': adult_age must be greater than child_max_age.';
+    }
+    return '';
+  }
+
+  const ENTRIES = Object.freeze({
+    [ENTRY.email]: {
+      clean: (text) => text.toLowerCase(),
+      refuse: (text) => (EMAIL_SHAPE.test(text) ? '' : 'Enter a whole email address, such as name@example.com.'),
+    },
+    [ENTRY.domain]: { clean: (text) => text.toLowerCase(), refuse: refuseDomain },
+    [ENTRY.origin]: { clean: (text) => text, refuse: refuseOrigin },
+  });
+
+  const SECTIONS = Object.freeze({
+    access: {
+      title: 'Who can sign up and sign in',
+      summary: 'The access mode decides who may create an account, sign in or accept an invitation.',
+      // An unset mode denies everyone, which is how every new project starts.
+      banner: (stored) => (token(stored.mode) ? null : {
+        title: 'This project is closed',
+        text: 'No access mode has been chosen, so nobody can sign up or sign in. Choose one below and save.',
+        detail: applyDelayNote(),
+      }),
+      check: (section) => (modeIs(MODE.allowlist)(section) && !hasItems(section.allowed_emails) && !hasItems(section.allowed_domains)
+        ? ['An allowlist needs at least one email address or domain. To turn everyone away, choose Closed.']
+        : []),
+      fields: [
+        {
+          key: 'mode', kind: KIND.choice, label: 'Access mode',
+          options: [
+            { value: MODE.open, title: 'Open', text: 'Anyone can sign up and sign in.' },
+            { value: MODE.allowlist, title: 'Allowlist', text: 'Only the email addresses and domains you list can sign up, sign in or accept an invitation.' },
+            { value: MODE.invite, title: 'Invite only', text: 'Nobody signs up on their own. People who have an account sign in, and people an admin invited can accept.' },
+            { value: MODE.closed, title: 'Closed', text: 'Nobody can sign up, sign in or accept an invitation.' },
+          ],
+        },
+        {
+          key: 'allowed_emails', kind: KIND.list, entry: ENTRY.email, applies: modeIs(MODE.allowlist),
+          label: 'Allowed email addresses', placeholder: 'name@example.com',
+          help: 'These exact addresses are let in.',
+        },
+        {
+          key: 'allowed_domains', kind: KIND.list, entry: ENTRY.domain, applies: modeIs(MODE.allowlist),
+          label: 'Allowed email domains', placeholder: 'example.com',
+          help: 'Everyone with an address on one of these domains is let in, listed above or not.',
+        },
+        {
+          key: 'admit_tenant_invitations', kind: KIND.toggle, applies: modeIs(MODE.invite),
+          label: 'Let invited people create their account',
+          help: 'A person with a pending invitation to an organization (tenant) can create the account it names, once they prove the address is theirs.',
+        },
+        {
+          key: 'admit_domain_join', kind: KIND.toggle, applies: modeIs(MODE.invite),
+          label: 'Let people on a joinable domain create their account',
+          help: 'A person whose email domain lets its people join an organization (tenant) can create an account, once they prove the address is theirs. They join nothing until they choose to.',
+        },
+        {
+          kind: KIND.heading, applies: modeAdmitsSomeone, label: 'Turned away regardless',
+          help: 'These only ever refuse. They never let in anyone the access mode refuses.',
+        },
+        {
+          key: 'block_public_email_domains', kind: KIND.toggle, applies: modeAdmitsSomeone,
+          label: 'Refuse public email providers',
+          help: 'Turns away addresses at consumer mailbox providers such as gmail.com or outlook.com, for a project that wants work email only.',
+        },
+        {
+          key: 'blocked_domains', kind: KIND.list, entry: ENTRY.domain, applies: modeAdmitsSomeone,
+          label: 'Blocked email domains', placeholder: 'example.com',
+          help: 'Addresses on these domains are refused as well.',
+        },
+        {
+          key: 'exempt_emails', kind: KIND.list, entry: ENTRY.email, applies: turnsSomeoneAway,
+          label: 'Exempt email addresses', placeholder: 'name@example.com',
+          help: 'These exact addresses pass the two rules above. This is not a second allowlist: an address the access mode refuses is still refused.',
+        },
+        { kind: KIND.heading, label: 'Accounts an organization manages' },
+        {
+          key: 'admit_managed_accounts', kind: KIND.toggle,
+          label: 'Let organizations create accounts they manage',
+          help: 'Owners and admins of an organization (tenant) can create accounts on a domain verified for it, where this server has managed accounts turned on.',
+        },
+        {
+          key: 'admit_managed_accounts_self_service', kind: KIND.toggle, applies: (section) => section.admit_managed_accounts === true,
+          label: 'Include organizations people created themselves',
+          help: 'Extends this to organizations (tenants) made through self-service.',
+        },
+      ],
+    },
+    anonymous: {
+      title: 'Anonymous sign-in',
+      summary: 'Lets your app open a session for someone before they have given an email address or any other credential.',
+      fields: [
+        {
+          key: 'enabled', kind: KIND.toggle, label: 'Allow anonymous sign-in',
+          help: 'Off by default. It is separate from the access mode: a closed project can still hand out anonymous sessions. Turning such an account into a full one follows the sign-up rules.',
+        },
+      ],
+    },
+    accounts: {
+      title: 'Account types',
+      summary: 'Which kinds of account this project has, and who creates them.',
+      // Only these two fields of the section are a project member's to set;
+      // the server refuses a write that carries any other.
+      exact: true,
+      fields: [
+        {
+          key: 'email_signup', kind: KIND.choice, unset: SIGNUP.self,
+          label: 'Accounts identified by an email address',
+          options: [
+            { value: SIGNUP.self, title: 'People sign up themselves', text: 'The default.' },
+            { value: SIGNUP.admin, title: 'Only an admin creates them', text: 'People sign in to the account an admin made for them.' },
+            { value: SIGNUP.off, title: 'Off', text: 'No new email accounts. The ones that exist keep signing in.' },
+          ],
+        },
+        {
+          key: 'username_signup', kind: KIND.choice, unset: SIGNUP.off,
+          label: 'Accounts identified by a username',
+          help: 'Child accounts a guardian creates are not governed here.',
+          options: [
+            { value: SIGNUP.off, title: 'Off', text: 'The default. No new username accounts. The ones that exist keep signing in.' },
+            { value: SIGNUP.self, title: 'People sign up themselves' },
+            { value: SIGNUP.admin, title: 'Only an admin creates them', text: 'People sign in to the account an admin made for them.' },
+          ],
+        },
+      ],
+    },
+    login: {
+      title: 'Sign-in methods',
+      summary: "These apply to people whose sign-in no organization (tenant) governs. An organization's own login policy replaces them for its members.",
+      fields: [
+        {
+          key: 'allowed_methods', kind: KIND.methods, label: 'Allowed methods',
+          help: 'Tick the methods to allow. With none ticked there is no restriction.',
+          options: [
+            { value: 'password', title: 'Password' },
+            { value: 'email_otp', title: 'Emailed code or link' },
+            { value: 'passkey', title: 'Passkey' },
+            { value: 'oauth', title: 'Sign in with a provider (OAuth)' },
+            { value: 'sso', title: 'Single sign-on (SSO)' },
+          ],
+        },
+        {
+          key: 'require_2fa', kind: KIND.toggle, label: 'Require a second factor',
+          help: 'After the first step of signing in, everyone these settings apply to must also pass a second factor.',
+        },
+      ],
+    },
+    recovery_emails: {
+      title: 'Recovery emails',
+      summary: 'Extra addresses a person proves they control and keeps on their account.',
+      fields: [
+        {
+          key: 'enabled', kind: KIND.toggle, label: 'Let people add recovery emails',
+          help: 'Off by default. Turning it off later keeps the addresses people already hold, which they can still list and remove.',
+        },
+        {
+          key: 'max', kind: KIND.number, max: 20, fallback: 5, label: 'Recovery emails per account',
+          help: 'How many one account may hold.',
+        },
+        {
+          key: 'reauth_max_age_seconds', kind: KIND.number, seconds: true, max: 3600, fallback: 900,
+          label: 'Recent sign-in needed to change the list',
+          help: 'How long ago a person may have signed in and still add or remove an address. This check cannot be turned off.',
+        },
+        {
+          key: 'sign_in', kind: KIND.toggle, label: 'Let a recovery email sign in',
+          help: 'An emailed code or link sent to a recovery email signs in to the account that holds it. Off by default.',
+        },
+        {
+          key: 'hold_seconds', kind: KIND.number, seconds: true, max: 2592000, fallback: 604800,
+          label: 'Recovery hold',
+          help: "After a sign-in by a recovery email, that session cannot change the account's security settings, and the account cannot be merged, until this much time has passed. It cannot be turned off.",
+        },
+      ],
+    },
+    tenants: {
+      title: 'Self-service organizations',
+      summary: 'An organization, called a tenant in the API, is a group of people inside your project, such as a company or a team.',
+      fields: [
+        {
+          key: 'self_service', kind: KIND.toggle, label: 'Let people create their own organization',
+          help: "A signed-in person can create an organization (tenant) they own. Off by default. People can always see and select the organizations they already belong to, however those were made. How many one account may create is the server operator's setting.",
+        },
+      ],
+    },
+    guardian: {
+      title: 'Guardians',
+      summary: "Checks on an adult who acts for a child account. They can tighten the server's own rules, never loosen them.",
+      fields: [
+        {
+          key: 'require_step_up', kind: KIND.toggle, label: 'Always make a guardian confirm who they are',
+          help: 'Closes the server-wide exception that lets a guardian who has no password act for a child without confirming again.',
+        },
+        {
+          key: 'require_adult_profile', kind: KIND.toggle, label: 'Guardians must be known adults',
+          help: 'Only an active person whose date of birth puts them in the adult age band can act as a guardian.',
+        },
+      ],
+    },
+    age_gate: {
+      title: 'Date of birth',
+      summary: 'Whether an account must have a date of birth on file.',
+      fields: [
+        {
+          key: 'require_dob', kind: KIND.toggle, label: 'Require a date of birth',
+          help: 'Nobody is given a session until their account has a date of birth. Accounts made before you turn this on are asked for one the next time they sign in.',
+        },
+      ],
+    },
+    jurisdictions: {
+      title: 'Age thresholds by market',
+      summary: "The ages that count as child, teen and adult differ from country to country. Give each market its own pair of thresholds and an account's market picks the pair. With none set, the server-wide thresholds apply.",
+      check: (section) => {
+        const chosen = marketCode(section.default);
+        return chosen && !marketCodes(section.thresholds).includes(chosen)
+          ? ['The default market has no thresholds. Add them, or choose another default.']
+          : [];
+      },
+      fields: [
+        {
+          key: 'thresholds', kind: KIND.json, label: 'Thresholds', refuse: refuseThresholds,
+          help: 'A JSON object keyed by market code. In each, child_max_age is the oldest age that still counts as a child and adult_age the youngest that counts as an adult. Ages in between are teens.',
+          example: { US: { child_max_age: 12, adult_age: 18 }, IN: { child_max_age: 17, adult_age: 18 } },
+        },
+        {
+          key: 'default', kind: KIND.select, label: 'Default market', clean: marketCode,
+          none: 'None: the strictest thresholds apply',
+          help: 'Used for an account with no market on file.',
+          options: (section) => marketCodes(section.thresholds).filter(Boolean),
+        },
+      ],
+    },
+    cors: {
+      title: 'Allowed web origins',
+      summary: "A browser lets a web page call this server only from an origin listed here, or from one the server's operator allows for every project.",
+      fields: [
+        {
+          key: 'allowed_origins', kind: KIND.list, entry: ENTRY.origin, label: 'Origins', placeholder: 'https://app.example.com',
+          help: 'A scheme and host, with a port if it needs one and nothing after it. https://*.example.com covers every subdomain one level down. An app with its own scheme is listed as scheme://host.',
+        },
+      ],
+    },
+  });
+
+  const PAGE_OVERVIEW = 'overview';
+  const PAGE_ACCESS = 'access';
+  const PAGES = Object.freeze([
+    { id: PAGE_OVERVIEW, title: 'Overview', lead: 'What this project is and how an app reaches it.' },
+    { id: PAGE_ACCESS, title: 'Sign-up and access', lead: 'Who may create an account and sign in to this project.', sections: ['access', 'anonymous'] },
+    { id: 'accounts', title: 'Accounts', lead: 'The kinds of account people have, how they sign in and how they recover.', sections: ['accounts', 'login', 'recovery_emails'] },
+    { id: 'organizations', title: 'Organizations', lead: 'Groups of people inside this project. The API calls an organization a tenant.', sections: ['tenants'] },
+    { id: 'children', title: 'Child accounts', lead: 'Guardians, dates of birth and the ages that make someone a child.', sections: ['guardian', 'age_gate', 'jurisdictions'] },
+    { id: 'origins', title: 'Web origins', lead: 'The websites whose pages may call this project from a browser.', sections: ['cors'] },
+  ]);
+
+  // ── State ────────────────────────────────────────────────────────────
+
+  const LOAD = Object.freeze({ idle: 'idle', loading: 'loading', ready: 'ready', failed: 'failed' });
+  const OUTCOME = Object.freeze({ saved: 'saved', failed: 'failed', conflict: 'conflict' });
+
+  // Everything the page knows lives here and nowhere else: tokens are never
+  // written to storage or a cookie, so reloading the page signs out.
+  const state = {
+    session: null,
+    projects: null,
+    canCreateProject: false,
+    refusal: null,
+    records: new Map(),
+    saving: null,
+  };
+
+  const view = { projectId: '', page: '', cards: [], dots: new Map() };
+
+  // The server writes its answers as protojson, which leaves a field out when
+  // it holds its zero value and writes a 64-bit number as a string: a project
+  // nobody has configured answers with no version at all, meaning this one.
+  const ZERO_VERSION = '0';
+
+  function recordFor(projectId) {
+    let record = state.records.get(projectId);
+    if (!record) {
+      record = { status: LOAD.idle, failure: null, settings: {}, version: ZERO_VERSION, savingSection: '', edits: {}, problems: {}, outcomes: {} };
+      state.records.set(projectId, record);
+    }
+    return record;
+  }
+
+  function storedSection(record, name) {
+    return isRecord(record.settings[name]) ? record.settings[name] : {};
+  }
+
+  // A section as the form shows it: what the server stores, with the
+  // person's unsaved edits over it. Fields the form does not draw ride along
+  // untouched.
+  function draftSection(record, name) {
+    return Object.assign({}, storedSection(record, name), record.edits[name]);
+  }
+
+  function hasEdits(record, name) {
+    return Object.keys(record.edits[name] || {}).length > 0;
+  }
+
+  function hasUnsavedEdits(record) {
+    return Object.keys(record.edits).some((name) => hasEdits(record, name));
+  }
+
+  function anyUnsavedEdits() {
+    return Array.from(state.records.values()).some(hasUnsavedEdits);
+  }
+
+  function setEdit(record, name, field, value) {
+    const stored = KINDS[field.kind].plain(storedSection(record, name)[field.key], field);
+    const edits = record.edits[name] || {};
+    if (sameValue(value, stored)) delete edits[field.key];
+    else edits[field.key] = value;
+    if (Object.keys(edits).length) record.edits[name] = edits;
+    else delete record.edits[name];
+    if (record.outcomes[name] && record.outcomes[name].kind === OUTCOME.saved) delete record.outcomes[name];
+  }
+
+  function setProblem(record, name, key, message) {
+    const problems = record.problems[name] || {};
+    if (message) problems[key] = message;
+    else delete problems[key];
+    record.problems[name] = problems;
+  }
+
+  function readSettings(text) {
+    if (text === undefined || text === '') return {};
+    let settings = null;
+    try {
+      settings = JSON.parse(text);
+    } catch (cause) {
+      settings = null;
+    }
+    if (!isRecord(settings)) throw new RpcError(Code.unreadable);
+    return settings;
+  }
+
+  // Takes the server's settings and their version, keeping only the edits
+  // that still differ from them.
+  function acceptSettings(record, answer) {
+    record.settings = readSettings(answer.settingsJson);
+    record.version = answer.version === undefined ? ZERO_VERSION : String(answer.version);
+    for (const name of Object.keys(record.edits)) {
+      const fields = SECTIONS[name].fields;
+      for (const key of Object.keys(record.edits[name])) {
+        setEdit(record, name, fields.find((field) => field.key === key), record.edits[name][key]);
+      }
+    }
+  }
+
+  // The section as it will be saved: everything the server stores in it,
+  // drawn or not, with the edits over it, unless the section is marked exact. A
+  // field that does not apply under the other choices is not drawn and is
+  // emptied here, because the server refuses a section that carries one.
+  // Fields are settled in order, so one may depend on those before it.
+  function settle(def, draft) {
+    const section = def.exact
+      ? Object.fromEntries(def.fields.filter((field) => Object.hasOwn(draft, field.key)).map((field) => [field.key, draft[field.key]]))
+      : Object.assign({}, draft);
+    const hidden = new Set();
+    const cleared = [];
+    for (const field of def.fields) {
+      if (!field.applies || field.applies(section)) continue;
+      hidden.add(field);
+      if (!field.key) continue;
+      const kind = KINDS[field.kind];
+      const empty = kind.plain(undefined, field);
+      if (sameValue(kind.plain(section[field.key], field), empty)) continue;
+      section[field.key] = empty;
+      cleared.push(field.label);
+    }
+    return { section, hidden, cleared };
+  }
+
+  function sectionState(record, name) {
+    const def = SECTIONS[name];
+    const settled = settle(def, draftSection(record, name));
+    const problems = record.problems[name] || {};
+    const blocked = def.fields.some((field) => field.key && !settled.hidden.has(field) && problems[field.key]);
+    const checks = def.check ? def.check(settled.section) : [];
+    const dirty = hasEdits(record, name);
+    return { settled, checks, dirty, blocked: blocked || checks.length > 0 };
+  }
+
+  // ── Form controls ────────────────────────────────────────────────────
+  //
+  // A control draws one field and reports edits through its access object. Its sync
+  // re-reads the value from state; sync(true) also drops whatever the person
+  // had half typed.
+
+  function helpLine(field, id) {
+    return field.help ? h('p', { class: 'help', id: id + '-help', text: field.help }) : null;
+  }
+
+  function problemLine(id) {
+    return h('p', { class: 'field-problem', id: id + '-problem', role: 'alert', hidden: true });
+  }
+
+  function showProblem(line, input, message) {
+    line.textContent = message || '';
+    line.hidden = !message;
+    input.setAttribute('aria-invalid', String(Boolean(message)));
+  }
+
+  function buildToggle(field, access) {
+    const id = uid('field');
+    const input = h('input', {
+      class: 'switch', id, type: 'checkbox', role: 'switch',
+      'aria-describedby': describedBy(field.help && id + '-help'),
+      change: () => access.set(input.checked),
+    });
+    const node = h('div', { class: 'field-split' },
+      h('div', { class: 'field-text' }, h('label', { class: 'field-label', for: id, text: field.label }), helpLine(field, id)),
+      input);
+    return { node, sync: () => { input.checked = access.value(); } };
+  }
+
+  function buildChoice(field, access) {
+    const name = uid('choice');
+    const options = field.options.map((option) => {
+      const input = h('input', { type: 'radio', name, value: option.value, change: () => access.set(option.value) });
+      const node = h('label', { class: 'choice' }, input,
+        h('span', { class: 'choice-title', text: option.title }),
+        option.text && h('span', { class: 'choice-text', text: option.text }));
+      return { option, input, node };
+    });
+    const node = h('fieldset', null,
+      h('legend', { class: 'field-label', text: field.label }),
+      field.help && h('p', { class: 'help', text: field.help }),
+      h('div', { class: field.options.length === 3 ? 'choices choices-three' : 'choices' }, options.map((item) => item.node)));
+    return {
+      node,
+      sync: () => {
+        const value = access.value();
+        for (const item of options) item.input.checked = item.option.value === value;
+      },
+    };
+  }
+
+  function buildList(field, access) {
+    const id = uid('field');
+    const entry = ENTRIES[field.entry];
+    const chips = h('ul', { class: 'chips', 'aria-label': field.label });
+    const none = h('p', { class: 'chips-none', text: 'None listed.' });
+    const problem = problemLine(id);
+    const input = h('input', {
+      class: 'input', id, type: 'text', placeholder: field.placeholder,
+      autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false',
+      'aria-describedby': describedBy(field.help && id + '-help', id + '-problem'),
+      keydown: (event) => {
+        if (event.isComposing || (event.key !== 'Enter' && event.key !== ',')) return;
+        event.preventDefault();
+        commit();
+      },
+      paste: (event) => {
+        const pasted = event.clipboardData ? event.clipboardData.getData('text').trim() : '';
+        if (!ENTRY_SEPARATOR.test(pasted)) return;
+        event.preventDefault();
+        input.value = (input.value + ' ' + pasted).trim();
+        commit();
+      },
+      // Text left in the box would otherwise be dropped without a word when
+      // the person goes on to Save.
+      blur: () => { if (input.value.trim()) commit(); },
+      input: () => { if (!input.value.trim()) fail(''); },
+    });
+
+    function fail(message) {
+      showProblem(problem, input, message);
+      access.setProblem(message);
+    }
+
+    function draw() {
+      const values = access.value();
+      chips.replaceChildren(...values.map((value) => h('li', { class: 'chip' },
+        h('span', { text: value }),
+        h('button', {
+          class: 'chip-remove', type: 'button', 'aria-label': 'Remove ' + value,
+          click: () => {
+            access.set(access.value().filter((other) => other !== value));
+            draw();
+            announce('Removed ' + value + '.');
+            input.focus();
+          },
+        }, icon('close')))));
+      chips.hidden = values.length === 0;
+      none.hidden = values.length > 0;
+    }
+
+    function commit() {
+      const typed = input.value.split(ENTRY_SEPARATOR).map((part) => part.trim()).filter(Boolean);
+      const values = access.value().slice();
+      const refused = [];
+      let reason = '';
+      for (const raw of typed) {
+        const value = entry.clean(raw);
+        const why = entry.refuse(value);
+        if (why) {
+          refused.push(raw);
+          reason = reason || why;
+        } else if (values.includes(value)) {
+          announce(value + ' is already listed.');
+        } else {
+          values.push(value);
+        }
+      }
+      input.value = refused.join(', ');
+      if (values.length !== access.value().length) {
+        access.set(values);
+        draw();
+      }
+      fail(reason);
+    }
+
+    const node = h('div', null,
+      h('label', { class: 'field-label', for: id, text: field.label }),
+      helpLine(field, id),
+      chips, none,
+      h('div', { class: 'entry' }, input, h('button', { class: 'btn', type: 'button', click: () => { commit(); input.focus(); } }, 'Add')),
+      problem);
+    return {
+      node,
+      sync: (reset) => {
+        if (reset) {
+          input.value = '';
+          showProblem(problem, input, '');
+        }
+        draw();
+      },
+    };
+  }
+
+  function buildNumber(field, access) {
+    const id = uid('field');
+    const amount = (count) => (field.seconds ? count + ' seconds (' + spokenSeconds(count) + ')' : String(count));
+    const help = field.help + ' Leave it empty for the default of ' + amount(field.fallback) + '. At most ' + amount(field.max) + '.';
+    const hint = h('span', { class: 'input-hint', id: id + '-hint' });
+    const problem = problemLine(id);
+    const input = h('input', {
+      class: 'input input-number', id, type: 'number', inputmode: 'numeric', min: 0, max: field.max, step: 1,
+      placeholder: field.fallback,
+      'aria-describedby': describedBy(id + '-help', id + '-hint', id + '-problem'),
+      input: () => {
+        const text = input.value.trim();
+        const count = Number(text);
+        // A browser reports text that is not a number as empty; badInput is
+        // what tells that from a box the person cleared.
+        const bad = input.validity.badInput || !Number.isInteger(count) || count < 0 || count > field.max;
+        showProblem(problem, input, bad ? 'Enter a whole number from 0 to ' + field.max + ', or leave it empty.' : '');
+        access.setProblem(bad ? problem.textContent : '');
+        if (!bad) access.set(count);
+        describe();
+      },
+    });
+
+    function describe() {
+      const count = access.value();
+      if (count === 0) hint.textContent = 'Default: ' + amount(field.fallback);
+      else hint.textContent = field.seconds ? spokenSeconds(count) : '';
+    }
+
+    const node = h('div', null,
+      h('label', { class: 'field-label', for: id, text: field.label }),
+      h('p', { class: 'help', id: id + '-help', text: help }),
+      h('div', { class: 'number-row' }, input, hint),
+      problem);
+    return {
+      node,
+      sync: (reset) => {
+        if (reset || !access.problem()) {
+          input.value = access.value() ? String(access.value()) : '';
+          showProblem(problem, input, '');
+        }
+        describe();
+      },
+    };
+  }
+
+  function buildMethods(field, access) {
+    const boxes = h('div', { class: 'checks' });
+    const summary = h('p', { class: 'help', role: 'status' });
+    let items = [];
+
+    function chosen() {
+      return access.value() ? access.value().split(',') : [];
+    }
+
+    function describe() {
+      summary.textContent = chosen().length ? 'Only the ticked methods are allowed.' : 'Every method is allowed.';
+    }
+
+    function draw() {
+      const ticked = chosen();
+      const known = field.options.map((option) => option.value);
+      // A method this page has no name for stays in the list, shown as the
+      // server spells it, so saving cannot drop it.
+      const others = ticked.filter((method) => !known.includes(method)).map((method) => ({ value: method, title: method }));
+      items = field.options.concat(others).map((option) => {
+        const input = h('input', {
+          type: 'checkbox', checked: ticked.includes(option.value),
+          change: () => {
+            access.set(items.filter((item) => item.input.checked).map((item) => item.option.value).join(','));
+            describe();
+          },
+        });
+        return { option, input, node: h('label', { class: 'check' }, input, h('span', { text: option.title })) };
+      });
+      boxes.replaceChildren(...items.map((item) => item.node));
+      describe();
+    }
+
+    const node = h('fieldset', null,
+      h('legend', { class: 'field-label', text: field.label }),
+      field.help && h('p', { class: 'help', text: field.help }),
+      boxes, summary);
+    return { node, sync: draw };
+  }
+
+  function buildJSON(field, access) {
+    const id = uid('field');
+    const problem = problemLine(id);
+    const input = h('textarea', {
+      class: 'input', id, rows: 8, placeholder: pretty(field.example),
+      autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false',
+      'aria-describedby': describedBy(field.help && id + '-help', id + '-problem'),
+      input: () => {
+        const outcome = read(input.value);
+        showProblem(problem, input, outcome.problem);
+        access.setProblem(outcome.problem);
+        if (!outcome.problem) access.set(outcome.value);
+      },
+    });
+
+    function read(text) {
+      if (!text.trim()) return { value: {}, problem: '' };
+      let value;
+      try {
+        value = JSON.parse(text);
+      } catch (cause) {
+        return { problem: 'This is not valid JSON yet. ' + cause.message };
+      }
+      return { value, problem: field.refuse(value) };
+    }
+
+    function write() {
+      const value = access.value();
+      input.value = Object.keys(value).length ? pretty(value) : '';
+      showProblem(problem, input, '');
+    }
+
+    const node = h('div', null,
+      h('div', { class: 'editor-row' },
+        h('label', { class: 'field-label', for: id, text: field.label }),
+        h('button', { class: 'btn btn-small', type: 'button', click: () => { if (!access.problem()) write(); } }, 'Tidy up')),
+      helpLine(field, id),
+      input, problem);
+    return {
+      node,
+      // The person's own text is kept, layout and all, for as long as it
+      // still says what the state holds.
+      sync: (reset) => {
+        const typed = read(input.value);
+        if (reset || (!access.problem() && !sameValue(typed.value, access.value()))) write();
+      },
+    };
+  }
+
+  function buildSelect(field, access) {
+    const id = uid('field');
+    const input = h('select', {
+      class: 'input', id,
+      'aria-describedby': describedBy(field.help && id + '-help'),
+      change: () => access.set(input.value),
+    });
+
+    function fill() {
+      const value = access.value();
+      const offered = field.options(access.draft());
+      if (value && !offered.includes(value)) offered.push(value);
+      showOnce(input, offered, () => [h('option', { value: '', text: field.none })].concat(
+        offered.map((option) => h('option', { value: option, text: option }))));
+      input.value = value;
+    }
+
+    const node = h('div', null,
+      h('label', { class: 'field-label', for: id, text: field.label }),
+      helpLine(field, id),
+      h('div', { class: 'select-row' }, input));
+    return { node, sync: fill, update: fill };
+  }
+
+  // How each kind of field is drawn, and plain: its value in the one form
+  // the page edits and compares, where unset and the default are the same.
+  const KINDS = Object.freeze({
+    [KIND.choice]: { build: buildChoice, plain: (value, field) => token(value) || field.unset || '' },
+    [KIND.toggle]: { build: buildToggle, plain: (value) => value === true },
+    [KIND.list]: { build: buildList, plain: (value) => (Array.isArray(value) ? value.filter((item) => typeof item === 'string') : []) },
+    [KIND.number]: { build: buildNumber, plain: (value) => (Number.isInteger(value) ? value : 0) },
+    [KIND.methods]: { build: buildMethods, plain: (value) => (typeof value === 'string' ? value.split(',').map(token).filter(Boolean).join(',') : '') },
+    [KIND.json]: { build: buildJSON, plain: (value) => (isRecord(value) ? value : {}) },
+    [KIND.select]: { build: buildSelect, plain: (value, field) => field.clean(value) },
+  });
+
+  // ── A section's card ─────────────────────────────────────────────────
+
+  function buildField(record, name, field, refresh) {
+    if (field.kind === KIND.heading) {
+      return { field, wrapper: h('div', { class: 'field-heading' }, h('h3', { text: field.label }), field.help && h('p', { class: 'help', text: field.help })) };
+    }
+    const kind = KINDS[field.kind];
+    const access = {
+      value: () => kind.plain(draftSection(record, name)[field.key], field),
+      draft: () => draftSection(record, name),
+      problem: () => (record.problems[name] || {})[field.key] || '',
+      set: (value) => {
+        setEdit(record, name, field, value);
+        refresh();
+      },
+      setProblem: (message) => {
+        setProblem(record, name, field.key, message);
+        refresh();
+      },
+    };
+    const control = kind.build(field, access);
+    return { field, control, wrapper: h('div', { class: 'field' }, control.node) };
+  }
+
+  function buildCard(record, projectId, name) {
+    const def = SECTIONS[name];
+    // A problem belongs to text in a box that is gone once the card is
+    // rebuilt, and would block saving with nothing to show for it.
+    delete record.problems[name];
+
+    const titleId = uid('section');
+    const unsaved = h('span', { class: 'pill pill-unsaved', text: 'Unsaved changes', hidden: true });
+    const banner = h('div', { class: 'card-pad', hidden: true });
+    const body = h('fieldset', { class: 'card-body' });
+    const note = h('p', { class: 'card-note', hidden: true });
+    const messages = h('div', { class: 'card-messages', hidden: true });
+    const status = h('p', { class: 'card-status', role: 'status' });
+    const discard = h('button', { class: 'btn btn-quiet', type: 'button', click: () => discardSection(record, card) }, 'Discard');
+    const save = h('button', { class: 'btn btn-primary', type: 'submit' }, 'Save');
+    const card = { name, record };
+    const items = def.fields.map((field) => buildField(record, name, field, () => card.refresh()));
+    body.append(...items.map((item) => item.wrapper));
+
+    card.node = h('form', {
+      class: 'card', method: 'post', novalidate: true, 'aria-labelledby': titleId,
+      submit: (event) => {
+        event.preventDefault();
+        saveSection(projectId, name);
+      },
+    },
+    h('div', { class: 'card-head' },
+      h('div', null, h('h2', { id: titleId, text: def.title }), h('p', { text: def.summary })),
+      unsaved),
+    banner, body, note, messages,
+    h('div', { class: 'card-foot' }, status, h('div', { class: 'card-actions' }, discard, save)));
+
+    card.sync = (reset) => {
+      for (const item of items) {
+        if (item.control) item.control.sync(reset);
+      }
+    };
+
+    card.refresh = () => {
+      const current = sectionState(record, name);
+      const saving = state.saving === card.record && record.savingSection === name;
+      const outcome = record.outcomes[name];
+      body.disabled = saving;
+      for (const item of items) {
+        item.wrapper.hidden = current.settled.hidden.has(item.field);
+        if (!item.control) continue;
+        item.wrapper.classList.toggle('is-edited', Object.hasOwn(record.edits[name] || {}, item.field.key));
+        if (item.control.update) item.control.update();
+      }
+      unsaved.hidden = !current.dirty;
+
+      const closed = def.banner ? def.banner(storedSection(record, name)) : null;
+      banner.hidden = !closed;
+      showOnce(banner, closed, () => (closed ? [alertBox('warn', closed)] : []));
+
+      const cleared = current.settled.cleared;
+      note.hidden = cleared.length === 0;
+      note.textContent = cleared.length
+        ? 'Saving also clears ' + LIST_FORMAT.format(cleared) + ': under these choices ' + (cleared.length === 1 ? 'it does' : 'they do') + ' not apply.'
+        : '';
+
+      const failure = outcome && outcome.kind !== OUTCOME.saved ? outcome : null;
+      messages.hidden = !failure && current.checks.length === 0;
+      showOnce(messages, [current.checks, failure], () => current.checks.map((text) => alertBox('warn', { text }))
+        .concat(failure ? [alertBox(failure.kind === OUTCOME.conflict ? 'warn' : 'error', failure.problem)] : []));
+
+      let words = '';
+      let tone = '';
+      if (saving) {
+        words = 'Saving…';
+      } else if (current.blocked) {
+        words = 'Fix what is marked above to save.';
+        tone = 'is-blocked';
+      } else if (current.dirty) {
+        words = 'Unsaved changes';
+        tone = 'is-unsaved';
+      } else if (outcome && outcome.kind === OUTCOME.saved) {
+        // Without this, a setting saved a moment ago and not yet enforced
+        // looks like a save that did not work.
+        words = applyDelay() ? 'Saved. It takes effect within ' + applyDelay() + '.' : 'Saved';
+        tone = 'is-saved';
+      }
+      showOnce(status, [words, tone], () => (words ? [tone === 'is-saved' && icon('check'), saving && h('span', { class: 'spinner', 'aria-hidden': 'true' }), words].filter(Boolean) : []));
+      status.className = 'card-status ' + tone;
+
+      setDisabled(save, !current.dirty || current.blocked || Boolean(state.saving));
+      setDisabled(discard, saving || !(current.dirty || Object.keys(record.problems[name] || {}).length));
+      refreshDots();
+    };
+    return card;
+  }
+
+  function discardSection(record, card) {
+    if (state.saving === record) return;
+    delete record.edits[card.name];
+    delete record.problems[card.name];
+    delete record.outcomes[card.name];
+    card.sync(true);
+    refreshCards();
+    announce(SECTIONS[card.name].title + ': changes discarded.');
+  }
+
+  function refreshCards() {
+    for (const card of view.cards) card.refresh();
+    refreshDots();
+  }
+
+  function refreshDots() {
+    const record = view.projectId ? recordFor(view.projectId) : null;
+    for (const page of PAGES) {
+      const dot = view.dots.get(page.id);
+      if (dot) dot.hidden = !(record && (page.sections || []).some((name) => hasEdits(record, name)));
+    }
+  }
+
+  // One section is saved at a time, and one save at a time per project: each
+  // write names the version it read, so a second write sent alongside would
+  // be refused as a conflict with the first.
+  async function saveSection(projectId, name) {
+    const record = recordFor(projectId);
+    const current = sectionState(record, name);
+    if (state.saving || record.status !== LOAD.ready || !current.dirty || current.blocked) return;
+
+    const focused = document.activeElement;
+    state.saving = record;
+    record.savingSection = name;
+    delete record.outcomes[name];
+    refreshCards();
+
+    let outcome;
+    try {
+      const answer = await authed('UpdateProjectSettings', {
+        projectId,
+        settingsJson: JSON.stringify({ [name]: current.settled.section }),
+        expectedVersion: record.version,
+      });
+      acceptSettings(record, answer);
+      delete record.edits[name];
+      outcome = { kind: OUTCOME.saved };
+    } catch (err) {
+      if (err.code === Code.sessionEnded) return;
+      outcome = await saveFailure(record, projectId, err);
+      if (!outcome) return;
+    }
+
+    state.saving = null;
+    record.savingSection = '';
+    record.outcomes[name] = outcome;
+    for (const card of view.cards) {
+      if (card.record === record) card.sync(outcome.kind === OUTCOME.saved && card.name === name);
+    }
+    refreshCards();
+    if (outcome.kind === OUTCOME.saved) announce(SECTIONS[name].title + ' saved.');
+    // The fields were disabled while the save ran, which drops focus.
+    if (focused && focused.isConnected && document.activeElement === document.body) focused.focus();
+  }
+
+  // Why a save failed, as the card's outcome; null when the session ended.
+  // A conflict loads what the server holds now and leaves the person's edits
+  // over it: an edit names only the fields they changed, so the other
+  // person's changes show through everywhere else.
+  async function saveFailure(record, projectId, err) {
+    if (err.code !== Code.aborted) return { kind: OUTCOME.failed, problem: saveProblem(err) };
+    try {
+      acceptSettings(record, await authed('GetProjectSettings', { projectId }));
+    } catch (reloadErr) {
+      if (reloadErr.code === Code.sessionEnded) return null;
+      return {
+        kind: OUTCOME.failed,
+        problem: { text: "Someone else changed this project's settings while you were editing, and the latest could not be loaded. Your changes are still here. Save again to retry." },
+      };
+    }
+    return {
+      kind: OUTCOME.conflict,
+      problem: {
+        title: 'Someone else changed these settings',
+        text: "This project's settings changed while you were editing, so nothing was saved. The latest are loaded now and your unsaved changes are still in the form. Check them, then save again.",
+      },
+    };
+  }
+
+  // ── Loading ──────────────────────────────────────────────────────────
+
+  async function loadProjects() {
+    const session = state.session;
+    state.projects = null;
+    state.refusal = null;
+    render();
+    try {
+      const answer = await authed('ListMyProjects', {});
+      state.projects = Array.isArray(answer.projects) ? answer.projects.filter((project) => isRecord(project) && project.projectId) : [];
+      state.canCreateProject = answer.canCreateProject === true;
+    } catch (err) {
+      if (err.code === Code.sessionEnded) return;
+      state.refusal = err;
+    }
+    if (state.session === session) render({ focus: true });
+  }
+
+  // Marks the settings as loading before it first waits, so the caller can
+  // draw that state straight away.
+  async function loadSettings(projectId) {
+    const session = state.session;
+    const record = recordFor(projectId);
+    record.status = LOAD.loading;
+    record.failure = null;
+    try {
+      acceptSettings(record, await authed('GetProjectSettings', { projectId }));
+      record.status = LOAD.ready;
+    } catch (err) {
+      if (err.code === Code.sessionEnded) return;
+      record.status = LOAD.failed;
+      record.failure = err;
+    }
+    if (state.session === session && view.projectId === projectId) renderMain();
+  }
+
+  // ── Routes ───────────────────────────────────────────────────────────
+
+  const ROUTE_PROJECT = 'p';
+  const HOME_HREF = '#/';
+  const PRODUCT_TITLE = 'Project console';
+
+  function projectHref(projectId, page) {
+    return HOME_HREF + ROUTE_PROJECT + '/' + encodeURIComponent(projectId) + '/' + page;
+  }
+
+  function parseRoute() {
+    const parts = location.hash.slice(1).split('/').filter(Boolean).map((part) => {
+      try {
+        return decodeURIComponent(part);
+      } catch (cause) {
+        return '';
+      }
+    });
+    if (parts[0] !== ROUTE_PROJECT || !parts[1]) return { projectId: '', page: '' };
+    return { projectId: parts[1], page: PAGES.some((page) => page.id === parts[2]) ? parts[2] : PAGE_OVERVIEW };
+  }
+
+  function currentProject(route) {
+    return (state.projects || []).find((project) => project.projectId === route.projectId) || null;
+  }
+
+  // ── Pages ────────────────────────────────────────────────────────────
+
+  const shell = {
+    root: byId('app'), frame: byId('frame'), sidebar: byId('sidebar'), main: byId('main'),
+    account: byId('account-email'), signOut: byId('sign-out'), skip: byId('skip'),
+  };
+
+  function render(options) {
+    if (!state.session) return;
+    const route = parseRoute();
+    const project = currentProject(route);
+    const entered = project && view.projectId !== project.projectId;
+    view.projectId = project ? project.projectId : '';
+    view.page = project ? route.page : '';
+    // Settings are read afresh each time a project is opened; edits made
+    // earlier in this visit are kept and laid over them.
+    if (entered) loadSettings(project.projectId);
+    renderSidebar(project);
+    renderMain(options);
+  }
+
+  function renderSidebar(project) {
+    shell.frame.classList.toggle('frame-wide', !project);
+    shell.sidebar.hidden = !project;
+    view.dots = new Map();
+    if (!project) {
+      shell.sidebar.replaceChildren();
+      return;
+    }
+    const picker = h('select', {
+      class: 'input', id: 'project-picker',
+      change: () => { location.hash = projectHref(picker.value, view.page); },
+    }, state.projects.map((other) => h('option', { value: other.projectId, text: other.name || other.projectId })));
+    picker.value = project.projectId;
+
+    let current = null;
+    const links = PAGES.map((page) => {
+      const dot = h('span', { class: 'nav-dot', role: 'img', 'aria-label': 'unsaved changes', hidden: true });
+      view.dots.set(page.id, dot);
+      const link = h('a', { href: projectHref(project.projectId, page.id), 'aria-current': page.id === view.page ? 'page' : null },
+        h('span', { text: page.title }), dot);
+      if (page.id === view.page) current = link;
+      return h('li', null, link);
+    });
+
+    shell.sidebar.replaceChildren(
+      h('a', { class: 'back', href: HOME_HREF }, icon('back'), 'All projects'),
+      h('label', { class: 'eyebrow', for: 'project-picker', text: 'Project' }),
+      picker,
+      h('nav', { 'aria-label': 'Project settings' }, h('ul', { class: 'nav' }, links)));
+    // On a phone the pages are a strip that scrolls sideways.
+    if (current) current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  function renderMain(options) {
+    const focus = Boolean(options && options.focus);
+    const held = shell.main.contains(document.activeElement);
+    const route = parseRoute();
+    view.cards = [];
+    shell.main.replaceChildren(...mainNodes(route).filter(Boolean));
+    for (const card of view.cards) card.sync(true);
+    refreshCards();
+    if (focus) window.scrollTo(0, 0);
+    if (focus || held) {
+      const heading = shell.main.querySelector('h1');
+      if (heading) heading.focus({ preventScroll: true });
+    }
+  }
+
+  function mainNodes(route) {
+    if (state.refusal) return refusalPage(state.refusal);
+    if (!state.projects) return loadingPage();
+    if (!route.projectId) return projectsPage();
+    const project = currentProject(route);
+    if (!project) return missingProjectPage();
+    const page = PAGES.find((candidate) => candidate.id === route.page);
+    document.title = page.title + ' · ' + (project.name || project.projectId) + ' · ' + PRODUCT_TITLE;
+    return page.sections ? settingsPage(project, page) : overviewPage(project, page);
+  }
+
+  function pageHead(eyebrow, title, lead, actions) {
+    return h('header', { class: 'page-head' },
+      h('div', null,
+        eyebrow && h('p', { class: 'eyebrow', text: eyebrow }),
+        h('h1', { tabindex: '-1', text: title }),
+        lead && h('p', { class: 'lead', text: lead })),
+      actions);
+  }
+
+  function statePage(options) {
+    document.title = options.title + ' · ' + PRODUCT_TITLE;
+    return [h('section', { class: 'card empty' },
+      h('span', { class: 'empty-mark' }, icon(options.icon)),
+      h('h1', { tabindex: '-1', text: options.title }),
+      h('p', { text: options.text }),
+      options.detail && h('p', { class: 'alert-detail', text: options.detail }),
+      options.actions && h('div', { class: 'actions' }, options.actions))];
+  }
+
+  function skeleton(lines) {
+    return h('div', { class: 'card-pad', 'aria-hidden': 'true' },
+      Array.from({ length: lines }, (unused, index) => h('div', { class: index % 2 ? 'skeleton skeleton-line is-short' : 'skeleton skeleton-line' })));
+  }
+
+  function loadingPage() {
+    document.title = PRODUCT_TITLE;
+    return [
+      h('div', { class: 'page-head' }, h('div', { class: 'skeleton skeleton-title' }),
+        serverOptions.selfServiceProjects === true && h('button', { class: 'btn btn-primary', type: 'button', disabled: true }, icon('plus'), 'New project')),
+      h('p', { class: 'visually-hidden', role: 'status', text: 'Loading your projects.' }),
+      h('div', { class: 'skeleton skeleton-block' }),
+    ];
+  }
+
+  function refusalPage(err) {
+    const again = h('button', { class: 'btn', type: 'button', click: loadProjects }, 'Try again');
+    if (err.code === Code.unimplemented) {
+      return statePage({ icon: 'lock', title: 'The console is not turned on', text: 'This server does not offer the project console. Its operator can turn it on.' });
+    }
+    if (needsVerifiedEmail(err)) return verifyEmailPage();
+    if (err.code === Code.permissionDenied || err.code === Code.failedPrecondition) {
+      return statePage({
+        icon: 'lock', title: 'This account cannot use the console',
+        text: 'The console is for a person who signed up on this server with their own account.',
+        detail: said(err), actions: [again],
+      });
+    }
+    const common = commonProblem(err);
+    return statePage({
+      icon: 'alert', title: 'Your projects could not be loaded',
+      text: common ? common.text : 'Something went wrong on the way.', detail: common ? '' : said(err), actions: [again],
+    });
+  }
+
+  function verifyEmailPage() {
+    const status = h('p', { class: 'help', role: 'status' });
+    const send = h('button', {
+      class: 'btn', type: 'button',
+      click: async () => {
+        setBusy(send, true, 'Sending…');
+        try {
+          await authed('SendEmailVerification', {});
+          status.textContent = 'Sent. Follow the link in the message, then check again.';
+        } catch (err) {
+          if (err.code === Code.sessionEnded) return;
+          const common = commonProblem(err);
+          status.textContent = common ? common.text : 'The message could not be sent. ' + said(err);
+        }
+        setBusy(send, false);
+      },
+    }, 'Send the message again');
+    const nodes = statePage({
+      icon: 'mail', title: 'Verify your email address',
+      text: 'The console opens once your email address is verified. Follow the link in the verification message sent to you.',
+      actions: [send, h('button', { class: 'btn btn-primary', type: 'button', click: loadProjects }, 'Check again')],
+    });
+    nodes[0].append(status);
+    return nodes;
+  }
+
+  function projectsPage() {
+    document.title = 'Projects · ' + PRODUCT_TITLE;
+    const lead = 'A project is its own set of accounts, with its own rules for who can sign in.';
+    const create = () => state.canCreateProject &&
+      h('button', { class: 'btn btn-primary', type: 'button', click: openProjectDialog }, icon('plus'), 'New project');
+    if (!state.projects.length) {
+      return [pageHead('', 'Projects', lead), h('section', { class: 'card empty' },
+        h('span', { class: 'empty-mark' }, icon('folder')),
+        h('h2', { text: 'No projects yet' }),
+        h('p', {
+          text: state.canCreateProject
+            ? 'Create your first project to get the key your app signs people in with, then choose who may sign in.'
+            : 'You are not a member of any project. A project you are added to will show up here.',
+        }),
+        state.canCreateProject && h('div', { class: 'actions' }, create()))];
+    }
+    return [
+      pageHead('', 'Projects', lead, create()),
+      h('ul', { class: 'card project-list' }, state.projects.map(projectRow)),
+      !state.canCreateProject && h('p', { class: 'footnote', text: 'New projects are created by the operator of this server.' }),
+    ];
+  }
+
+  // A role this page has no name for is shown as the server spells it.
+  const ROLE_LABELS = Object.freeze({ owner: 'Owner', admin: 'Admin' });
+
+  function roleLabel(role) {
+    return ROLE_LABELS[role] || role || 'Member';
+  }
+
+  function projectRow(project) {
+    const record = state.records.get(project.projectId);
+    const name = project.name || project.projectId;
+    return h('li', null, h('a', { class: 'project-row', href: projectHref(project.projectId, PAGE_OVERVIEW) },
+      h('span', { class: 'project-avatar', 'aria-hidden': 'true', text: name.trim().charAt(0) }),
+      h('span', { class: 'project-main' },
+        h('span', { class: 'project-name', text: name }),
+        h('span', { class: 'project-id', text: project.projectId })),
+      record && hasUnsavedEdits(record) && h('span', { class: 'pill pill-unsaved', text: 'Unsaved changes' }),
+      h('span', { class: 'pill', text: roleLabel(project.role) }),
+      h('span', { class: 'project-date', text: formatDate(project.createdAt) }),
+      icon('chevron')));
+  }
+
+  function missingProjectPage() {
+    return statePage({
+      icon: 'folder', title: 'Project not found',
+      text: 'You are not a member of a project with this id.',
+      actions: [h('a', { class: 'btn', href: HOME_HREF }, 'All projects')],
+    });
+  }
+
+  function copyable(value, label) {
+    const status = h('span', { class: 'copy-status', role: 'status' });
+    // Without the clipboard, the value can still be selected whole and copied.
+    const button = navigator.clipboard && h('button', {
+      class: 'btn btn-small', type: 'button',
+      click: () => {
+        navigator.clipboard.writeText(value).then(() => {
+          status.textContent = 'Copied';
+          setTimeout(() => { status.textContent = ''; }, COPIED_NOTICE_MS);
+        }, () => {
+          status.textContent = 'Could not copy. Select the text and copy it.';
+        });
+      },
+    }, icon('copy'), label);
+    return h('div', { class: 'copyable' }, h('code', { class: 'code-value', text: value }), button, status);
+  }
+
+  function fact(term, value) {
+    return h('div', { class: 'fact' }, h('dt', { text: term }), h('dd', null, value));
+  }
+
+  function overviewPage(project, page) {
+    const record = recordFor(project.projectId);
+    return [
+      pageHead(project.name || project.projectId, page.title, page.lead),
+      accessSummary(project, record),
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('div', null, h('h2', { text: 'Publishable key' }),
+          h('p', { text: 'Your app sends this key in the ' + PROJECT_KEY_HEADER + ' request header, so the server knows which project a request is for. It names the project and is not a secret.' }))),
+        h('div', { class: 'card-pad' }, project.publishableKey
+          ? [copyable(project.publishableKey, 'Copy key'), h('pre', { class: 'code-block', text: PROJECT_KEY_HEADER + ': ' + project.publishableKey })]
+          : alertBox('warn', { text: "This project has no publishable key. Ask the server's operator to issue one." }))),
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', { text: 'Project' })),
+        h('dl', null,
+          fact('Name', project.name || 'Unnamed'),
+          fact('Project ID', copyable(project.projectId, 'Copy ID')),
+          fact('Your role', [h('span', { class: 'pill', text: roleLabel(project.role) }), ' ', h('span', { class: 'help', text: 'Owners and admins can both change these settings.' })]),
+          fact('Created', formatDate(project.createdAt) || 'Unknown'))),
+    ];
+  }
+
+  function accessSummary(project, record) {
+    const head = h('div', { class: 'card-head' }, h('h2', { text: 'Who can sign in' }));
+    if (record.status === LOAD.failed) return h('section', { class: 'card' }, head, h('div', { class: 'card-pad' }, loadFailure(project, record)));
+    if (record.status !== LOAD.ready) return h('section', { class: 'card' }, head, skeleton(2));
+
+    const mode = token(storedSection(record, 'access').mode);
+    const option = SECTIONS.access.fields[0].options.find((candidate) => candidate.value === mode);
+    const change = h('a', { class: option ? 'btn' : 'btn btn-primary', href: projectHref(project.projectId, PAGE_ACCESS) }, option ? 'Change' : 'Choose who can sign in');
+    const summary = option
+      ? alertBox(mode === MODE.closed ? 'warn' : 'ok', { title: option.title, text: option.text, detail: applyDelayNote() }, [change])
+      : alertBox('warn', {
+        title: 'Closed: no access mode chosen',
+        text: 'Nobody can sign up or sign in to this project until you choose who may. Every new project starts this way.',
+        detail: applyDelayNote(),
+      }, [change]);
+    return h('section', { class: 'card' }, head, h('div', { class: 'card-pad' }, summary));
+  }
+
+  function loadFailure(project, record) {
+    const again = h('button', {
+      class: 'btn', type: 'button',
+      click: () => {
+        loadSettings(project.projectId);
+        renderMain();
+      },
+    }, 'Try again');
+    return alertBox('error', loadProblem(record.failure), [again]);
+  }
+
+  function settingsPage(project, page) {
+    const record = recordFor(project.projectId);
+    const head = pageHead(project.name || project.projectId, page.title, page.lead);
+    if (record.status === LOAD.failed) return [head, loadFailure(project, record)];
+    if (record.status !== LOAD.ready) {
+      return [head, h('p', { class: 'visually-hidden', role: 'status', text: 'Loading settings.' })].concat(
+        page.sections.map(() => h('div', { class: 'skeleton skeleton-block' })));
+    }
+    view.cards = page.sections.map((name) => buildCard(record, project.projectId, name));
+    return [head].concat(view.cards.map((card) => card.node));
+  }
+
+  // ── New project ──────────────────────────────────────────────────────
+
+  const projectDialog = {
+    root: byId('project-dialog'), form: byId('project-form'), name: byId('project-name'),
+    message: byId('project-message'), create: byId('project-create'), cancel: byId('project-cancel'),
+    busy: false,
+  };
+
+  function openProjectDialog() {
+    projectDialog.name.value = '';
+    showIn(projectDialog.message, 'error', null);
+    projectDialog.root.showModal();
+    projectDialog.name.focus();
+  }
+
+  async function createProject() {
+    if (projectDialog.busy) return;
+    const session = state.session;
+    const name = projectDialog.name.value.trim();
+    if (!name) {
+      showIn(projectDialog.message, 'error', { text: 'Give the project a name.' });
+      projectDialog.name.focus();
+      return;
+    }
+    projectDialog.busy = true;
+    setBusy(projectDialog.create, true, 'Creating…');
+    showIn(projectDialog.message, 'error', null);
+    try {
+      const answer = await authed('CreateProject', { name });
+      if (!isRecord(answer.project) || !answer.project.projectId) throw new RpcError(Code.unreadable);
+      state.projects = (state.projects || []).concat(answer.project);
+      projectDialog.root.close();
+      announce('Project ' + name + ' created.');
+      location.hash = projectHref(answer.project.projectId, PAGE_OVERVIEW);
+    } catch (err) {
+      if (err.code !== Code.sessionEnded) showIn(projectDialog.message, 'error', createProblem(err));
+      // Creating has no retry key, so a request whose answer was lost may
+      // have made the project: show the person the list as it now is.
+      if (err.code === Code.network || err.code === Code.unreadable) refreshProjects(session);
+    }
+    projectDialog.busy = false;
+    setBusy(projectDialog.create, false);
+  }
+
+  async function refreshProjects(session) {
+    try {
+      const answer = await authed('ListMyProjects', {});
+      if (state.session !== session || !Array.isArray(answer.projects)) return;
+      state.projects = answer.projects.filter((project) => isRecord(project) && project.projectId);
+      state.canCreateProject = answer.canCreateProject === true;
+      render();
+    } catch (err) {
+      // The list on screen stays; the dialog already says what went wrong.
+    }
+  }
+
+  // ── Confirming ───────────────────────────────────────────────────────
+
+  const DIALOG_ACCEPTED = 'accepted';
+  const confirmDialog = { root: byId('confirm-dialog'), title: byId('confirm-title'), text: byId('confirm-text'), accept: byId('confirm-accept'), cancel: byId('confirm-cancel') };
+
+  function confirm(options) {
+    confirmDialog.title.textContent = options.title;
+    confirmDialog.text.textContent = options.text;
+    confirmDialog.accept.textContent = options.accept;
+    confirmDialog.root.returnValue = '';
+    confirmDialog.root.showModal();
+    return new Promise((resolve) => {
+      confirmDialog.root.addEventListener('close', () => resolve(confirmDialog.root.returnValue === DIALOG_ACCEPTED), { once: true });
+    });
+  }
+
+  // ── Signing in and out ───────────────────────────────────────────────
+
+  const signin = {
+    root: byId('signin'), lead: byId('signin-lead'), message: byId('signin-message'),
+    form: byId('signin-form'), email: byId('signin-email'), password: byId('signin-password'), submit: byId('signin-submit'),
+    codeForm: byId('code-form'), code: byId('code-input'), codeSubmit: byId('code-submit'), codeBack: byId('code-back'),
+    challenge: '',
+  };
+
+  function showPasswordStep(kind, problem) {
+    signin.challenge = '';
+    signin.code.value = '';
+    signin.password.value = '';
+    signin.codeForm.hidden = true;
+    signin.form.hidden = false;
+    showIn(signin.message, kind, problem);
+    (signin.email.value ? signin.password : signin.email).focus();
+  }
+
+  function showCodeStep(challenge) {
+    signin.challenge = challenge;
+    signin.form.hidden = true;
+    signin.codeForm.hidden = false;
+    showIn(signin.message, 'info', { text: 'Your password is right. This account also asks for a verification code.' });
+    signin.code.focus();
+  }
+
+  function showSignIn(kind, problem) {
+    for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
+    shell.root.hidden = true;
+    signin.root.hidden = false;
+    document.title = PRODUCT_TITLE;
+    showPasswordStep(kind, problem);
+  }
+
+  function startSession(answer, email) {
+    if (!answer.accessToken || !answer.refreshToken) {
+      showPasswordStep('error', { text: 'The server did not open a session for this account.' });
+      return;
+    }
+    state.session = { accessToken: answer.accessToken, refreshToken: answer.refreshToken, refreshing: null };
+    shell.account.textContent = (isRecord(answer.user) && answer.user.email) || email;
+    signin.root.hidden = true;
+    shell.root.hidden = false;
+    loadProjects();
+  }
+
+  async function submitPassword() {
+    const email = signin.email.value.trim();
+    const password = signin.password.value;
+    if (!email || !password) {
+      showIn(signin.message, 'error', { text: 'Enter your email address and your password.' });
+      (email ? signin.password : signin.email).focus();
+      return;
+    }
+    setBusy(signin.submit, true, 'Signing in…');
+    showIn(signin.message, '', null);
+    try {
+      const answer = await rpc('PasswordLogin', { email, password });
+      signin.password.value = '';
+      if (answer.totpRequired && answer.loginChallengeId) showCodeStep(answer.loginChallengeId);
+      else startSession(answer, email);
+    } catch (err) {
+      showPasswordStep('error', signInProblem(err));
+    }
+    setBusy(signin.submit, false);
+  }
+
+  async function submitCode() {
+    const code = signin.code.value.trim();
+    if (!code) {
+      showIn(signin.message, 'error', { text: 'Enter the verification code.' });
+      signin.code.focus();
+      return;
+    }
+    setBusy(signin.codeSubmit, true, 'Verifying…');
+    showIn(signin.message, '', null);
+    try {
+      const answer = await rpc('VerifyTotp', { loginChallengeId: signin.challenge, code });
+      startSession(answer, signin.email.value.trim());
+      signin.code.value = '';
+    } catch (err) {
+      // The server spends the sign-in's challenge on the first code it is
+      // shown, right or wrong, so the way on is the password again.
+      showPasswordStep('error', codeProblem(err));
+    }
+    setBusy(signin.codeSubmit, false);
+  }
+
+  function endSession(session, problem) {
+    if (state.session !== session) return;
+    state.session = null;
+    state.projects = null;
+    state.canCreateProject = false;
+    state.refusal = null;
+    state.saving = null;
+    state.records = new Map();
+    view.projectId = '';
+    view.page = '';
+    view.cards = [];
+    shell.account.textContent = '';
+    shell.main.replaceChildren();
+    shell.sidebar.replaceChildren();
+    showSignIn(problem ? 'warn' : '', problem);
+  }
+
+  async function signOut() {
+    const session = state.session;
+    if (!session) return;
+    if (anyUnsavedEdits()) {
+      const sure = await confirm({
+        title: 'Sign out with unsaved changes?',
+        text: 'Changes you have not saved will be lost.',
+        accept: 'Sign out',
+      });
+      if (!sure || state.session !== session) return;
+    }
+    const refreshToken = session.refreshToken;
+    // Whoever uses this browser next should not find the address waiting.
+    signin.email.value = '';
+    endSession(session, null);
+    try {
+      await rpc('Logout', { refreshToken });
+    } catch (err) {
+      if (!state.session) {
+        showIn(signin.message, 'warn', { text: 'You are signed out of this page, but the server could not be told. That session lasts until it expires on its own.' });
+      }
+    }
+  }
+
+  // ── Wiring ───────────────────────────────────────────────────────────
+
+  signin.lead.textContent = serverOptions.selfServiceProjects === true
+    ? 'Create projects and decide who can sign in to them.'
+    : 'Manage the projects you belong to.';
+
+  signin.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitPassword();
+  });
+  signin.codeForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitCode();
+  });
+  signin.codeBack.addEventListener('click', () => showPasswordStep('', null));
+
+  shell.signOut.addEventListener('click', signOut);
+  shell.skip.addEventListener('click', () => shell.main.focus());
+
+  projectDialog.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    createProject();
+  });
+  projectDialog.cancel.addEventListener('click', () => { if (!projectDialog.busy) projectDialog.root.close(); });
+  projectDialog.root.addEventListener('cancel', (event) => { if (projectDialog.busy) event.preventDefault(); });
+
+  confirmDialog.accept.addEventListener('click', () => confirmDialog.root.close(DIALOG_ACCEPTED));
+  confirmDialog.cancel.addEventListener('click', () => confirmDialog.root.close(''));
+
+  window.addEventListener('hashchange', () => render({ focus: true }));
+  window.addEventListener('beforeunload', (event) => {
+    if (!anyUnsavedEdits()) return;
+    event.preventDefault();
+    // Some browsers ask before leaving only when this is set.
+    event.returnValue = '';
+  });
+
+  showSignIn('', null);
+})();
+</script>
+</body>
+</html>

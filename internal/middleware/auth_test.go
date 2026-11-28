@@ -122,6 +122,36 @@ func TestAuthMiddleware_SCIMPaths(t *testing.T) {
 	}
 }
 
+// The console page is a document a browser loads before anyone has signed
+// in, so its path passes the JWT layer, and only its path: a sibling sharing
+// the prefix string is still enforced, and so are the RPCs the page calls,
+// which a signed-in console account makes with its own token.
+func TestAuthMiddleware_ConsolePaths(t *testing.T) {
+	kr := testSigner(t)
+	for path, exempt := range map[string]bool{
+		"/console":          true,
+		"/console/":         true,
+		"/console/anything": true,
+		"/consolex":         false,
+		"/identity.v1.IdentityService/CreateProject":         false,
+		"/identity.v1.IdentityService/ListMyProjects":        false,
+		"/identity.v1.IdentityService/GetProjectSettings":    false,
+		"/identity.v1.IdentityService/UpdateProjectSettings": false,
+	} {
+		t.Run(path, func(t *testing.T) {
+			var called bool
+			var userID string
+			handler := AuthMiddleware(kr, TokenTenants{}, "", false)(echoHandler(&called, &userID))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			assert.Equal(t, exempt, called, "reached the handler without a JWT")
+			if !exempt {
+				assert.Equal(t, http.StatusUnauthorized, rec.Code)
+			}
+		})
+	}
+}
+
 func TestAuthMiddleware_ExemptPath_NoToken_Passes(t *testing.T) {
 	kr := testSigner(t)
 	var called bool

@@ -619,6 +619,50 @@ func TestBuildRateLimits_TenantCreationLimited(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code, "CreateTenantInvitation must not share CreateTenant's budget")
 }
 
+// TestBuildRateLimits_ProjectCreationLimited asserts CreateProject is metered
+// per IP on its own budget: the per-account limit bounds what one account
+// owns, and this bounds one address making accounts to get around it.
+func TestBuildRateLimits_ProjectCreationLimited(t *testing.T) {
+	const (
+		create = "/identity.v1.IdentityService/CreateProject"
+		list   = "/identity.v1.IdentityService/ListMyProjects"
+	)
+	cfg := &config.Config{
+		RateLimitWindowSeconds: 60,
+		RateLimitSignupPerIP:   2,
+		RateLimitLoginPerIP:    5,
+		RateLimitResetPerIP:    5,
+		RateLimitVerifyPerIP:   20,
+
+		RateLimitPasswordlessPerIP: 5,
+		RateLimitPhonePerIP:        5,
+		RateLimitBootstrapPerIP:    5,
+	}
+	limits := buildRateLimits(cfg)
+	var tag string
+	for _, l := range limits {
+		if l.PathPrefix == create {
+			tag = l.Tag
+		}
+	}
+	require.Equal(t, "project_create", tag, "CreateProject must carry its own rate limit")
+
+	handler := middleware.RateLimitMiddleware(limits, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	assertQuotaExhausts(t, handler, create, "7.7.7.11", 2)
+
+	// The same address still reads its projects, and still creates a tenant:
+	// each creation spends a budget of its own.
+	for _, path := range []string{list, "/identity.v1.IdentityService/CreateTenant"} {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set(middleware.ClientIPHeader, "7.7.7.11")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code, "%s must not share CreateProject's budget", path)
+	}
+}
+
 // TestBuildRateLimits_TenantInvitationLimited asserts CreateTenantInvitation,
 // which sends an email per admitted call, is metered per IP on its own budget,
 // apart from CreateTenant's, and that a zero quota switches it off.

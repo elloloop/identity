@@ -52,6 +52,7 @@ The proto schema is also published to the [Buf Schema Registry](https://buf.buil
 - **JWT issuance** with key rotation, plus `/.well-known/jwks.json` for downstream services
 - **User and Group CRUD**, group membership data
 - **Audit log** of auth events
+- **Project console** (off by default): a project's owners sign in at `/console/` and configure it, without the operator's admin secret
 - **Email and phone verification** flows
 
 Identity authenticates users, issues JWTs, and assigns coarse roles

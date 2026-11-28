@@ -468,6 +468,33 @@
     "anchor": "server-and-ports"
   },
   {
+    "name": "GATEWAY_CONSOLE_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "serves the project console at /console/ and its RPCs: an account of the default project signs in and manages the projects it is a member of (ListMyProjects, GetProjectSettings, UpdateProjectSettings), without the admin secret (ADR-0022).",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT",
+    "type": "integer",
+    "default": "10",
+    "required": false,
+    "description": "caps how many projects one console account may own, from 0 to 100 (0 selects the default, 10); a creation past it is RESOURCE_EXHAUSTED.",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
+    "name": "GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED",
+    "type": "boolean",
+    "default": "false",
+    "required": false,
+    "description": "lets a console account create a project it owns (CreateProject).",
+    "category": "Other",
+    "anchor": "other"
+  },
+  {
     "name": "GATEWAY_COOKIE_DOMAIN",
     "type": "string",
     "default": "",

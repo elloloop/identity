@@ -64,6 +64,9 @@ that other products at the company depend on for:
 - Account-level role/status (admin/member/guest, active/locked/
   deactivated/suspended)
 - Audit of every state-changing identity event
+- A console where a project's own members configure it, signed in with an
+  account instead of the operator's admin secret
+  ([Project console](#project-console))
 
 It is **not**:
 
@@ -890,6 +893,45 @@ minute of the account's suspension, removal or reset; the refresh that
 follows checks the account's standing in its tenant and is refused. Calls
 that attach a credential or administer a tenant also read a managed caller's
 account and session from the store, never the session cache.
+
+## Project console
+
+A project's settings decide how its users authenticate, and the person who
+owns a project is often not the person who operates the server. The console
+([ADR-0022](./adr/0022-project-console-and-project-members.md)) is how that
+person manages their project without the admin secret, which reaches every
+project. It is off unless `GATEWAY_CONSOLE_ENABLED` is set, and postgres
+only.
+
+- **Console accounts are the default project's accounts.** The page at
+  `/console/` signs in with `Login`, so there is one sign-in system, and the
+  default project's access mode decides who can have a console account. The
+  console RPCs accept a token only on a request that resolved to the default
+  project, and only from an active person with a verified email: not an
+  agent, an anonymous account or a tenant-managed one.
+- **A project has members.** A `project_members` row (role `owner` or
+  `admin`) is what authorizes a console call on a project. A project the
+  caller does not belong to is refused exactly as one that does not exist.
+- **Creating a project** (`CreateProject`) is a second switch,
+  `GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED`, bounded per account by
+  `GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT`. The project comes with one
+  publishable credential and no access mode: it admits nobody until its
+  owner chooses one.
+- **Members edit an allow-listed part of the config**
+  (`GetProjectSettings`, `UpdateProjectSettings`): `access`, `age_gate`,
+  `anonymous`, `cors`, `guardian`, `jurisdictions`, `login`,
+  `recovery_emails`, `tenants`, and `accounts.email_signup` /
+  `accounts.username_signup`. The rest of `config_json` is the operator's:
+  `oauth` (secrets, hub sharing), `accounts.domain`, `branding`,
+  `email_delivery`, `phone`, `passkey`, `assurance`, `products`. The list
+  lives in `memberEditableSettings`; a section added to the config later is
+  closed to members until it is added there on purpose. While a project has
+  a product age guardrail, `age_gate` and `jurisdictions`, which it is built
+  on, are the operator's too. Settings are read and stored through the
+  config parser, so a member sees, and writes, exactly what is enforced.
+- **The operator's path is unchanged.** `AdminCreateProject`,
+  `UpsertProjectConfig` and the other admin-secret RPCs work as before, on
+  every project, console-created ones included.
 
 ## Recovery emails
 

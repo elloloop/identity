@@ -191,6 +191,10 @@ const (
 	IdentityService_DeleteLoginPolicy_FullMethodName                      = "/identity.v1.IdentityService/DeleteLoginPolicy"
 	IdentityService_UpsertProjectConfig_FullMethodName                    = "/identity.v1.IdentityService/UpsertProjectConfig"
 	IdentityService_GetProjectConfig_FullMethodName                       = "/identity.v1.IdentityService/GetProjectConfig"
+	IdentityService_CreateProject_FullMethodName                          = "/identity.v1.IdentityService/CreateProject"
+	IdentityService_ListMyProjects_FullMethodName                         = "/identity.v1.IdentityService/ListMyProjects"
+	IdentityService_GetProjectSettings_FullMethodName                     = "/identity.v1.IdentityService/GetProjectSettings"
+	IdentityService_UpdateProjectSettings_FullMethodName                  = "/identity.v1.IdentityService/UpdateProjectSettings"
 	IdentityService_AdminSetProjectOAuthProvider_FullMethodName           = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
 	IdentityService_SignInAnonymously_FullMethodName                      = "/identity.v1.IdentityService/SignInAnonymously"
 	IdentityService_UpgradeAnonymousAccount_FullMethodName                = "/identity.v1.IdentityService/UpgradeAnonymousAccount"
@@ -988,6 +992,43 @@ type IdentityServiceClient interface {
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertProjectConfig(ctx context.Context, in *UpsertProjectConfigRequest, opts ...grpc.CallOption) (*UpsertProjectConfigResponse, error)
 	GetProjectConfig(ctx context.Context, in *GetProjectConfigRequest, opts ...grpc.CallOption) (*GetProjectConfigResponse, error)
+	// Project console (ADR-0022). The people who own a project manage it with
+	// these four RPCs. The caller is an account of the deployment's own
+	// (default) project: the Authorization header carries its access token, the
+	// request must resolve to that project, and no admin secret is involved.
+	// Served only while GATEWAY_CONSOLE_ENABLED is on, and only on the postgres
+	// control-plane driver: UNIMPLEMENTED otherwise. Every one of them answers
+	// UNAUTHENTICATED with no session, and PERMISSION_DENIED for a token of
+	// another project, for an account that is not an active person (an agent,
+	// an anonymous or managed account, one that is deactivated), and for a
+	// session a recovery hold binds; FAILED_PRECONDITION (email verification
+	// required) until the caller has verified their email.
+	//
+	// CreateProject creates a project the caller owns, with one publishable
+	// credential, and records project_created. The project starts with no
+	// access mode, so nobody can sign up or sign in to it until its owner sets
+	// one with UpdateProjectSettings. FAILED_PRECONDITION unless
+	// GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED is on; RESOURCE_EXHAUSTED
+	// once the caller owns GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT projects,
+	// or past the per-address budget GATEWAY_RATE_LIMIT_SIGNUP_PER_IP sizes;
+	// INVALID_ARGUMENT for a blank or over-long name. There is no idempotency
+	// key: a retry after a lost response may create a second project, which the
+	// limit bounds and ListMyProjects shows.
+	CreateProject(ctx context.Context, in *CreateProjectRequest, opts ...grpc.CallOption) (*CreateProjectResponse, error)
+	// ListMyProjects lists the active projects the caller is a member of.
+	ListMyProjects(ctx context.Context, in *ListMyProjectsRequest, opts ...grpc.CallOption) (*ListMyProjectsResponse, error)
+	// GetProjectSettings reads the member-editable part of a project's config.
+	// PERMISSION_DENIED for a project the caller is not a member of, an unknown
+	// or suspended one included, so the call reveals nothing about projects the
+	// caller does not belong to; INVALID_ARGUMENT for a blank project_id.
+	GetProjectSettings(ctx context.Context, in *GetProjectSettingsRequest, opts ...grpc.CallOption) (*GetProjectSettingsResponse, error)
+	// UpdateProjectSettings changes the member-editable part of a project's
+	// config and records project_settings_updated with the sections changed.
+	// Refused as GetProjectSettings is; INVALID_ARGUMENT and ABORTED as
+	// UpdateProjectSettingsRequest describes; FAILED_PRECONDITION when the
+	// write names accounts and the stored config spells that section more
+	// than one way, which the project's operator corrects.
+	UpdateProjectSettings(ctx context.Context, in *UpdateProjectSettingsRequest, opts ...grpc.CallOption) (*UpdateProjectSettingsResponse, error)
 	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
 	// sets/rotates one provider (encrypting any plaintext secret server-side and
 	// merging it into config_json without disturbing other keys);
@@ -2818,6 +2859,46 @@ func (c *identityServiceClient) GetProjectConfig(ctx context.Context, in *GetPro
 	return out, nil
 }
 
+func (c *identityServiceClient) CreateProject(ctx context.Context, in *CreateProjectRequest, opts ...grpc.CallOption) (*CreateProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateProjectResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) ListMyProjects(ctx context.Context, in *ListMyProjectsRequest, opts ...grpc.CallOption) (*ListMyProjectsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMyProjectsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_ListMyProjects_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) GetProjectSettings(ctx context.Context, in *GetProjectSettingsRequest, opts ...grpc.CallOption) (*GetProjectSettingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProjectSettingsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_GetProjectSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) UpdateProjectSettings(ctx context.Context, in *UpdateProjectSettingsRequest, opts ...grpc.CallOption) (*UpdateProjectSettingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateProjectSettingsResponse)
+	err := c.cc.Invoke(ctx, IdentityService_UpdateProjectSettings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *identityServiceClient) AdminSetProjectOAuthProvider(ctx context.Context, in *AdminSetProjectOAuthProviderRequest, opts ...grpc.CallOption) (*AdminSetProjectOAuthProviderResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminSetProjectOAuthProviderResponse)
@@ -3775,6 +3856,43 @@ type IdentityServiceServer interface {
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertProjectConfig(context.Context, *UpsertProjectConfigRequest) (*UpsertProjectConfigResponse, error)
 	GetProjectConfig(context.Context, *GetProjectConfigRequest) (*GetProjectConfigResponse, error)
+	// Project console (ADR-0022). The people who own a project manage it with
+	// these four RPCs. The caller is an account of the deployment's own
+	// (default) project: the Authorization header carries its access token, the
+	// request must resolve to that project, and no admin secret is involved.
+	// Served only while GATEWAY_CONSOLE_ENABLED is on, and only on the postgres
+	// control-plane driver: UNIMPLEMENTED otherwise. Every one of them answers
+	// UNAUTHENTICATED with no session, and PERMISSION_DENIED for a token of
+	// another project, for an account that is not an active person (an agent,
+	// an anonymous or managed account, one that is deactivated), and for a
+	// session a recovery hold binds; FAILED_PRECONDITION (email verification
+	// required) until the caller has verified their email.
+	//
+	// CreateProject creates a project the caller owns, with one publishable
+	// credential, and records project_created. The project starts with no
+	// access mode, so nobody can sign up or sign in to it until its owner sets
+	// one with UpdateProjectSettings. FAILED_PRECONDITION unless
+	// GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED is on; RESOURCE_EXHAUSTED
+	// once the caller owns GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT projects,
+	// or past the per-address budget GATEWAY_RATE_LIMIT_SIGNUP_PER_IP sizes;
+	// INVALID_ARGUMENT for a blank or over-long name. There is no idempotency
+	// key: a retry after a lost response may create a second project, which the
+	// limit bounds and ListMyProjects shows.
+	CreateProject(context.Context, *CreateProjectRequest) (*CreateProjectResponse, error)
+	// ListMyProjects lists the active projects the caller is a member of.
+	ListMyProjects(context.Context, *ListMyProjectsRequest) (*ListMyProjectsResponse, error)
+	// GetProjectSettings reads the member-editable part of a project's config.
+	// PERMISSION_DENIED for a project the caller is not a member of, an unknown
+	// or suspended one included, so the call reveals nothing about projects the
+	// caller does not belong to; INVALID_ARGUMENT for a blank project_id.
+	GetProjectSettings(context.Context, *GetProjectSettingsRequest) (*GetProjectSettingsResponse, error)
+	// UpdateProjectSettings changes the member-editable part of a project's
+	// config and records project_settings_updated with the sections changed.
+	// Refused as GetProjectSettings is; INVALID_ARGUMENT and ABORTED as
+	// UpdateProjectSettingsRequest describes; FAILED_PRECONDITION when the
+	// write names accounts and the stored config spells that section more
+	// than one way, which the project's operator corrects.
+	UpdateProjectSettings(context.Context, *UpdateProjectSettingsRequest) (*UpdateProjectSettingsResponse, error)
 	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
 	// sets/rotates one provider (encrypting any plaintext secret server-side and
 	// merging it into config_json without disturbing other keys);
@@ -4400,6 +4518,18 @@ func (UnimplementedIdentityServiceServer) UpsertProjectConfig(context.Context, *
 }
 func (UnimplementedIdentityServiceServer) GetProjectConfig(context.Context, *GetProjectConfigRequest) (*GetProjectConfigResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetProjectConfig not implemented")
+}
+func (UnimplementedIdentityServiceServer) CreateProject(context.Context, *CreateProjectRequest) (*CreateProjectResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateProject not implemented")
+}
+func (UnimplementedIdentityServiceServer) ListMyProjects(context.Context, *ListMyProjectsRequest) (*ListMyProjectsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListMyProjects not implemented")
+}
+func (UnimplementedIdentityServiceServer) GetProjectSettings(context.Context, *GetProjectSettingsRequest) (*GetProjectSettingsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetProjectSettings not implemented")
+}
+func (UnimplementedIdentityServiceServer) UpdateProjectSettings(context.Context, *UpdateProjectSettingsRequest) (*UpdateProjectSettingsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateProjectSettings not implemented")
 }
 func (UnimplementedIdentityServiceServer) AdminSetProjectOAuthProvider(context.Context, *AdminSetProjectOAuthProviderRequest) (*AdminSetProjectOAuthProviderResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminSetProjectOAuthProvider not implemented")
@@ -7572,6 +7702,78 @@ func _IdentityService_GetProjectConfig_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _IdentityService_CreateProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateProject(ctx, req.(*CreateProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_ListMyProjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMyProjectsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).ListMyProjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_ListMyProjects_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).ListMyProjects(ctx, req.(*ListMyProjectsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_GetProjectSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProjectSettingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).GetProjectSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_GetProjectSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).GetProjectSettings(ctx, req.(*GetProjectSettingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_UpdateProjectSettings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateProjectSettingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).UpdateProjectSettings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_UpdateProjectSettings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).UpdateProjectSettings(ctx, req.(*UpdateProjectSettingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _IdentityService_AdminSetProjectOAuthProvider_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminSetProjectOAuthProviderRequest)
 	if err := dec(in); err != nil {
@@ -8590,6 +8792,22 @@ var IdentityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetProjectConfig",
 			Handler:    _IdentityService_GetProjectConfig_Handler,
+		},
+		{
+			MethodName: "CreateProject",
+			Handler:    _IdentityService_CreateProject_Handler,
+		},
+		{
+			MethodName: "ListMyProjects",
+			Handler:    _IdentityService_ListMyProjects_Handler,
+		},
+		{
+			MethodName: "GetProjectSettings",
+			Handler:    _IdentityService_GetProjectSettings_Handler,
+		},
+		{
+			MethodName: "UpdateProjectSettings",
+			Handler:    _IdentityService_UpdateProjectSettings_Handler,
 		},
 		{
 			MethodName: "AdminSetProjectOAuthProvider",
