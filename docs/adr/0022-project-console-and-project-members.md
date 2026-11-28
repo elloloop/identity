@@ -157,6 +157,15 @@ server serves, with their own account and no admin secret.
   replaces the stored one, so during a rollout that adds a field to an
   editable section, a member saving that section through a replica on the
   old version clears the new field.
+- `cors` is a member's, so a member chooses which browser origins their
+  project answers with credentials allowed. That is theirs to get wrong for
+  their own project, as its access mode is. It does not reach another
+  project: a project's origins are added only for a request that resolved
+  to that project, and a preflight carries no project key, so it resolves by
+  Host. On a host several projects share, a project's own list therefore
+  admits nothing a preflight is needed for, which every call carrying a
+  token or a project key is; it takes effect on the project's own auth
+  domain.
 - Nothing floors the age thresholds of a project that has no product
   guardrail: its members may set `jurisdictions` below the deployment's
   `GATEWAY_AGEGATE_*` pair. An operator who adds a guardrail to a project
