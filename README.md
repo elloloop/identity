@@ -7,6 +7,7 @@ Authentication and user-management service. Deploys as a single container; pulls
 Full docs, including guides and API reference, are published at
 **[elloloop.github.io/identity](https://elloloop.github.io/identity)**:
 
+- [Architecture board](https://elloloop.github.io/identity/architecture/identity.svg) · [editable Excalidraw file](./docs-site/public/architecture/identity.excalidraw). Follow a chapter to a use case, its RPC methods and the implementation.
 - [Introduction](https://elloloop.github.io/identity/docs/introduction) / [Quickstart](https://elloloop.github.io/identity/docs/quickstart)
 - [Proto reference](https://elloloop.github.io/identity/docs/api-reference/proto) — generated from [`proto/identity/v1/identity.proto`](./proto/identity/v1/identity.proto)
 - [gRPC reference](https://elloloop.github.io/identity/docs/api-reference/grpc)
