@@ -551,6 +551,18 @@ const (
 	// IdentityServiceGetProjectConfigProcedure is the fully-qualified name of the IdentityService's
 	// GetProjectConfig RPC.
 	IdentityServiceGetProjectConfigProcedure = "/identity.v1.IdentityService/GetProjectConfig"
+	// IdentityServiceCreateProjectProcedure is the fully-qualified name of the IdentityService's
+	// CreateProject RPC.
+	IdentityServiceCreateProjectProcedure = "/identity.v1.IdentityService/CreateProject"
+	// IdentityServiceListMyProjectsProcedure is the fully-qualified name of the IdentityService's
+	// ListMyProjects RPC.
+	IdentityServiceListMyProjectsProcedure = "/identity.v1.IdentityService/ListMyProjects"
+	// IdentityServiceGetProjectSettingsProcedure is the fully-qualified name of the IdentityService's
+	// GetProjectSettings RPC.
+	IdentityServiceGetProjectSettingsProcedure = "/identity.v1.IdentityService/GetProjectSettings"
+	// IdentityServiceUpdateProjectSettingsProcedure is the fully-qualified name of the
+	// IdentityService's UpdateProjectSettings RPC.
+	IdentityServiceUpdateProjectSettingsProcedure = "/identity.v1.IdentityService/UpdateProjectSettings"
 	// IdentityServiceAdminSetProjectOAuthProviderProcedure is the fully-qualified name of the
 	// IdentityService's AdminSetProjectOAuthProvider RPC.
 	IdentityServiceAdminSetProjectOAuthProviderProcedure = "/identity.v1.IdentityService/AdminSetProjectOAuthProvider"
@@ -1391,6 +1403,40 @@ type IdentityServiceClient interface {
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error)
 	GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error)
+	// Project console (ADR-0022). The people who own a project manage it with
+	// these four RPCs. The caller is an account of the deployment's own
+	// (default) project: the Authorization header carries its access token, the
+	// request must resolve to that project, and no admin secret is involved.
+	// Served only while GATEWAY_CONSOLE_ENABLED is on, and only on the postgres
+	// control-plane driver: UNIMPLEMENTED otherwise. Every one of them answers
+	// UNAUTHENTICATED with no session, and PERMISSION_DENIED for a token of
+	// another project, for an account that is not an active person (an agent,
+	// an anonymous or managed account, one that is deactivated), and for a
+	// session a recovery hold binds; FAILED_PRECONDITION (email verification
+	// required) until the caller has verified their email.
+	//
+	// CreateProject creates a project the caller owns, with one publishable
+	// credential, and records project_created. The project starts with no
+	// access mode, so nobody can sign up or sign in to it until its owner sets
+	// one with UpdateProjectSettings. FAILED_PRECONDITION unless
+	// GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED is on; RESOURCE_EXHAUSTED
+	// once the caller owns GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT projects;
+	// INVALID_ARGUMENT for a blank or over-long name. There is no idempotency
+	// key: a retry after a lost response may create a second project, which the
+	// limit bounds and ListMyProjects shows.
+	CreateProject(context.Context, *connect.Request[v1.CreateProjectRequest]) (*connect.Response[v1.CreateProjectResponse], error)
+	// ListMyProjects lists the active projects the caller is a member of.
+	ListMyProjects(context.Context, *connect.Request[v1.ListMyProjectsRequest]) (*connect.Response[v1.ListMyProjectsResponse], error)
+	// GetProjectSettings reads the member-editable part of a project's config.
+	// PERMISSION_DENIED for a project the caller is not a member of, an unknown
+	// or suspended one included, so the call reveals nothing about projects the
+	// caller does not belong to; INVALID_ARGUMENT for a blank project_id.
+	GetProjectSettings(context.Context, *connect.Request[v1.GetProjectSettingsRequest]) (*connect.Response[v1.GetProjectSettingsResponse], error)
+	// UpdateProjectSettings changes the member-editable part of a project's
+	// config and records project_settings_updated with the sections changed.
+	// Refused as GetProjectSettings is; INVALID_ARGUMENT and ABORTED as
+	// UpdateProjectSettingsRequest describes.
+	UpdateProjectSettings(context.Context, *connect.Request[v1.UpdateProjectSettingsRequest]) (*connect.Response[v1.UpdateProjectSettingsResponse], error)
 	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
 	// sets/rotates one provider (encrypting any plaintext secret server-side and
 	// merging it into config_json without disturbing other keys);
@@ -2536,6 +2582,30 @@ func NewIdentityServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(identityServiceMethods.ByName("GetProjectConfig")),
 			connect.WithClientOptions(opts...),
 		),
+		createProject: connect.NewClient[v1.CreateProjectRequest, v1.CreateProjectResponse](
+			httpClient,
+			baseURL+IdentityServiceCreateProjectProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("CreateProject")),
+			connect.WithClientOptions(opts...),
+		),
+		listMyProjects: connect.NewClient[v1.ListMyProjectsRequest, v1.ListMyProjectsResponse](
+			httpClient,
+			baseURL+IdentityServiceListMyProjectsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("ListMyProjects")),
+			connect.WithClientOptions(opts...),
+		),
+		getProjectSettings: connect.NewClient[v1.GetProjectSettingsRequest, v1.GetProjectSettingsResponse](
+			httpClient,
+			baseURL+IdentityServiceGetProjectSettingsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("GetProjectSettings")),
+			connect.WithClientOptions(opts...),
+		),
+		updateProjectSettings: connect.NewClient[v1.UpdateProjectSettingsRequest, v1.UpdateProjectSettingsResponse](
+			httpClient,
+			baseURL+IdentityServiceUpdateProjectSettingsProcedure,
+			connect.WithSchema(identityServiceMethods.ByName("UpdateProjectSettings")),
+			connect.WithClientOptions(opts...),
+		),
 		adminSetProjectOAuthProvider: connect.NewClient[v1.AdminSetProjectOAuthProviderRequest, v1.AdminSetProjectOAuthProviderResponse](
 			httpClient,
 			baseURL+IdentityServiceAdminSetProjectOAuthProviderProcedure,
@@ -2822,6 +2892,10 @@ type identityServiceClient struct {
 	deleteLoginPolicy                      *connect.Client[v1.DeleteLoginPolicyRequest, v1.DeleteLoginPolicyResponse]
 	upsertProjectConfig                    *connect.Client[v1.UpsertProjectConfigRequest, v1.UpsertProjectConfigResponse]
 	getProjectConfig                       *connect.Client[v1.GetProjectConfigRequest, v1.GetProjectConfigResponse]
+	createProject                          *connect.Client[v1.CreateProjectRequest, v1.CreateProjectResponse]
+	listMyProjects                         *connect.Client[v1.ListMyProjectsRequest, v1.ListMyProjectsResponse]
+	getProjectSettings                     *connect.Client[v1.GetProjectSettingsRequest, v1.GetProjectSettingsResponse]
+	updateProjectSettings                  *connect.Client[v1.UpdateProjectSettingsRequest, v1.UpdateProjectSettingsResponse]
 	adminSetProjectOAuthProvider           *connect.Client[v1.AdminSetProjectOAuthProviderRequest, v1.AdminSetProjectOAuthProviderResponse]
 	signInAnonymously                      *connect.Client[v1.SignInAnonymouslyRequest, v1.SignInAnonymouslyResponse]
 	upgradeAnonymousAccount                *connect.Client[v1.UpgradeAnonymousAccountRequest, v1.UpgradeAnonymousAccountResponse]
@@ -3702,6 +3776,26 @@ func (c *identityServiceClient) GetProjectConfig(ctx context.Context, req *conne
 	return c.getProjectConfig.CallUnary(ctx, req)
 }
 
+// CreateProject calls identity.v1.IdentityService.CreateProject.
+func (c *identityServiceClient) CreateProject(ctx context.Context, req *connect.Request[v1.CreateProjectRequest]) (*connect.Response[v1.CreateProjectResponse], error) {
+	return c.createProject.CallUnary(ctx, req)
+}
+
+// ListMyProjects calls identity.v1.IdentityService.ListMyProjects.
+func (c *identityServiceClient) ListMyProjects(ctx context.Context, req *connect.Request[v1.ListMyProjectsRequest]) (*connect.Response[v1.ListMyProjectsResponse], error) {
+	return c.listMyProjects.CallUnary(ctx, req)
+}
+
+// GetProjectSettings calls identity.v1.IdentityService.GetProjectSettings.
+func (c *identityServiceClient) GetProjectSettings(ctx context.Context, req *connect.Request[v1.GetProjectSettingsRequest]) (*connect.Response[v1.GetProjectSettingsResponse], error) {
+	return c.getProjectSettings.CallUnary(ctx, req)
+}
+
+// UpdateProjectSettings calls identity.v1.IdentityService.UpdateProjectSettings.
+func (c *identityServiceClient) UpdateProjectSettings(ctx context.Context, req *connect.Request[v1.UpdateProjectSettingsRequest]) (*connect.Response[v1.UpdateProjectSettingsResponse], error) {
+	return c.updateProjectSettings.CallUnary(ctx, req)
+}
+
 // AdminSetProjectOAuthProvider calls identity.v1.IdentityService.AdminSetProjectOAuthProvider.
 func (c *identityServiceClient) AdminSetProjectOAuthProvider(ctx context.Context, req *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error) {
 	return c.adminSetProjectOAuthProvider.CallUnary(ctx, req)
@@ -4571,6 +4665,40 @@ type IdentityServiceHandler interface {
 	// Admin* RPCs, and UNIMPLEMENTED on a build with no control plane.
 	UpsertProjectConfig(context.Context, *connect.Request[v1.UpsertProjectConfigRequest]) (*connect.Response[v1.UpsertProjectConfigResponse], error)
 	GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error)
+	// Project console (ADR-0022). The people who own a project manage it with
+	// these four RPCs. The caller is an account of the deployment's own
+	// (default) project: the Authorization header carries its access token, the
+	// request must resolve to that project, and no admin secret is involved.
+	// Served only while GATEWAY_CONSOLE_ENABLED is on, and only on the postgres
+	// control-plane driver: UNIMPLEMENTED otherwise. Every one of them answers
+	// UNAUTHENTICATED with no session, and PERMISSION_DENIED for a token of
+	// another project, for an account that is not an active person (an agent,
+	// an anonymous or managed account, one that is deactivated), and for a
+	// session a recovery hold binds; FAILED_PRECONDITION (email verification
+	// required) until the caller has verified their email.
+	//
+	// CreateProject creates a project the caller owns, with one publishable
+	// credential, and records project_created. The project starts with no
+	// access mode, so nobody can sign up or sign in to it until its owner sets
+	// one with UpdateProjectSettings. FAILED_PRECONDITION unless
+	// GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED is on; RESOURCE_EXHAUSTED
+	// once the caller owns GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT projects;
+	// INVALID_ARGUMENT for a blank or over-long name. There is no idempotency
+	// key: a retry after a lost response may create a second project, which the
+	// limit bounds and ListMyProjects shows.
+	CreateProject(context.Context, *connect.Request[v1.CreateProjectRequest]) (*connect.Response[v1.CreateProjectResponse], error)
+	// ListMyProjects lists the active projects the caller is a member of.
+	ListMyProjects(context.Context, *connect.Request[v1.ListMyProjectsRequest]) (*connect.Response[v1.ListMyProjectsResponse], error)
+	// GetProjectSettings reads the member-editable part of a project's config.
+	// PERMISSION_DENIED for a project the caller is not a member of, an unknown
+	// or suspended one included, so the call reveals nothing about projects the
+	// caller does not belong to; INVALID_ARGUMENT for a blank project_id.
+	GetProjectSettings(context.Context, *connect.Request[v1.GetProjectSettingsRequest]) (*connect.Response[v1.GetProjectSettingsResponse], error)
+	// UpdateProjectSettings changes the member-editable part of a project's
+	// config and records project_settings_updated with the sections changed.
+	// Refused as GetProjectSettings is; INVALID_ARGUMENT and ABORTED as
+	// UpdateProjectSettingsRequest describes.
+	UpdateProjectSettings(context.Context, *connect.Request[v1.UpdateProjectSettingsRequest]) (*connect.Response[v1.UpdateProjectSettingsResponse], error)
 	// Per-project OAuth provider authoring. AdminSetProjectOAuthProvider
 	// sets/rotates one provider (encrypting any plaintext secret server-side and
 	// merging it into config_json without disturbing other keys);
@@ -5712,6 +5840,30 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 		connect.WithSchema(identityServiceMethods.ByName("GetProjectConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
+	identityServiceCreateProjectHandler := connect.NewUnaryHandler(
+		IdentityServiceCreateProjectProcedure,
+		svc.CreateProject,
+		connect.WithSchema(identityServiceMethods.ByName("CreateProject")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceListMyProjectsHandler := connect.NewUnaryHandler(
+		IdentityServiceListMyProjectsProcedure,
+		svc.ListMyProjects,
+		connect.WithSchema(identityServiceMethods.ByName("ListMyProjects")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceGetProjectSettingsHandler := connect.NewUnaryHandler(
+		IdentityServiceGetProjectSettingsProcedure,
+		svc.GetProjectSettings,
+		connect.WithSchema(identityServiceMethods.ByName("GetProjectSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	identityServiceUpdateProjectSettingsHandler := connect.NewUnaryHandler(
+		IdentityServiceUpdateProjectSettingsProcedure,
+		svc.UpdateProjectSettings,
+		connect.WithSchema(identityServiceMethods.ByName("UpdateProjectSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
 	identityServiceAdminSetProjectOAuthProviderHandler := connect.NewUnaryHandler(
 		IdentityServiceAdminSetProjectOAuthProviderProcedure,
 		svc.AdminSetProjectOAuthProvider,
@@ -6167,6 +6319,14 @@ func NewIdentityServiceHandler(svc IdentityServiceHandler, opts ...connect.Handl
 			identityServiceUpsertProjectConfigHandler.ServeHTTP(w, r)
 		case IdentityServiceGetProjectConfigProcedure:
 			identityServiceGetProjectConfigHandler.ServeHTTP(w, r)
+		case IdentityServiceCreateProjectProcedure:
+			identityServiceCreateProjectHandler.ServeHTTP(w, r)
+		case IdentityServiceListMyProjectsProcedure:
+			identityServiceListMyProjectsHandler.ServeHTTP(w, r)
+		case IdentityServiceGetProjectSettingsProcedure:
+			identityServiceGetProjectSettingsHandler.ServeHTTP(w, r)
+		case IdentityServiceUpdateProjectSettingsProcedure:
+			identityServiceUpdateProjectSettingsHandler.ServeHTTP(w, r)
 		case IdentityServiceAdminSetProjectOAuthProviderProcedure:
 			identityServiceAdminSetProjectOAuthProviderHandler.ServeHTTP(w, r)
 		case IdentityServiceSignInAnonymouslyProcedure:
@@ -6898,6 +7058,22 @@ func (UnimplementedIdentityServiceHandler) UpsertProjectConfig(context.Context, 
 
 func (UnimplementedIdentityServiceHandler) GetProjectConfig(context.Context, *connect.Request[v1.GetProjectConfigRequest]) (*connect.Response[v1.GetProjectConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetProjectConfig is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) CreateProject(context.Context, *connect.Request[v1.CreateProjectRequest]) (*connect.Response[v1.CreateProjectResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.CreateProject is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) ListMyProjects(context.Context, *connect.Request[v1.ListMyProjectsRequest]) (*connect.Response[v1.ListMyProjectsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.ListMyProjects is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) GetProjectSettings(context.Context, *connect.Request[v1.GetProjectSettingsRequest]) (*connect.Response[v1.GetProjectSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.GetProjectSettings is not implemented"))
+}
+
+func (UnimplementedIdentityServiceHandler) UpdateProjectSettings(context.Context, *connect.Request[v1.UpdateProjectSettingsRequest]) (*connect.Response[v1.UpdateProjectSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("identity.v1.IdentityService.UpdateProjectSettings is not implemented"))
 }
 
 func (UnimplementedIdentityServiceHandler) AdminSetProjectOAuthProvider(context.Context, *connect.Request[v1.AdminSetProjectOAuthProviderRequest]) (*connect.Response[v1.AdminSetProjectOAuthProviderResponse], error) {

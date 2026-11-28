@@ -1,5 +1,56 @@
 # Upgrade guide
 
+## Next — project console: a project's own members manage it, signed in with an account (migration `0071_add_project_members`, schema 71; additive RPCs `CreateProject`, `ListMyProjects`, `GetProjectSettings`, `UpdateProjectSettings`; audit events `project_created`, `project_settings_updated`; `GATEWAY_CONSOLE_ENABLED`, `GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED`, `GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT` (all off by default); a page at `/console/`; `ProjectMemberStore`, `ProjectConsoleService` (Go API))
+
+Nothing changes until `GATEWAY_CONSOLE_ENABLED` is set. See
+[ADR-0022](./adr/0022-project-console-and-project-members.md).
+
+- **What it is.** With `GATEWAY_CONSOLE_ENABLED=true` (postgres only; any
+  other driver refuses to boot) the server serves a page at `/console/`
+  where an account of the **default project** signs in and manages the
+  projects it is a member of. The operator's admin secret is not involved
+  and its RPCs are unchanged.
+- **Creating projects.** `GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED=true`
+  lets a console account create a project it owns (`CreateProject`), up to
+  `GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT` (0 to 100; 0 selects the
+  default, 10). It needs `GATEWAY_CONSOLE_ENABLED`. A project made this way
+  has one publishable credential and **no access mode, so nobody can sign up
+  or sign in to it until its owner chooses one** in the console.
+- **Who can reach it.** Console accounts are the default project's accounts,
+  so `GATEWAY_DEFAULT_PROJECT_ACCESS_MODE` decides who can have one. With
+  that mode `open` and self-service projects on, anyone can create a
+  project. A caller must be an active person with a verified email; an
+  agent, an anonymous account and a tenant-managed account are refused.
+- **What a member can change.** Only these sections of a project's
+  `config_json`: `access`, `age_gate`, `anonymous`, `cors`, `guardian`,
+  `jurisdictions`, `login`, `recovery_emails`, `tenants`, and in `accounts`
+  the fields `email_signup` and `username_signup`. Everything else (`oauth`,
+  `accounts.domain`, `branding`, `email_delivery`, `phone`, `passkey`,
+  `assurance`, `products`) stays the operator's and is neither shown to nor
+  writable by a member. A member's write passes the same validation as
+  `UpsertProjectConfig`.
+- **Existing projects.** A project an operator created has no members, so
+  nobody sees it in the console. There is no RPC yet to add a member to one;
+  until there is, an operator who wants a project in someone's console adds
+  the row (`user_id` is the id of an account of the default project):
+
+  ```sql
+  INSERT INTO project_members (project_id, user_id, role, created_at_ms)
+  VALUES ('<project id>', '<account id>', 'owner', (extract(epoch FROM now()) * 1000)::bigint);
+  ```
+- **Deleting an account** deletes its memberships. A project whose only
+  owner is deleted keeps running and is the operator's to manage.
+
+### Migration
+
+`0071_add_project_members` creates `project_members` with foreign keys to
+`projects` and `users`. Creating them takes SHARE ROW EXCLUSIVE on both
+tables for the length of the catalog change, blocking writes, not reads;
+`lock_timeout` bounds the wait at 10 seconds. On a timeout the migration
+rolls back and leaves version 71 dirty: run `identity migrate force 70`, then
+`identity migrate` again. Rolling back drops the memberships and keeps the
+projects.
+
 ## Next — managed-account polish: a deactivated agent comes back only behind an owner in standing; the managed token ceiling always holds; `owners_notice_due`; `identity_managed_help_limited_total`; an unread standing is `UNAVAILABLE` (no migration; an audit detail and a log field renamed; one metric; one stricter start-up check)
 
 - **`ReactivateAgent` needs the owner's standing.** An agent whose owner is a

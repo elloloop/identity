@@ -1,0 +1,154 @@
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { Code } from "astro-expressive-code/components";
+---
+
+<DocsLayout title="Project console">
+  <h1>Project console</h1>
+  <p>
+    The console is a page the server serves at <code>/console/</code> where
+    the people who own a project manage it with their own account. They do
+    not need the operator's admin secret, which reaches every project on the
+    server. A project's settings decide who can sign in to it, so this is
+    where its owner chooses whether it has open sign-up, tenants, individual
+    accounts, child accounts and so on.
+  </p>
+
+  <h2 id="turning-it-on">Turning it on</h2>
+  <p>The console is off by default and needs the postgres driver.</p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Console settings">
+  <table>
+    <thead>
+      <tr><th scope="col">Variable</th><th scope="col">Default</th><th scope="col">Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>GATEWAY_CONSOLE_ENABLED</code></td>
+        <td><code>false</code></td>
+        <td>Serves the page and its RPCs.</td>
+      </tr>
+      <tr>
+        <td><code>GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED</code></td>
+        <td><code>false</code></td>
+        <td>Lets a console account create a project it owns. Needs the console.</td>
+      </tr>
+      <tr>
+        <td><code>GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT</code></td>
+        <td><code>10</code></td>
+        <td>How many projects one account may own, up to 100.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="accounts">Who signs in</h2>
+  <p>
+    A console account is an ordinary account of the server's own (default)
+    project. It signs in the way any account of that project does, so
+    lockout, two-step verification and session revocation all apply, and
+    <code>GATEWAY_DEFAULT_PROJECT_ACCESS_MODE</code> decides who can have
+    one. With that mode <code>open</code> and self-service projects on,
+    anyone can create a project.
+  </p>
+  <p>
+    The console admits an active person whose email is verified. An agent, an
+    anonymous account and an account a tenant manages are refused, and so is
+    a token of any other project: a customer of a project is not one of its
+    administrators.
+  </p>
+
+  <h2 id="projects">Projects and members</h2>
+  <p>
+    A project has members, each an <code>owner</code> or an <code>admin</code>;
+    both may change its settings. The account that creates a project owns it.
+    A project the caller is not a member of is refused exactly as one that
+    does not exist.
+  </p>
+  <p>
+    A new project comes with one publishable key, which an application sends
+    in the <code>X-Project-Key</code> header to select it, and with
+    <strong>no access mode: nobody can sign up or sign in until its owner
+    chooses one.</strong>
+  </p>
+  <p>
+    A project the operator created with <code>AdminCreateProject</code> has
+    no members and appears in nobody's console. Until there is a call for
+    it, the operator adds the row (<code>user_id</code> is an account of the
+    default project):
+  </p>
+  <Code lang="sql" code={`INSERT INTO project_members (project_id, user_id, role, created_at_ms)
+VALUES ('<project id>', '<account id>', 'owner', (extract(epoch FROM now()) * 1000)::bigint);`} />
+
+  <h2 id="settings">What a member can change</h2>
+  <p>
+    Members read and write an allow-listed part of the project's
+    <code>config_json</code>. Everything else stays the operator's and is
+    neither shown to a member nor writable by one.
+  </p>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Member-editable settings">
+  <table>
+    <thead>
+      <tr><th scope="col">Members</th><th scope="col">Operator only</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>
+          <code>access</code>, <code>anonymous</code>, <code>login</code>,
+          <code>recovery_emails</code>, <code>tenants</code>,
+          <code>guardian</code>, <code>age_gate</code>,
+          <code>jurisdictions</code>, <code>cors</code>,
+          <code>accounts.email_signup</code>,
+          <code>accounts.username_signup</code>
+        </td>
+        <td>
+          <code>oauth</code>, <code>accounts.domain</code>,
+          <code>branding</code>, <code>email_delivery</code>,
+          <code>phone</code>, <code>passkey</code>, <code>assurance</code>,
+          <code>products</code>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  <p>
+    A member's change passes the same validation as an operator's
+    <code>UpsertProjectConfig</code>. It governs sign-ins once the server's
+    project cache expires
+    (<code>GATEWAY_PROJECT_RESOLUTION_CACHE_TTL_SECONDS</code>, 30 by
+    default), as an operator's change does.
+  </p>
+
+  <h2 id="api">Calling it from code</h2>
+  <p>
+    The page uses four RPCs, and a script can call them the same way with the
+    account's access token. The request must resolve to the default project,
+    so it carries no <code>X-Project-Key</code>.
+  </p>
+  <Code lang="bash" code={`# Sign in as a console account.
+TOKEN=$(curl -s https://auth.example.com/identity.v1.IdentityService/PasswordLogin \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"owner@example.com","password":"..."}' | jq -r .accessToken)
+
+# Create a project, then open it to sign-up.
+curl -s https://auth.example.com/identity.v1.IdentityService/CreateProject \\
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \\
+  -d '{"name":"Acme Storefront"}'
+
+curl -s https://auth.example.com/identity.v1.IdentityService/UpdateProjectSettings \\
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \\
+  -d '{"projectId":"<project id>","settingsJson":"{\\"access\\":{\\"mode\\":\\"open\\"}}","expectedVersion":"0"}'`} />
+  <p>
+    <code>UpdateProjectSettings</code> replaces each section it names and
+    leaves the rest alone. It takes the <code>version</code> the caller last
+    read from <code>GetProjectSettings</code> and answers
+    <code>ABORTED</code> when the project's config has changed since, so two
+    people editing at once cannot overwrite each other.
+  </p>
+
+  <h2 id="audit">Audit</h2>
+  <p>
+    <code>project_created</code> and <code>project_settings_updated</code>
+    record the console account as actor and the project acted on. A settings
+    change lists the sections changed, never their values.
+  </p>
+</DocsLayout>

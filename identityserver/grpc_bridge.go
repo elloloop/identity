@@ -1012,6 +1012,22 @@ func (b *grpcBridge) ListMyTenants(ctx context.Context, in *identitypb.ListMyTen
 	return invoke(ctx, b, in, b.h.ListMyTenants)
 }
 
+func (b *grpcBridge) CreateProject(ctx context.Context, in *identitypb.CreateProjectRequest) (*identitypb.CreateProjectResponse, error) {
+	return invoke(ctx, b, in, b.h.CreateProject)
+}
+
+func (b *grpcBridge) ListMyProjects(ctx context.Context, in *identitypb.ListMyProjectsRequest) (*identitypb.ListMyProjectsResponse, error) {
+	return invoke(ctx, b, in, b.h.ListMyProjects)
+}
+
+func (b *grpcBridge) GetProjectSettings(ctx context.Context, in *identitypb.GetProjectSettingsRequest) (*identitypb.GetProjectSettingsResponse, error) {
+	return invoke(ctx, b, in, b.h.GetProjectSettings)
+}
+
+func (b *grpcBridge) UpdateProjectSettings(ctx context.Context, in *identitypb.UpdateProjectSettingsRequest) (*identitypb.UpdateProjectSettingsResponse, error) {
+	return invoke(ctx, b, in, b.h.UpdateProjectSettings)
+}
+
 func (b *grpcBridge) ListJoinableTenants(ctx context.Context, in *identitypb.ListJoinableTenantsRequest) (*identitypb.ListJoinableTenantsResponse, error) {
 	return invoke(ctx, b, in, b.h.ListJoinableTenants)
 }

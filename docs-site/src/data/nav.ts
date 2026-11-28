@@ -85,6 +85,7 @@ export const sidebarSections: NavSection[] = [
   {
     title: "Operations",
     items: [
+      { label: "Project Console", href: `${BASE}/docs/operations/project-console` },
       { label: "Audit Logging", href: `${BASE}/docs/operations/audit-logging` },
       { label: "SCIM Provisioning", href: `${BASE}/docs/operations/scim` },
       { label: "Observability", href: `${BASE}/docs/operations/observability` },

@@ -244,6 +244,17 @@ func (b *Built) ManagedSetupStore() service.ManagedSetupStore {
 	return b.InvitationStore
 }
 
+// ProjectMembers returns the control-plane store of who manages which
+// project, as the driver-agnostic interface the project console uses, or a
+// true nil when this build has no control plane (memory) — avoiding the
+// typed-nil trap.
+func (b *Built) ProjectMembers() service.ProjectMemberStore {
+	if b.ProjectStore == nil {
+		return nil
+	}
+	return b.ProjectStore
+}
+
 // PlatformAdminStoreIface returns the platform-admin store as a
 // driver-agnostic interface, or a true nil when this build has no control
 // plane (memory) — avoiding the typed-nil trap.

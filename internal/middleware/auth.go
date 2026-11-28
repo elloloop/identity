@@ -195,13 +195,24 @@ const hostedOAuthPrefix = "/oauth/"
 // authUIPrefix is the path prefix for the embedded UI static files.
 const authUIPrefix = "/auth/"
 
+// ConsolePathPrefix is where the project console page is served, and
+// consoleMountPath its bare root, which the mux redirects into it. The page
+// is a static document a browser loads before anyone has signed in, so it
+// carries no JWT; the RPCs it then calls are authenticated like any other.
+const (
+	consoleMountPath  = "/console"
+	ConsolePathPrefix = consoleMountPath + "/"
+)
+
 // isAuthExempt reports whether path bypasses JWT enforcement: either an
 // exact-match entry in AuthExemptPaths or any path under the hosted
-// OAuth, auth UI or SCIM prefix.
+// OAuth, auth UI, console or SCIM prefix.
 func isAuthExempt(path string) bool {
 	return path == "/.well-known/oauth-authorization-server" || AuthExemptPaths[path] ||
 		strings.HasPrefix(path, hostedOAuthPrefix) ||
 		strings.HasPrefix(path, authUIPrefix) ||
+		path == consoleMountPath ||
+		strings.HasPrefix(path, ConsolePathPrefix) ||
 		path == scimMountPath ||
 		strings.HasPrefix(path, SCIMPathPrefix)
 }

@@ -223,6 +223,24 @@ func (s *ControlPlaneAdminService) DeleteLoginPolicy(ctx context.Context, secret
 	return nil
 }
 
+// validateProjectConfigJSON reports, as ErrInvalidArgument, a config blob a
+// project may not store: one that does not decode to the typed config, or
+// whose CORS allow-list is invalid. Every write of a whole config passes it
+// before it is persisted, the operator's (UpsertProjectConfig) and a member's
+// (ProjectConsoleService.UpdateProjectSettings) alike, so a malformed config
+// is a caller error rather than a write the login/resolver path later trips
+// over.
+func validateProjectConfigJSON(configJSON string) error {
+	cfg, err := ParseProjectConfig(configJSON)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+	}
+	if _, err := cfg.CORS.Allowlist(); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+	}
+	return nil
+}
+
 // UpsertProjectConfig REPLACES a project's config_json blob and returns the
 // stored (normalised) value. The blob must be a valid JSON object — it is
 // validated by decoding it through ParseProjectConfig so a malformed config is
@@ -239,15 +257,8 @@ func (s *ControlPlaneAdminService) UpsertProjectConfig(ctx context.Context, secr
 	if projectID == "" {
 		return "", fmt.Errorf("%w: missing project_id", ErrInvalidArgument)
 	}
-	// Validate the blob decodes to the typed config before persisting it, so a
-	// malformed config is a caller error rather than a write the login/resolver
-	// path later trips over.
-	cfg, err := ParseProjectConfig(configJSON)
-	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
-	}
-	if _, err := cfg.CORS.Allowlist(); err != nil {
-		return "", fmt.Errorf("%w: %s", ErrInvalidArgument, err.Error())
+	if err := validateProjectConfigJSON(configJSON); err != nil {
+		return "", err
 	}
 	// A whole-blob replace still routes through the optimistic-concurrency helper
 	// so it is serialized against concurrent config mutators (e.g. an in-flight

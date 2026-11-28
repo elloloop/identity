@@ -143,6 +143,10 @@ type Deps struct {
 	// Config.DisableFirstAdminBootstrap closes it entirely. It self-secures by
 	// closing once any admin exists.
 	PlatformAdminStore service.PlatformAdminStore
+	// ProjectMemberStore records which console accounts manage which project
+	// (ADR-0022). Non-nil ONLY for the postgres driver; with it nil the
+	// project console is not built and its RPCs answer Unimplemented.
+	ProjectMemberStore service.ProjectMemberStore
 
 	// LoginPolicyStore backs the operator LoginPolicy-authoring admin RPCs
 	// (UpsertLoginPolicy / GetLoginPolicy / DeleteLoginPolicy) — the write
@@ -993,6 +997,8 @@ func New(deps Deps) (*Built, error) {
 		return nil, fmt.Errorf("agent exchange metrics: %w", err)
 	}
 	handler.WithManagedChildAuthorization(buildManagedChildAuthorization(deps, authSvc, logger))
+	consoleSvc := buildProjectConsole(deps, repo, users, auditLog, logger)
+	handler.WithProjectConsole(consoleSvc)
 	handler.WithAccountClassification(buildAccountClassification(deps, authSvc, logger))
 	handler.WithTeammateKeys(teammateKeys).WithAgentExchangeMetrics(exchanges)
 
@@ -1004,6 +1010,7 @@ func New(deps Deps) (*Built, error) {
 	// Default auth UI (login/signup). Rendered per request so it offers
 	// exactly the sign-in options the resolved project enables server-side.
 	mux.Handle("/auth/", ui.Handler(deps.Config, authSvc, returnAllow.Enabled()))
+	mountProjectConsole(mux, deps.Config, consoleSvc)
 	logHostedOAuthFlow(logger, returnAllow)
 	(&hostedOAuthHandler{auth: authSvc, allowlist: returnAllow, logger: logger}).register(mux)
 
@@ -1568,6 +1575,58 @@ func buildControlPlaneAdminService(deps Deps, users service.UserDirectory, audit
 		auditLog,
 		logger,
 	)
+}
+
+// buildProjectConsole builds the project console service (ADR-0022), or
+// returns nil when GATEWAY_CONSOLE_ENABLED is off or the build has no control
+// plane (memory), in which case its RPCs answer Unimplemented and its page is
+// not mounted. Console accounts are the default project's accounts, so that
+// project's id is the one the service admits tokens of.
+func buildProjectConsole(deps Deps, repo service.Repository, users service.UserDirectory, auditLog *audit.Logger, logger *zap.Logger) *service.ProjectConsoleService {
+	if deps.Config == nil || !deps.Config.ConsoleEnabled {
+		return nil
+	}
+	if deps.ProjectMemberStore == nil || deps.ControlPlaneStore == nil || users == nil {
+		logger.Info("project_console_disabled", zap.String("hint", "GATEWAY_CONSOLE_ENABLED needs the postgres control plane"))
+		return nil
+	}
+	logger.Info("project_console_enabled",
+		zap.Bool("self_service_projects", deps.Config.ConsoleSelfServiceProjectsEnabled),
+		zap.Int("max_projects_per_account", deps.Config.ConsoleProjectsLimit()))
+	return service.NewProjectConsoleService(
+		service.ProjectConsoleConfig{
+			ConsoleProjectID:      deps.Config.DefaultProjectID,
+			SelfServiceProjects:   deps.Config.ConsoleSelfServiceProjectsEnabled,
+			MaxProjectsPerAccount: deps.Config.ConsoleProjectsLimit(),
+		},
+		deps.ProjectMemberStore, deps.ControlPlaneStore, users, repo, auditLog, logger,
+	)
+}
+
+// mountProjectConsole serves the console page when the console is built. The
+// page is static, but it is the door to the default project's accounts, so it
+// answers only on a request that resolved to that project: on another
+// project's auth domain there is no console, as its RPCs would refuse that
+// project's tokens anyway.
+func mountProjectConsole(mux *http.ServeMux, cfg *config.Config, console *service.ProjectConsoleService) {
+	if console == nil {
+		return
+	}
+	// A saved setting governs sign-ins once the project-resolution cache has
+	// let go of the project's old config, so the page tells its user that
+	// lifetime rather than letting a change look as if it did nothing.
+	page := ui.ConsoleHandler(ui.ConsoleOptions{
+		SelfServiceProjects:        console.SelfServiceProjects(),
+		SettingsApplyWithinSeconds: cfg.ProjectResolutionCacheTTLSeconds,
+	})
+	mux.Handle(middleware.ConsolePathPrefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scope := service.ProjectScopeFromContext(r.Context())
+		if scope != nil && scope.ProjectID != cfg.DefaultProjectID {
+			http.NotFound(w, r)
+			return
+		}
+		page.ServeHTTP(w, r)
+	}))
 }
 
 func buildAccountClassification(deps Deps, auth *service.AuthService, logger *zap.Logger) *service.AccountClassificationService {

@@ -200,6 +200,16 @@ const DefaultSelfServiceTenantsWindowSeconds = 86400
 // days).
 const MaxSelfServiceTenantsWindowSeconds = 30 * 86400
 
+// DefaultConsoleMaxProjectsPerAccount is how many projects one console
+// account may own when GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT is unset or 0.
+const DefaultConsoleMaxProjectsPerAccount = 10
+
+// MaxConsoleMaxProjectsPerAccount is the largest
+// GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT accepted. ListMyProjects is not
+// paged, so the cap is what one answer may carry; a project is also an
+// isolation shard an operator may have to clean up.
+const MaxConsoleMaxProjectsPerAccount = 100
+
 // DefaultTenantInvitationMaxPerTenant is how many invitations one tenant may
 // send in each window when GATEWAY_TENANT_INVITATION_MAX_PER_TENANT is unset
 // or 0.
@@ -1629,6 +1639,22 @@ type Config struct {
 	// limit counts over, from 0 to 2592000 (0 selects the default, 86400).
 	// Driven by GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS.
 	SelfServiceTenantsWindowSeconds int
+	// ConsoleEnabled serves the project console at /console/ and its RPCs
+	// (ListMyProjects, GetProjectSettings, UpdateProjectSettings): an account
+	// of the default project signs in and manages the projects it is a member
+	// of, without the admin secret (ADR-0022). Postgres only. Default OFF.
+	// Driven by GATEWAY_CONSOLE_ENABLED.
+	ConsoleEnabled bool
+	// ConsoleSelfServiceProjectsEnabled lets a console account create a
+	// project it owns (CreateProject). Needs ConsoleEnabled. Default OFF: a
+	// project is an isolation shard, so opening creation to everyone who can
+	// sign up to the default project is the operator's decision. Driven by
+	// GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED.
+	ConsoleSelfServiceProjectsEnabled bool
+	// ConsoleMaxProjectsPerAccount caps how many projects one console account
+	// may own, from 0 to 100 (0 selects the default, 10); a creation past it
+	// is RESOURCE_EXHAUSTED. Driven by GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT.
+	ConsoleMaxProjectsPerAccount int
 	// TenantSelectionEnabled lets RefreshToken put a tenant the caller may
 	// act in into the new access token's "tenant" claim, on postgres only;
 	// turn it on only once every replica runs this release and every
@@ -2090,6 +2116,9 @@ func loadFromEnv() *Config {
 		SelfServiceTenantsEnabled:         envBool("GATEWAY_SELF_SERVICE_TENANTS_ENABLED", false),
 		SelfServiceTenantsMaxPerUser:      envInt("GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", DefaultSelfServiceTenantsMaxPerUser),
 		SelfServiceTenantsWindowSeconds:   envInt("GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", DefaultSelfServiceTenantsWindowSeconds),
+		ConsoleEnabled:                    envBool("GATEWAY_CONSOLE_ENABLED", false),
+		ConsoleSelfServiceProjectsEnabled: envBool("GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED", false),
+		ConsoleMaxProjectsPerAccount:      envInt("GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT", DefaultConsoleMaxProjectsPerAccount),
 		TenantSelectionEnabled:            envBool("GATEWAY_TENANT_SELECTION_ENABLED", false),
 		ManagedAccountsEnabled:            envBool("GATEWAY_MANAGED_ACCOUNTS_ENABLED", false),
 		ManagedAccessTokenExpirySeconds:   envInt("GATEWAY_MANAGED_ACCESS_TOKEN_EXPIRY_SECONDS", DefaultManagedAccessTokenExpirySeconds),
@@ -3404,6 +3433,12 @@ func (c *Config) SelfServiceTenantsLimit() int {
 	return boundedSetting(c.SelfServiceTenantsMaxPerUser, DefaultSelfServiceTenantsMaxPerUser, MaxSelfServiceTenantsMaxPerUser)
 }
 
+// ConsoleProjectsLimit is how many projects one console account may own: the
+// configured value, or the default when unset.
+func (c *Config) ConsoleProjectsLimit() int {
+	return boundedSetting(c.ConsoleMaxProjectsPerAccount, DefaultConsoleMaxProjectsPerAccount, MaxConsoleMaxProjectsPerAccount)
+}
+
 // SelfServiceTenantsWindow is the window the per-user creation limit counts
 // over: the configured value, or the default when unset.
 func (c *Config) SelfServiceTenantsWindow() time.Duration {
@@ -3497,6 +3532,7 @@ func (c *Config) validateTenantGovernance() error {
 	}{
 		{"GATEWAY_SELF_SERVICE_TENANTS_MAX_PER_USER", c.SelfServiceTenantsMaxPerUser, MaxSelfServiceTenantsMaxPerUser, DefaultSelfServiceTenantsMaxPerUser, noOff},
 		{"GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS", c.SelfServiceTenantsWindowSeconds, MaxSelfServiceTenantsWindowSeconds, DefaultSelfServiceTenantsWindowSeconds, ""},
+		{"GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT", c.ConsoleMaxProjectsPerAccount, MaxConsoleMaxProjectsPerAccount, DefaultConsoleMaxProjectsPerAccount, noOff},
 		{"GATEWAY_TENANT_INVITATION_MAX_PER_TENANT", c.TenantInvitationMaxPerTenant, MaxTenantInvitationMaxPerTenant, DefaultTenantInvitationMaxPerTenant, noOff},
 		{"GATEWAY_TENANT_INVITATION_WINDOW_SECONDS", c.TenantInvitationWindowSeconds, MaxTenantInvitationWindowSeconds, DefaultTenantInvitationWindowSeconds, ""},
 		{"GATEWAY_TENANT_INVITATION_RESEND_COOLDOWN_SECONDS", c.TenantInvitationResendCooldownSeconds, MaxTenantInvitationResendCooldownSeconds, DefaultTenantInvitationResendCooldownSeconds, "; the cooldown cannot be turned off"},
@@ -3525,7 +3561,13 @@ func (c *Config) validateTenantGovernance() error {
 	if c.RateLimitDomainPerIP < 0 {
 		return fmt.Errorf("config: GATEWAY_RATE_LIMIT_DOMAIN_PER_IP=%d must be >= 0 (0 disables it)", c.RateLimitDomainPerIP)
 	}
+	if c.ConsoleSelfServiceProjectsEnabled && !c.ConsoleEnabled {
+		return errors.New("config: GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED needs GATEWAY_CONSOLE_ENABLED, the console its projects are created and managed in")
+	}
 	if c.RepoDriver != "" && c.RepoDriver != "postgres" {
+		if c.ConsoleEnabled {
+			return fmt.Errorf("config: GATEWAY_CONSOLE_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
+		}
 		if c.SelfServiceTenantsEnabled {
 			return fmt.Errorf("config: GATEWAY_SELF_SERVICE_TENANTS_ENABLED needs GATEWAY_REPO_DRIVER=postgres (got %q)", c.RepoDriver)
 		}

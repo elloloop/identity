@@ -656,6 +656,7 @@ func TestTenantSenderAndDomainLimits(t *testing.T) {
 func TestTenantFeaturesNeedPostgres(t *testing.T) {
 	for name, set := range map[string]func(*Config){
 		"GATEWAY_SELF_SERVICE_TENANTS_ENABLED": func(c *Config) { c.SelfServiceTenantsEnabled = true },
+		"GATEWAY_CONSOLE_ENABLED":              func(c *Config) { c.ConsoleEnabled = true },
 		"GATEWAY_TENANT_SELECTION_ENABLED":     func(c *Config) { c.TenantSelectionEnabled = true },
 		"GATEWAY_MANAGED_ACCOUNTS_ENABLED": func(c *Config) {
 			c.ManagedAccountsEnabled = true
@@ -669,6 +670,47 @@ func TestTenantFeaturesNeedPostgres(t *testing.T) {
 			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), name) {
 				t.Fatalf("%s on %s must be refused, got %v", name, driver, err)
 			}
+		}
+	}
+}
+
+// The console and its project creation are opt-in, and creation needs the
+// console its projects are managed in.
+func TestConsoleSettings(t *testing.T) {
+	t.Setenv("GATEWAY_CONSOLE_ENABLED", "")
+	t.Setenv("GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED", "")
+	t.Setenv("GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT", "")
+	c := Load()
+	if c.ConsoleEnabled || c.ConsoleSelfServiceProjectsEnabled {
+		t.Fatal("the console and self-service projects must default off")
+	}
+	if got := c.ConsoleProjectsLimit(); got != DefaultConsoleMaxProjectsPerAccount {
+		t.Fatalf("unset project limit: got %d, want the default %d", got, DefaultConsoleMaxProjectsPerAccount)
+	}
+
+	t.Setenv("GATEWAY_CONSOLE_ENABLED", "true")
+	t.Setenv("GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED", "true")
+	t.Setenv("GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT", "3")
+	c = Load()
+	if !c.ConsoleEnabled || !c.ConsoleSelfServiceProjectsEnabled || c.ConsoleProjectsLimit() != 3 {
+		t.Fatalf("env not read: enabled=%v self_service=%v limit=%d", c.ConsoleEnabled, c.ConsoleSelfServiceProjectsEnabled, c.ConsoleProjectsLimit())
+	}
+
+	c = Load()
+	c.RepoDriver = "postgres"
+	c.ConsoleEnabled = false
+	c.ConsoleSelfServiceProjectsEnabled = true
+	if err := c.validateTenantGovernance(); err == nil || !strings.Contains(err.Error(), "GATEWAY_CONSOLE_SELF_SERVICE_PROJECTS_ENABLED") {
+		t.Fatalf("self-service projects without the console must be refused, got %v", err)
+	}
+	c.ConsoleEnabled = true
+	if err := c.validateTenantGovernance(); err != nil {
+		t.Fatalf("the console with self-service projects on postgres: %v", err)
+	}
+	for _, limit := range []int{-1, MaxConsoleMaxProjectsPerAccount + 1} {
+		c.ConsoleMaxProjectsPerAccount = limit
+		if err := c.validateTenantGovernance(); err == nil || !strings.Contains(err.Error(), "GATEWAY_CONSOLE_MAX_PROJECTS_PER_ACCOUNT") {
+			t.Fatalf("project limit %d must be refused, got %v", limit, err)
 		}
 	}
 }
