@@ -1639,11 +1639,12 @@ type Config struct {
 	// limit counts over, from 0 to 2592000 (0 selects the default, 86400).
 	// Driven by GATEWAY_SELF_SERVICE_TENANTS_WINDOW_SECONDS.
 	SelfServiceTenantsWindowSeconds int
-	// ConsoleEnabled serves the project console at /console/ and its RPCs
-	// (ListMyProjects, GetProjectSettings, UpdateProjectSettings): an account
-	// of the default project signs in and manages the projects it is a member
-	// of, without the admin secret (ADR-0022). Postgres only. Default OFF.
-	// Driven by GATEWAY_CONSOLE_ENABLED.
+	// ConsoleEnabled serves the project console at /console/ and its RPCs:
+	// an account of the default project signs in and manages the projects it
+	// is a member of (ListMyProjects, GetProjectSettings,
+	// UpdateProjectSettings), without the admin secret (ADR-0022).
+	// CreateProject needs ConsoleSelfServiceProjectsEnabled as well. Postgres
+	// only. Default OFF. Driven by GATEWAY_CONSOLE_ENABLED.
 	ConsoleEnabled bool
 	// ConsoleSelfServiceProjectsEnabled lets a console account create a
 	// project it owns (CreateProject). Needs ConsoleEnabled. Default OFF: a

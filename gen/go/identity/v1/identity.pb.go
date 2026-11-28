@@ -20282,8 +20282,12 @@ type UpdateProjectSettingsRequest struct {
 	// GetProjectSettingsResponse.settings_json. A section present replaces
 	// that section (in accounts, the fields named there); a section absent is
 	// left as it is; a section set to null is cleared to its default. A key
-	// that is not an editable section or field is INVALID_ARGUMENT, and so is
-	// a result the project's config rules refuse.
+	// that is not an editable section or field, or that the config does not
+	// have, is INVALID_ARGUMENT, and so is a result the project's config rules
+	// refuse. While the project has a product age guardrail (products, the
+	// operator's), age_gate and jurisdictions are the operator's too and
+	// writing either is INVALID_ARGUMENT. A write that changes nothing stores
+	// nothing and returns the version unchanged.
 	SettingsJson string `protobuf:"bytes,2,opt,name=settings_json,json=settingsJson,proto3" json:"settings_json,omitempty"`
 	// expected_version is the version the caller last read. ABORTED when the
 	// project's config has changed since, so that two people editing at once

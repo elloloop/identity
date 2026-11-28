@@ -116,6 +116,12 @@ VALUES ('<project id>', '<account id>', 'owner', (extract(epoch FROM now()) * 10
   </table>
   </div>
   <p>
+    While any product of the project sets a <code>minimum_age_band</code>,
+    <code>age_gate</code> and <code>jurisdictions</code> are the operator's
+    as well: the guardrail is built on them, and a member who lowered a
+    threshold would let every account through it.
+  </p>
+  <p>
     Settings are shown as the server reads them: under their canonical
     names, with a setting at its default left out. A member's change passes
     the same validation as an operator's

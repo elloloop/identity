@@ -41,14 +41,24 @@ var memberEditableSettings = map[string][]string{
 	"tenants":         nil,
 }
 
+// sectionsUnderProductGuardrails are the member-editable sections a
+// project's product guardrails are built on. A guardrail (config_json
+// products, the operator's) refuses a product to accounts below an age band;
+// which band an account falls in is jurisdictions, and whether its age is
+// known at all is age_gate. A member who lowered a threshold, or stopped
+// asking for a date of birth, would let every account through a guardrail
+// the operator set, so while a project has one these sections are the
+// operator's too.
+var sectionsUnderProductGuardrails = []string{"age_gate", "jurisdictions"}
+
 // jsonNull is the JSON literal that clears a section to its default.
 const jsonNull = "null"
 
 // emptyJSONObject is the config of a project that has set nothing.
 const emptyJSONObject = "{}"
 
-// jsonZeroValues are the JSON encodings of a Go zero value: what a config
-// field holds when its key is absent.
+// jsonZeroValues are the JSON encodings of the zero value of a config
+// field's type: what the field holds when its key is absent.
 var jsonZeroValues = []string{jsonNull, "false", "0", `""`, "[]", emptyJSONObject}
 
 // ErrProjectConfigAmbiguous is returned when a member's write would have to
@@ -70,43 +80,34 @@ var ErrProjectConfigAmbiguous = errors.New("the project's stored config spells a
 // "access"."Mode", governs sign-in as surely as the canonical spelling does;
 // a view cut from the text could show a member one value while the server
 // enforced another. Reading through the parser makes what a member sees
-// exactly what is in force. The price is that a key this server's parser
-// does not know is not shown, and is not kept when a member saves the
-// section it is in.
+// exactly what is in force.
 func MemberSettings(configJSON string) (string, error) {
-	if strings.TrimSpace(configJSON) == "" {
-		configJSON = emptyJSONObject
-	}
-	parsed, err := ParseProjectConfig(configJSON)
+	parsed, err := parseStoredConfig(configJSON)
 	if err != nil {
-		return "", fmt.Errorf("stored project config: %w", err)
+		return "", err
 	}
-	canonical, err := json.Marshal(parsed)
-	if err != nil {
-		return "", fmt.Errorf("stored project config: %w", err)
-	}
-	sections, err := decodeJSONObject(string(canonical))
+	sections, err := configSections(parsed)
 	if err != nil {
 		return "", fmt.Errorf("stored project config: %w", err)
 	}
 
 	out := make(map[string]json.RawMessage, len(memberEditableSettings))
 	for section, fields := range memberEditableSettings {
-		values, err := decodeJSONObject(string(sections[section]))
+		values, err := nonZeroFields(sections[section])
 		if err != nil {
 			return "", fmt.Errorf("stored project config: section %s: %w", section, err)
 		}
-		visible := make(map[string]json.RawMessage, len(values))
-		for field, value := range values {
-			if isJSONZero(value) || (fields != nil && !slices.Contains(fields, field)) {
-				continue
+		if fields != nil {
+			for field := range values {
+				if !slices.Contains(fields, field) {
+					delete(values, field)
+				}
 			}
-			visible[field] = value
 		}
-		if len(visible) == 0 {
+		if len(values) == 0 {
 			continue
 		}
-		encoded, err := json.Marshal(visible)
+		encoded, err := json.Marshal(values)
 		if err != nil {
 			return "", fmt.Errorf("stored project config: section %s: %w", section, err)
 		}
@@ -126,19 +127,26 @@ func MemberSettings(configJSON string) (string, error) {
 // null is cleared; a section absent is untouched, as is everything that is
 // not member-editable.
 //
-// Keys are matched exactly, so "OAuth" or "accounts.Domain" is refused, not
-// folded onto a name the config parser would read it as: encoding/json
-// matches keys without regard to case, and an allow list that did the same
-// would let a member reach a field by spelling it differently. For the same
-// reason a write removes every other spelling of the section or field it
-// sets, so the value written is the one the parser reads.
+// Section and restricted-field names are matched exactly, so "OAuth" or
+// "accounts.Domain" is refused, not folded onto a name the config parser
+// would read it as: encoding/json matches keys without regard to case, and
+// an allow list that did the same would let a member reach a field by
+// spelling it differently. For the same reason a write removes every other
+// spelling of the section or field it sets, and a whole section is stored as
+// the parser read it (canonicalSection), so the value written is the one the
+// parser reads.
 //
-// It returns ErrInvalidArgument for settings that are not a JSON object or
-// that name something not editable, and ErrProjectConfigAmbiguous for a
-// field-restricted section the stored config spells more than one way, whose
-// operator fields it could not carry over faithfully. It does not judge the
-// result: the caller validates the returned config as any other config write.
+// It returns ErrInvalidArgument for settings that are not a JSON object,
+// that name something not editable, or that hold a key the config does not
+// have, and ErrProjectConfigAmbiguous for a field-restricted section the
+// stored config spells more than one way, whose operator fields it could not
+// carry over faithfully. It does not judge the result: the caller validates
+// the returned config as any other config write.
 func ApplyMemberSettings(configJSON, settingsJSON string) (next string, changed []string, err error) {
+	stored, err := parseStoredConfig(configJSON)
+	if err != nil {
+		return "", nil, err
+	}
 	config, err := decodeJSONObject(configJSON)
 	if err != nil {
 		return "", nil, fmt.Errorf("stored project config: %w", err)
@@ -157,10 +165,14 @@ func ApplyMemberSettings(configJSON, settingsJSON string) (next string, changed 
 	}
 	sort.Strings(sections)
 
+	guarded := hasProductGuardrails(stored)
 	for _, section := range sections {
 		fields, editable := memberEditableSettings[section]
 		if !editable {
 			return "", nil, fmt.Errorf("%w: %q is not a setting a project's members can change", ErrInvalidArgument, section)
+		}
+		if guarded && slices.Contains(sectionsUnderProductGuardrails, section) {
+			return "", nil, fmt.Errorf("%w: %q is the operator's to change while the project has product age guardrails", ErrInvalidArgument, section)
 		}
 		spellings := foldedKeys(config, section)
 		if fields != nil && len(spellings) > 1 {
@@ -194,15 +206,37 @@ func ApplyMemberSettings(configJSON, settingsJSON string) (next string, changed 
 	return string(encoded), changed, nil
 }
 
+// parseStoredConfig parses a project's stored config, which is blank for a
+// project that has set nothing.
+func parseStoredConfig(configJSON string) (ProjectConfig, error) {
+	if strings.TrimSpace(configJSON) == "" {
+		configJSON = emptyJSONObject
+	}
+	parsed, err := ParseProjectConfig(configJSON)
+	if err != nil {
+		return ProjectConfig{}, fmt.Errorf("stored project config: %w", err)
+	}
+	return parsed, nil
+}
+
+// hasProductGuardrails reports whether any of the project's products refuses
+// accounts below an age band. A product configured for its branding alone
+// imposes no guardrail.
+func hasProductGuardrails(cfg ProjectConfig) bool {
+	for _, product := range cfg.Products {
+		if product.MinimumAgeBand != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // mergeSection returns what section holds after a member writes value to it:
 // nil when the section ends up unset. fields is the section's editable field
 // list, nil when the whole section is editable.
 func mergeSection(section string, fields []string, stored, value json.RawMessage) (json.RawMessage, error) {
 	if fields == nil {
-		if isJSONNull(value) {
-			return nil, nil
-		}
-		return value, nil
+		return canonicalSection(section, value)
 	}
 
 	kept := map[string]json.RawMessage{}
@@ -239,6 +273,76 @@ func mergeSection(section string, fields []string, stored, value json.RawMessage
 		return nil, fmt.Errorf("project config: section %s: %w", section, err)
 	}
 	return encoded, nil
+}
+
+// canonicalSection returns a member's value for a whole section as the
+// config parser reads it: decoded into the config's own type and written
+// back under its canonical field names, with fields at their default left
+// out. nil when nothing is set.
+//
+// A member's JSON is not stored as sent. Two keys that differ only in case
+// name one field, and which of them wins depends on their order, which the
+// store does not keep (a jsonb column reorders an object's keys). Stored as
+// sent, a section could be validated under one reading and enforced under
+// another. Stored as parsed, it has one reading. A key the config does not
+// have is refused rather than dropped, so a member is never told a setting
+// was saved that this server does not read.
+func canonicalSection(section string, value json.RawMessage) (json.RawMessage, error) {
+	if isJSONNull(value) {
+		return nil, nil
+	}
+	wrapped, err := json.Marshal(map[string]json.RawMessage{section: value})
+	if err != nil {
+		return nil, fmt.Errorf("%w: settings_json: section %s: %s", ErrInvalidArgument, section, err.Error())
+	}
+	var cfg ProjectConfig
+	dec := json.NewDecoder(bytes.NewReader(wrapped))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("%w: settings_json: section %s: %s", ErrInvalidArgument, section, err.Error())
+	}
+	sections, err := configSections(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("project config: section %s: %w", section, err)
+	}
+	values, err := nonZeroFields(sections[section])
+	if err != nil {
+		return nil, fmt.Errorf("project config: section %s: %w", section, err)
+	}
+	if len(values) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return nil, fmt.Errorf("project config: section %s: %w", section, err)
+	}
+	return encoded, nil
+}
+
+// configSections returns cfg's sections keyed by their canonical names, each
+// as the JSON its own type encodes to.
+func configSections(cfg ProjectConfig) (map[string]json.RawMessage, error) {
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return decodeJSONObject(string(encoded))
+}
+
+// nonZeroFields decodes a section and drops each field whose value is the
+// zero value of its type. It looks at the section's own fields only: a
+// nested object is kept or dropped whole, never pruned.
+func nonZeroFields(section json.RawMessage) (map[string]json.RawMessage, error) {
+	fields, err := decodeJSONObject(string(section))
+	if err != nil {
+		return nil, err
+	}
+	for field, value := range fields {
+		if isJSONZero(value) {
+			delete(fields, field)
+		}
+	}
+	return fields, nil
 }
 
 // decodeJSONObject decodes text as exactly one JSON object. Blank text is the
@@ -285,7 +389,7 @@ func isJSONNull(raw json.RawMessage) bool {
 	return string(bytes.TrimSpace(raw)) == jsonNull
 }
 
-// isJSONZero reports whether raw encodes a Go zero value.
+// isJSONZero reports whether raw is one of jsonZeroValues.
 func isJSONZero(raw json.RawMessage) bool {
 	return slices.Contains(jsonZeroValues, string(bytes.TrimSpace(raw)))
 }

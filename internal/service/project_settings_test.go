@@ -113,9 +113,9 @@ func TestMemberSettings_RejectsAStoredConfigThatIsNotAnObject(t *testing.T) {
 
 func TestApplyMemberSettings_ReplacesPresentSectionsAndKeepsTheRest(t *testing.T) {
 	config := `{
-		"access": {"mode": "closed", "allowed_domains": ["example.com"]},
-		"tenants": {"self_service": false},
-		"oauth": {"google": {"client_id": "id"}},
+		"access": {"mode": "allowlist", "allowed_domains": ["example.com"]},
+		"tenants": {"self_service": true},
+		"oauth": {"google": {"client_id": "id", "client_secret_enc": "ciphertext"}},
 		"branding": {"from": "team@example.com"}
 	}`
 	next, changed, err := ApplyMemberSettings(config, `{"access": {"mode": "open"}, "anonymous": {"enabled": true}}`)
@@ -125,8 +125,8 @@ func TestApplyMemberSettings_ReplacesPresentSectionsAndKeepsTheRest(t *testing.T
 	want := map[string]any{
 		"access":    map[string]any{"mode": "open"},
 		"anonymous": map[string]any{"enabled": true},
-		"tenants":   map[string]any{"self_service": false},
-		"oauth":     map[string]any{"google": map[string]any{"client_id": "id"}},
+		"tenants":   map[string]any{"self_service": true},
+		"oauth":     map[string]any{"google": map[string]any{"client_id": "id", "client_secret_enc": "ciphertext"}},
 		"branding":  map[string]any{"from": "team@example.com"},
 	}
 	if !reflect.DeepEqual(decodeForTest(t, next), want) {
@@ -149,11 +149,11 @@ func TestApplyMemberSettings_ReportsOnlySectionsWhoseValueChanged(t *testing.T) 
 }
 
 func TestApplyMemberSettings_NullClearsASection(t *testing.T) {
-	next, changed, err := ApplyMemberSettings(`{"access": {"mode": "open"}, "oauth": {"x": 1}}`, `{"access": null}`)
+	next, changed, err := ApplyMemberSettings(`{"access": {"mode": "open"}, "branding": {"from": "team@example.com"}}`, `{"access": null}`)
 	if err != nil {
 		t.Fatalf("ApplyMemberSettings: %v", err)
 	}
-	if want := map[string]any{"oauth": map[string]any{"x": float64(1)}}; !reflect.DeepEqual(decodeForTest(t, next), want) {
+	if want := map[string]any{"branding": map[string]any{"from": "team@example.com"}}; !reflect.DeepEqual(decodeForTest(t, next), want) {
 		t.Fatalf("config = %s, want %v", next, want)
 	}
 	if !reflect.DeepEqual(changed, []string{"access"}) {
@@ -172,13 +172,16 @@ func TestApplyMemberSettings_RefusesWhatIsNotEditable(t *testing.T) {
 		"operator field, other case":     `{"accounts": {"Domain": "example.com"}}`,
 		"operator field beside editable": `{"accounts": {"email_signup": "self", "domain": "example.com"}}`,
 		"restricted section, not object": `{"accounts": "self"}`,
+		"whole section, not object":      `{"access": "open"}`,
+		"key the config does not have":   `{"access": {"mode": "open", "nonsense": true}}`,
+		"nested key it does not have":    `{"jurisdictions": {"thresholds": {"US": {"child_max_age": 12, "adult_age": 18, "nonsense": 1}}}}`,
 		"not an object":                  `["access"]`,
 		"null":                           `null`,
 		"blank":                          `  `,
 		"two objects":                    `{"access": {"mode": "open"}} {"oauth": {}}`,
 		"malformed":                      `{"access": `,
 	}
-	const config = `{"accounts": {"domain": "accounts.example.com"}, "oauth": {"google": {"client_id": "ours"}}}`
+	const config = `{"accounts": {"domain": "accounts.example.com"}, "oauth": {"google": {"client_id": "ours", "client_secret_enc": "ciphertext"}}}`
 	for name, settings := range cases {
 		t.Run(name, func(t *testing.T) {
 			next, changed, err := ApplyMemberSettings(config, settings)
@@ -247,6 +250,78 @@ func TestApplyMemberSettings_WriteReplacesEverySpelling(t *testing.T) {
 	}
 	if parsed.Accounts.Domain != "accounts.example.com" || parsed.Accounts.EmailSignup != "off" {
 		t.Errorf("parsed accounts = %+v, want the operator's domain and the member's email_signup", parsed.Accounts)
+	}
+}
+
+// A whole section is stored as the parser read it, not as it was sent. Two
+// keys that differ only in case name one field, and which wins depends on
+// their order, which the store does not keep; stored as sent, a section could
+// be validated under one reading and enforced under another.
+func TestApplyMemberSettings_StoresAWholeSectionAsParsed(t *testing.T) {
+	const written = `{"access": {"Mode": "closed", "mode": "open", "ALLOWED_EMAILS": [], "block_public_email_domains": false}}`
+	next, changed, err := ApplyMemberSettings(`{}`, written)
+	if err != nil {
+		t.Fatalf("ApplyMemberSettings: %v", err)
+	}
+	// What the parser makes of the member's own text is what must be stored.
+	var sent struct {
+		Access ProjectAccessConfig `json:"access"`
+	}
+	if err := json.Unmarshal([]byte(written), &sent); err != nil {
+		t.Fatalf("decode the written section: %v", err)
+	}
+	want := map[string]any{"access": map[string]any{"mode": sent.Access.Mode}}
+	if !reflect.DeepEqual(decodeForTest(t, next), want) {
+		t.Fatalf("config = %s, want %v: one canonical key, defaults left out", next, want)
+	}
+	if !reflect.DeepEqual(changed, []string{"access"}) {
+		t.Errorf("changed = %v, want [access]", changed)
+	}
+
+	// A section written with nothing but defaults is a section unset.
+	next, changed, err = ApplyMemberSettings(`{"tenants": {"self_service": true}}`, `{"tenants": {"self_service": false}}`)
+	if err != nil {
+		t.Fatalf("ApplyMemberSettings(defaults): %v", err)
+	}
+	if next != "{}" {
+		t.Errorf("config = %s, want {}", next)
+	}
+	if !reflect.DeepEqual(changed, []string{"tenants"}) {
+		t.Errorf("changed = %v, want [tenants]", changed)
+	}
+}
+
+// While a project has a product age guardrail, the sections it is built on
+// are the operator's: a member who lowered a threshold, or stopped asking for
+// a date of birth, would let every account through it. Other sections stay
+// editable, and a product configured for its branding alone guards nothing.
+func TestApplyMemberSettings_ProductGuardrailsHoldTheAgeSections(t *testing.T) {
+	const guarded = `{"products": {"studio": {"minimum_age_band": "teen"}}, "jurisdictions": {"default": "US", "thresholds": {"US": {"child_max_age": 12, "adult_age": 18}}}, "age_gate": {"require_dob": true}}`
+	for name, settings := range map[string]string{
+		"lowering a threshold":         `{"jurisdictions": {"default": "US", "thresholds": {"US": {"child_max_age": 0, "adult_age": 1}}}}`,
+		"clearing the thresholds":      `{"jurisdictions": null}`,
+		"dropping the date of birth":   `{"age_gate": {"require_dob": false}}`,
+		"beside an editable section":   `{"access": {"mode": "open"}, "age_gate": null}`,
+		"re-sending the stored values": `{"age_gate": {"require_dob": true}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			next, changed, err := ApplyMemberSettings(guarded, settings)
+			if !errors.Is(err, ErrInvalidArgument) {
+				t.Fatalf("err = %v, want ErrInvalidArgument (next=%q changed=%v)", err, next, changed)
+			}
+			if next != "" || changed != nil {
+				t.Errorf("a refused write returned a config: next=%q changed=%v", next, changed)
+			}
+		})
+	}
+
+	if _, changed, err := ApplyMemberSettings(guarded, `{"access": {"mode": "open"}, "guardian": {"require_step_up": true}}`); err != nil || !reflect.DeepEqual(changed, []string{"access", "guardian"}) {
+		t.Errorf("sections no guardrail rests on: changed = %v, err = %v, want [access guardian]", changed, err)
+	}
+
+	const brandingOnly = `{"products": {"studio": {"branding": {"from": "studio@example.com"}}}}`
+	if _, changed, err := ApplyMemberSettings(brandingOnly, `{"age_gate": {"require_dob": true}}`); err != nil || !reflect.DeepEqual(changed, []string{"age_gate"}) {
+		t.Errorf("a product with no age band: changed = %v, err = %v, want [age_gate]", changed, err)
 	}
 }
 

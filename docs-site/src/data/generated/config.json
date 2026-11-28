@@ -472,7 +472,7 @@
     "type": "boolean",
     "default": "false",
     "required": false,
-    "description": "serves the project console at /console/ and its RPCs (ListMyProjects, GetProjectSettings, UpdateProjectSettings): an account of the default project signs in and manages the projects it is a member of, without the admin secret (ADR-0022).",
+    "description": "serves the project console at /console/ and its RPCs: an account of the default project signs in and manages the projects it is a member of (ListMyProjects, GetProjectSettings, UpdateProjectSettings), without the admin secret (ADR-0022).",
     "category": "Other",
     "anchor": "other"
   },

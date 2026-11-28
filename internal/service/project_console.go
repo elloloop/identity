@@ -333,6 +333,12 @@ func (s *ProjectConsoleService) UpdateProjectSettings(
 	if err := checkNewHostKeys(current, next); err != nil {
 		return "", 0, err
 	}
+	if len(changed) == 0 {
+		// Nothing to store. Writing anyway would advance the version, and
+		// with it refuse whoever else is editing for a change nobody made.
+		stored, err = MemberSettings(current)
+		return stored, currentVersion, err
+	}
 
 	storedConfig, version, err := s.settings.UpdateProjectConfig(ctx, project.ID, expectedVersion, next)
 	if err != nil {

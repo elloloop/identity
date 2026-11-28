@@ -92,6 +92,28 @@ server serves, with their own account and no admin secret.
   that section more than one way is refused (`ErrProjectConfigAmbiguous`):
   the parser reads the operator's fields from every spelling, in an order
   the merge cannot reproduce.
+- **A member's section is stored as parsed, not as sent.** Two keys that
+  differ only in case name one field, and which wins depends on their order,
+  which a jsonb column does not keep. Stored as sent, a section could be
+  validated under one reading and enforced under another. So a whole section
+  is decoded into the config's own type and written back under its canonical
+  names, with fields at their default left out, and a key the config does
+  not have is refused rather than dropped.
+- **Product guardrails hold the age sections.** A product guardrail
+  (`products`, the operator's) refuses a product to accounts below an age
+  band; which band an account falls in is `jurisdictions`, and whether its
+  age is known at all is `age_gate`. While any product of the project sets a
+  `minimum_age_band`, a member's write to either section is refused, since
+  lowering a threshold or dropping the date of birth would let every account
+  through a guardrail the operator set. A project with no guardrail leaves
+  both to its members.
+- **A save that changes nothing stores nothing.** The version does not
+  advance, so it refuses nobody else's pending save, and no change is
+  audited.
+- **Settings writes have no per-address budget.** `UpdateProjectSettings` is
+  authorized by membership of the project it names and writes one row by
+  compare-and-swap, adding none, so there is no growth for an address to
+  drive.
 - **Creation is budgeted per address as well as per account.**
   `CreateProject` spends a per-IP budget the size of the sign-up budget
   (`GATEWAY_RATE_LIMIT_SIGNUP_PER_IP`), as `CreateTenant` does: the
@@ -131,10 +153,14 @@ server serves, with their own account and no admin secret.
 - A member cannot read the operator's sections at all, so the console shows
   an incomplete picture of a project an operator has also configured.
 - The console reads and writes a section as this server's parser knows it.
-  A key the parser does not know is not shown and is not kept when a member
-  saves that section, so during a rollout that adds a field to an editable
-  section, a member saving it through a replica on the old version drops
-  the new field.
+  A key the parser does not know is not shown, and a section a member saves
+  replaces the stored one, so during a rollout that adds a field to an
+  editable section, a member saving that section through a replica on the
+  old version clears the new field.
+- Nothing floors the age thresholds of a project that has no product
+  guardrail: its members may set `jurisdictions` below the deployment's
+  `GATEWAY_AGEGATE_*` pair. An operator who adds a guardrail to a project
+  reviews the thresholds its members set before it.
 - `platform_admins` stays what it was: a bootstrap record with no sign-in.
   This ADR does not build its login; an operator who wants a page uses a
   console account with the projects they are a member of.

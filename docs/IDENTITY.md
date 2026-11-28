@@ -925,7 +925,10 @@ only.
   `oauth` (secrets, hub sharing), `accounts.domain`, `branding`,
   `email_delivery`, `phone`, `passkey`, `assurance`, `products`. The list
   lives in `memberEditableSettings`; a section added to the config later is
-  closed to members until it is added there on purpose.
+  closed to members until it is added there on purpose. While a project has
+  a product age guardrail, `age_gate` and `jurisdictions`, which it is built
+  on, are the operator's too. Settings are read and stored through the
+  config parser, so a member sees, and writes, exactly what is enforced.
 - **The operator's path is unchanged.** `AdminCreateProject`,
   `UpsertProjectConfig` and the other admin-secret RPCs work as before, on
   every project, console-created ones included.

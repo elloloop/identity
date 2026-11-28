@@ -31,9 +31,15 @@ Nothing changes until `GATEWAY_CONSOLE_ENABLED` is set. See
   writable by a member. A member's write passes the same validation as
   `UpsertProjectConfig`. Settings are shown as the server reads them: under
   their canonical names, with a field at its default left out, whatever
-  letter case an operator's blob used. A key this version does not know is
-  not shown, and is dropped when a member saves the section it is in, so let
-  a rollout finish before members edit a section it adds a field to.
+  letter case an operator's blob used, and a member's section is stored the
+  same way. A key this version does not know is refused on a write and not
+  shown on a read, and saving a section replaces it, so let a rollout finish
+  before members edit a section it adds a field to.
+- **Product age guardrails.** While any product of a project sets
+  `minimum_age_band`, its members cannot change `age_gate` or
+  `jurisdictions`, which the guardrail is built on. A project with no
+  guardrail leaves both to its members, with no floor: review them before
+  adding a guardrail.
 - **Existing projects.** A project an operator created has no members, so
   nobody sees it in the console. There is no RPC yet to add a member to one;
   until there is, an operator who wants a project in someone's console adds

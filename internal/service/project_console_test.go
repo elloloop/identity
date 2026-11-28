@@ -246,6 +246,12 @@ func TestProjectConsole_AdmitsOnlyConsoleAccounts(t *testing.T) {
 			},
 		},
 		{
+			name: "agent account", ctx: consoleCtx(), caller: "user-agent", want: ErrPermissionDenied,
+			prepare: func(f *consoleFixture) {
+				f.users.set(testConsoleProject, &User{ID: "user-agent", Kind: UserKindAgent, Status: StatusActive, EmailVerified: true})
+			},
+		},
+		{
 			name: "anonymous account", ctx: consoleCtx(), caller: "user-anon", want: ErrPermissionDenied,
 			prepare: func(f *consoleFixture) {
 				f.users.set(testConsoleProject, &User{ID: "user-anon", IsAnonymous: true})
@@ -392,7 +398,7 @@ func TestProjectConsole_GetAndUpdateSettings(t *testing.T) {
 		t.Errorf("version = %d, want 5", version)
 	}
 	// A setting turned off is at its default, so it is absent from what a
-	// member is shown, while the stored config keeps what was written.
+	// member is shown and from the stored config alike.
 	wantSettings := map[string]any{"access": map[string]any{"mode": "open"}}
 	if !reflect.DeepEqual(decodeForTest(t, stored), wantSettings) {
 		t.Fatalf("returned settings = %s, want %v", stored, wantSettings)
@@ -401,7 +407,6 @@ func TestProjectConsole_GetAndUpdateSettings(t *testing.T) {
 		"oauth":    map[string]any{"hub": true},
 		"accounts": map[string]any{"domain": "accounts.example.com"},
 		"access":   map[string]any{"mode": "open"},
-		"tenants":  map[string]any{"self_service": false},
 	}
 	if !reflect.DeepEqual(decodeForTest(t, f.settings.config[projectID]), wantConfig) {
 		t.Fatalf("stored config = %s, want %v", f.settings.config[projectID], wantConfig)
@@ -415,6 +420,41 @@ func TestProjectConsole_GetAndUpdateSettings(t *testing.T) {
 	}
 	if strings.Contains(f.audit.details[0], "open") {
 		t.Errorf("audit details carry a setting's value: %s", f.audit.details[0])
+	}
+}
+
+// A save that changes nothing is not a write: the config keeps its version,
+// so nobody else's pending save is invalidated, and no change is audited.
+func TestProjectConsole_UpdateSettings_NothingChanged(t *testing.T) {
+	f := newConsoleFixture(t, true)
+	const projectID = "project-a"
+	const stored = `{"access":{"mode":"open"}}`
+	f.members.add(projectID, testConsoleOwner, ProjectRoleOwner)
+	f.settings.config[projectID] = stored
+	f.settings.version[projectID] = 2
+
+	settings, version, err := f.svc.UpdateProjectSettings(
+		consoleCtx(), testConsoleOwner, passwordSignIn(), projectID,
+		`{"access":{"mode":"open"},"tenants":{"self_service":false},"login":null}`, 2, "", "",
+	)
+	if err != nil {
+		t.Fatalf("UpdateProjectSettings: %v", err)
+	}
+	if version != 2 || f.settings.version[projectID] != 2 || f.settings.writes != 0 {
+		t.Errorf("version = %d (stored %d, writes %d), want the version unchanged and no write",
+			version, f.settings.version[projectID], f.settings.writes)
+	}
+	if want := map[string]any{"access": map[string]any{"mode": "open"}}; !reflect.DeepEqual(decodeForTest(t, settings), want) {
+		t.Errorf("settings = %s, want %v", settings, want)
+	}
+	if len(f.audit.events) != 0 {
+		t.Errorf("a save that changed nothing was audited: %v", f.audit.events)
+	}
+
+	// It is still held to the version the member read.
+	_, _, err = f.svc.UpdateProjectSettings(consoleCtx(), testConsoleOwner, passwordSignIn(), projectID, `{"access":{"mode":"open"}}`, 1, "", "")
+	if !errors.Is(err, ErrProjectConfigConflict) {
+		t.Errorf("a stale version: err = %v, want ErrProjectConfigConflict", err)
 	}
 }
 
